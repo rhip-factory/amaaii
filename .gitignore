@@ -6,3 +6,4 @@ ngrok
 .vscode/
 dist/
 build/
+.worktrees/
