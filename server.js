@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const { handleIncomingMessage } = require('./utils/messageHandler');
 const { initializeDatabase } = require('./services/database');
 const { log } = require('./utils/logger');
+const twilioSignature = require('./middleware/twilioSignature');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', twilioSignature, async (req, res) => {
   try {
     const { From, Body, ProfileName } = req.body;
 
