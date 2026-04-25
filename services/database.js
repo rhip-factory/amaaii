@@ -1,5 +1,6 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const { log } = require('../utils/logger');
 
 const dbPath = path.join(__dirname, '..', 'amaaii.db');
 const db = new sqlite3.Database(dbPath);
@@ -22,7 +23,7 @@ function initializeDatabase() {
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `, (err) => {
-        if (err) console.error('Error creating users table:', err);
+        if (err) log.error("Error creating users table", err);
       });
 
       db.run(`
@@ -38,7 +39,7 @@ function initializeDatabase() {
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
       `, (err) => {
-        if (err) console.error('Error creating conversations table:', err);
+        if (err) log.error("Error creating conversations table", err);
       });
 
       db.run(`
@@ -52,7 +53,7 @@ function initializeDatabase() {
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
       `, (err) => {
-        if (err) console.error('Error creating symptoms table:', err);
+        if (err) log.error("Error creating symptoms table", err);
       });
 
       db.run(`
@@ -66,7 +67,7 @@ function initializeDatabase() {
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
       `, (err) => {
-        if (err) console.error('Error creating anc_visits table:', err);
+        if (err) log.error("Error creating anc_visits table", err);
       });
 
       db.run(`
@@ -94,7 +95,7 @@ function initializeDatabase() {
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
       `, (err) => {
-        if (err) console.error('Error creating journals table:', err);
+        if (err) log.error("Error creating journals table", err);
         else resolve();
       });
     });

@@ -1,4 +1,5 @@
 const OpenAI = require('openai');
+const { log } = require('../utils/logger');
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -175,7 +176,7 @@ async function getAmaaiiResponse(userMessage, context = {}) {
 
     return completion.choices[0].message.content;
   } catch (error) {
-    console.error('OpenAI API error:', error);
+    log.error('OpenAI API error', error);
     return "I'm sorry, I'm having trouble processing your message right now. Please try again later or contact your healthcare provider if this is urgent. 💚";
   }
 }

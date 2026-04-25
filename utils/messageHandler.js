@@ -4,15 +4,16 @@ const { detectDangerSigns, assessMood, extractSymptoms } = require('../services/
 const userManager = require('./userManager');
 const db = require('../services/database');
 const journalManager = require('../services/journalManager');
+const { log } = require('./logger');
 
 async function handleIncomingMessage(from, message, profileName) {
   try {
-    console.log(`Processing message from ${from} (${profileName}): ${message}`);
-    
+    log.info(`Processing message from ${from}`, { profileName, message });
+
     const user = await userManager.getOrCreateUser(from, profileName);
     const userContext = userManager.getUserContext(user);
-    
-    console.log(`User context:`, userContext);
+
+    log.info('User context', userContext);
     
     let response = '';
     let conversationContext = 'general';
@@ -61,7 +62,7 @@ async function handleIncomingMessage(from, message, profileName) {
       const mood = assessMood(message);
       const symptoms = extractSymptoms(message);
       
-      console.log(`Analysis - Urgency: ${dangerSignAnalysis.urgencyLevel}, Mood: ${mood}, Symptoms:`, symptoms);
+      log.info('Analysis', { urgencyLevel: dangerSignAnalysis.urgencyLevel, mood, symptoms });
       
       if (dangerSignAnalysis.urgencyLevel === 'critical' || dangerSignAnalysis.urgencyLevel === 'high') {
         response = dangerSignAnalysis.recommendedAction;
@@ -114,7 +115,7 @@ async function handleIncomingMessage(from, message, profileName) {
     
     await sendWhatsAppMessage(from, response);
     
-    console.log(`Response sent successfully to ${from}`);
+    log.info(`Response sent successfully to ${from}`);
     
     // Schedule follow-up for high-risk cases
     if (analysisData.urgencyLevel === 'high' || analysisData.urgencyLevel === 'critical') {
@@ -130,7 +131,7 @@ async function handleIncomingMessage(from, message, profileName) {
     }
     
   } catch (error) {
-    console.error('Error in message handler:', error);
+    log.error('Error in message handler', error);
     
     try {
       await sendWhatsAppMessage(
@@ -138,7 +139,7 @@ async function handleIncomingMessage(from, message, profileName) {
         "I apologize, but I'm having trouble processing your message. Please try again or type 'help' for assistance. If this is urgent, please contact your healthcare provider immediately."
       );
     } catch (sendError) {
-      console.error('Failed to send error message:', sendError);
+      log.error('Failed to send error message', sendError);
     }
   }
 }

@@ -1,4 +1,5 @@
 const db = require('../services/database');
+const { log } = require('./logger');
 
 class UserManager {
   async getOrCreateUser(phoneNumber, profileName = null) {
@@ -15,7 +16,7 @@ class UserManager {
       
       return user;
     } catch (error) {
-      console.error('Error in getOrCreateUser:', error);
+      log.error('Error in getOrCreateUser', error);
       throw error;
     }
   }
@@ -40,7 +41,7 @@ class UserManager {
       
       return await db.getUser(phoneNumber);
     } catch (error) {
-      console.error('Error updating user profile:', error);
+      log.error('Error updating user profile', error);
       throw error;
     }
   }
