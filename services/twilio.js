@@ -1,16 +1,22 @@
 const twilio = require('twilio');
 const { log } = require('../utils/logger');
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const client = twilio(accountSid, authToken);
+let cachedClient = null;
+
+function getClient() {
+  if (cachedClient) return cachedClient;
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  cachedClient = twilio(accountSid, authToken);
+  return cachedClient;
+}
 
 async function sendWhatsAppMessage(to, message) {
   try {
-    const response = await client.messages.create({
+    const response = await getClient().messages.create({
       body: message,
       from: process.env.TWILIO_WHATSAPP_NUMBER,
-      to: to
+      to: to,
     });
 
     log.info(`Message sent successfully. SID: ${response.sid}`);
@@ -21,4 +27,4 @@ async function sendWhatsAppMessage(to, message) {
   }
 }
 
-module.exports = { sendWhatsAppMessage };
+module.exports = { sendWhatsAppMessage, getClient };
