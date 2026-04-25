@@ -3,6 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { handleIncomingMessage } = require('./utils/messageHandler');
 const { initializeDatabase } = require('./services/database');
+const { log } = require('./utils/logger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,14 +14,14 @@ app.use(bodyParser.json());
 app.post('/webhook', async (req, res) => {
   try {
     const { From, Body, ProfileName } = req.body;
-    
-    console.log(`Received message from ${From} (${ProfileName}): ${Body}`);
-    
+
+    log.info('Received message', { From, ProfileName, Body });
+
     await handleIncomingMessage(From, Body, ProfileName);
-    
+
     res.status(200).send('Message received');
   } catch (error) {
-    console.error('Error processing message:', error);
+    log.error('Error processing message', error);
     res.status(500).send('Error processing message');
   }
 });
@@ -36,26 +37,32 @@ app.get('/', (req, res) => {
 async function startServer() {
   try {
     await initializeDatabase();
-    console.log('Database initialized successfully');
-    
+    log.info('Database initialized successfully');
+
     app.listen(PORT, () => {
-      console.log(`\n✅ Amaaii WhatsApp Bot Server Started`);
-      console.log(`📍 Server is running on port ${PORT}`);
-      console.log(`🔗 Webhook endpoint: http://localhost:${PORT}/webhook`);
-      console.log('\n📱 Features Enabled:');
-      console.log('  - Danger sign detection with escalation');
-      console.log('  - User profile management');
-      console.log('  - Conversation history tracking');
-      console.log('  - Symptom monitoring');
-      console.log('  - Mental health screening');
-      console.log('  - ANC visit tracking');
-      console.log('\n🌐 To expose this server to the internet for Twilio:');
-      console.log(`  1. Install ngrok: npm install -g ngrok`);
-      console.log(`  2. Run: ngrok http ${PORT}`);
-      console.log('  3. Copy the HTTPS URL and set it in Twilio WhatsApp Sandbox settings\n');
+      log.info(`Amaaii WhatsApp Bot Server Started`);
+      log.info(`Server is running on port ${PORT}`);
+      log.info(`Webhook endpoint: http://localhost:${PORT}/webhook`);
+      log.info('Features Enabled', {
+        features: [
+          'Danger sign detection with escalation',
+          'User profile management',
+          'Conversation history tracking',
+          'Symptom monitoring',
+          'Mental health screening',
+          'ANC visit tracking',
+        ],
+      });
+      log.info('To expose this server to the internet for Twilio:', {
+        steps: [
+          'Install ngrok: npm install -g ngrok',
+          `Run: ngrok http ${PORT}`,
+          'Copy the HTTPS URL and set it in Twilio WhatsApp Sandbox settings',
+        ],
+      });
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    log.error('Failed to start server', error);
     process.exit(1);
   }
 }
