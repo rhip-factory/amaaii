@@ -104,7 +104,10 @@ class UserManager {
       hasProfile: !!(user.name && user.age && user.pregnancy_week),
       pregnancyStage: this.getPregnancyStage(user.pregnancy_week),
       daysToDelivery: this.getDaysToDelivery(user.edd),
-      needsOnboarding: !user.age || !user.pregnancy_week
+      // Stays true until name, age, week, AND location are all set;
+      // otherwise handleOnboarding's location step is never reached
+      // (the router skips onboarding once this flag flips).
+      needsOnboarding: !user.name || !user.age || !user.pregnancy_week || !user.location
     };
     
     return context;
