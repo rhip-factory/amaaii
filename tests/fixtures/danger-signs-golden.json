@@ -1,0 +1,306 @@
+[
+  {
+    "message": "I am bleeding heavily and it won't stop",
+    "expected_urgency": "critical",
+    "note": "heavy bleeding"
+  },
+  {
+    "message": "There's gushing blood from down there",
+    "expected_urgency": "critical",
+    "note": "gushing blood"
+  },
+  {
+    "message": "I've been soaking a pad every hour",
+    "expected_urgency": "critical",
+    "note": "soaking a pad"
+  },
+  {
+    "message": "Severe headache and seeing spots",
+    "expected_urgency": "critical",
+    "note": "severe headache + visual disturbance"
+  },
+  {
+    "message": "I had a seizure this morning",
+    "expected_urgency": "critical",
+    "note": "seizure"
+  },
+  {
+    "message": "I just fainted and collapsed in the kitchen",
+    "expected_urgency": "critical",
+    "note": "loss of consciousness"
+  },
+  {
+    "message": "I can't breathe properly, gasping for air",
+    "expected_urgency": "critical",
+    "note": "severe breathing difficulty"
+  },
+  {
+    "message": "Crushing chest pain that won't stop",
+    "expected_urgency": "critical",
+    "note": "severe chest pain"
+  },
+  {
+    "message": "My water broke a few minutes ago",
+    "expected_urgency": "critical",
+    "note": "rupture of membranes"
+  },
+  {
+    "message": "I want to kill myself, I can't do this anymore",
+    "expected_urgency": "critical",
+    "note": "suicidal ideation"
+  },
+
+  {
+    "message": "I have a severe headache that has lasted two days",
+    "expected_urgency": "high",
+    "note": "severe headache without vision change"
+  },
+  {
+    "message": "I have a high fever, 39 degrees since last night",
+    "expected_urgency": "high",
+    "note": "fever"
+  },
+  {
+    "message": "Persistent vomiting all morning, can't keep water down",
+    "expected_urgency": "high",
+    "note": "persistent vomiting"
+  },
+  {
+    "message": "My face is very swollen this morning",
+    "expected_urgency": "high",
+    "note": "facial swelling"
+  },
+  {
+    "message": "I noticed swelling in my hands and they hurt",
+    "expected_urgency": "high",
+    "note": "hand swelling"
+  },
+  {
+    "message": "Baby not moving at all today",
+    "expected_urgency": "high",
+    "note": "reduced fetal movement"
+  },
+  {
+    "message": "I have severe pain in my abdomen",
+    "expected_urgency": "high",
+    "note": "severe pain"
+  },
+  {
+    "message": "My hands look very puffy today",
+    "expected_urgency": "high",
+    "note": "puffy hands"
+  },
+  {
+    "message": "I haven't felt the baby move for hours",
+    "expected_urgency": "high",
+    "note": "decreased fetal movement"
+  },
+  {
+    "message": "Some light spotting today, no cramps",
+    "expected_urgency": "high",
+    "note": "spotting"
+  },
+
+  {
+    "message": "I have a mild headache today",
+    "expected_urgency": "moderate",
+    "note": "headache"
+  },
+  {
+    "message": "Some cramping this afternoon",
+    "expected_urgency": "moderate",
+    "note": "cramping"
+  },
+  {
+    "message": "Lower back pain has been bothering me",
+    "expected_urgency": "moderate",
+    "note": "back pain"
+  },
+  {
+    "message": "My feet are swollen at the end of the day",
+    "expected_urgency": "moderate",
+    "note": "foot swelling"
+  },
+  {
+    "message": "I feel dizzy when I stand up too fast",
+    "expected_urgency": "moderate",
+    "note": "dizziness"
+  },
+  {
+    "message": "I have nausea every morning this week",
+    "expected_urgency": "moderate",
+    "note": "nausea"
+  },
+  {
+    "message": "I feel so tired and exhausted today",
+    "expected_urgency": "moderate",
+    "note": "fatigue with pronoun precedent"
+  },
+  {
+    "message": "I have unusual vaginal discharge",
+    "expected_urgency": "moderate",
+    "note": "qualified discharge"
+  },
+  {
+    "message": "I am very tired today, no energy",
+    "expected_urgency": "moderate",
+    "note": "tired with intensifier"
+  },
+  {
+    "message": "Mild morning sickness this week",
+    "expected_urgency": "moderate",
+    "note": "morning sickness"
+  },
+
+  {
+    "message": "my blood pressure was fine at the clinic",
+    "expected_urgency": "low",
+    "note": "REQUIRED — bare 'blood' must not trigger HIGH"
+  },
+  {
+    "message": "I'm tired of waiting for my ANC appointment",
+    "expected_urgency": "low",
+    "note": "REQUIRED — 'tired of' is figurative"
+  },
+  {
+    "message": "I've been drinking fluids all day",
+    "expected_urgency": "low",
+    "note": "REQUIRED — 'fluids' without bodily context"
+  },
+  {
+    "message": "the blood test came back good",
+    "expected_urgency": "low",
+    "note": "REQUIRED — 'blood test'"
+  },
+  {
+    "message": "not feeling too tired today, actually",
+    "expected_urgency": "low",
+    "note": "REQUIRED — 'too tired' (no qualifying precedent)"
+  },
+  {
+    "message": "Hi Amaaii, just checking in",
+    "expected_urgency": "low",
+    "note": "greeting"
+  },
+  {
+    "message": "Thank you for your help yesterday",
+    "expected_urgency": "low",
+    "note": "thanks"
+  },
+  {
+    "message": "How are you doing today?",
+    "expected_urgency": "low",
+    "note": "casual question"
+  },
+  {
+    "message": "I went to the clinic for routine bloodwork",
+    "expected_urgency": "low",
+    "note": "bloodwork — not bleeding"
+  },
+  {
+    "message": "What should I eat in my second trimester?",
+    "expected_urgency": "low",
+    "note": "nutrition question"
+  },
+  {
+    "message": "I'm taking my prenatal vitamins regularly",
+    "expected_urgency": "low",
+    "note": "compliance update"
+  },
+  {
+    "message": "Tell me about ANC visits and what to expect",
+    "expected_urgency": "low",
+    "note": "info request"
+  },
+  {
+    "message": "I'm planning to visit the doctor next week",
+    "expected_urgency": "low",
+    "note": "scheduling"
+  },
+  {
+    "message": "The midwife discharged me from the ward",
+    "expected_urgency": "low",
+    "note": "'discharged' (verb) — not standalone 'discharge'"
+  },
+  {
+    "message": "She wore a tired old shirt to the clinic",
+    "expected_urgency": "low",
+    "note": "'tired' as adjective, no symptom-verb precedent"
+  },
+
+  {
+    "message": "BLEEDING HEAVILY!!!",
+    "expected_urgency": "critical",
+    "note": "uppercase critical"
+  },
+  {
+    "message": "i feel SO tired today",
+    "expected_urgency": "moderate",
+    "note": "mixed case + intensifier 'so'"
+  },
+  {
+    "message": "headache and dizzy together",
+    "expected_urgency": "moderate",
+    "note": "two moderate symptoms"
+  },
+  {
+    "message": "blood test results were normal",
+    "expected_urgency": "low",
+    "note": "blood test"
+  },
+  {
+    "message": "I drink lots of fluids and I feel great",
+    "expected_urgency": "low",
+    "note": "fluids without bodily context"
+  },
+  {
+    "message": "the doctor checked my blood pressure today",
+    "expected_urgency": "low",
+    "note": "blood pressure"
+  },
+  {
+    "message": "headache headache headache, all day",
+    "expected_urgency": "moderate",
+    "note": "repeated headache"
+  },
+  {
+    "message": "I see blood clots in my discharge today",
+    "expected_urgency": "critical",
+    "note": "blood clots — critical even with discharge mention"
+  },
+  {
+    "message": "feeling exhausted from work but otherwise good",
+    "expected_urgency": "moderate",
+    "note": "feeling exhausted"
+  },
+  {
+    "message": "i'm so so tired today",
+    "expected_urgency": "moderate",
+    "note": "doubled 'so' before tired"
+  },
+  {
+    "message": "fever last night, around 38.5C",
+    "expected_urgency": "high",
+    "note": "fever with temp"
+  },
+  {
+    "message": "Chest pain so bad I can't breathe",
+    "expected_urgency": "critical",
+    "note": "severe breathing difficulty"
+  },
+  {
+    "message": "I think the baby moved less today",
+    "expected_urgency": "high",
+    "note": "decreased movement phrasing"
+  },
+  {
+    "message": "fluid gushing down my legs",
+    "expected_urgency": "critical",
+    "note": "amniotic fluid pattern"
+  },
+  {
+    "message": "leaking from my vagina, watery",
+    "expected_urgency": "moderate",
+    "note": "leaking with bodily context — moderate (not amniotic-specific)"
+  }
+]
