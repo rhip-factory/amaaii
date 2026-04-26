@@ -84,31 +84,6 @@ PROGRESSION:
 5. Obstetric history
 6. Risk assessment and personalization`;
 
-const JOURNALING_PROMPT = `
-CURRENT CONTEXT: Processing daily journal entry
-GOAL: Understand user's current state and provide supportive response
-
-ANALYSIS STEPS:
-1. Identify reported symptoms (physical)
-2. Assess mood and emotional state
-3. Note concerns or questions
-4. Check for danger signs
-5. Evaluate urgency level
-6. Determine appropriate response
-
-SYMPTOM CATEGORIES:
-- Normal: mild nausea, fatigue, backache, gradual swelling
-- Monitor: moderate pain, persistent symptoms, unusual patterns
-- Concerning: severe symptoms, sudden changes, multiple issues
-- Urgent: danger signs (requires immediate care)
-
-RESPONSE STRUCTURE:
-1. Acknowledge and validate
-2. Normalize if appropriate
-3. Provide guidance or information
-4. Recommend action if needed
-5. Ask follow-up question if needed`;
-
 const MENTAL_HEALTH_PROMPT = `
 CURRENT CONTEXT: Mental health check-in
 GOAL: Screen for depression, anxiety with compassion
@@ -147,11 +122,11 @@ async function getAmaaiiResponse(userMessage, context = {}) {
     
     if (isNewUser) {
       contextualPrompt = ONBOARDING_PROMPT;
-    } else if (currentContext === 'journaling') {
-      contextualPrompt = JOURNALING_PROMPT;
     } else if (currentContext === 'mental_health') {
       contextualPrompt = MENTAL_HEALTH_PROMPT;
     }
+    // 'journaling' context never reaches the AI path — the journal flow
+    // returns its own response — so JOURNALING_PROMPT was removed in 7.6.
     
     let messages = [
       { role: "system", content: systemPrompt + '\n\n' + contextualPrompt }
@@ -181,87 +156,6 @@ async function getAmaaiiResponse(userMessage, context = {}) {
   }
 }
 
-async function analyzeForDangerSigns(message) {
-  const dangerKeywords = {
-    critical: [
-      'bleeding heavily', 'severe bleeding', 'blood clots', 'gushing blood',
-      'severe headache', 'seeing spots', 'blurred vision', 'vision changes',
-      'convulsions', 'seizure', 'passed out', 'unconscious', 'fainted',
-      'can\'t breathe', 'chest pain', 'severe pain',
-      'water broke', 'fluid gushing', 'contractions before 37 weeks',
-      'want to die', 'kill myself', 'end it all', 'suicide'
-    ],
-    high: [
-      'bleeding', 'spotting blood', 'headache', 'dizzy',
-      'fever', 'high temperature', 'burning up',
-      'vomiting', 'can\'t keep food down',
-      'swelling face', 'swollen hands', 'puffy eyes',
-      'baby not moving', 'no movement', 'haven\'t felt baby'
-    ],
-    moderate: [
-      'pain', 'cramping', 'backache', 'tired', 
-      'nausea', 'morning sickness', 'constipation',
-      'swelling feet', 'swollen ankles'
-    ]
-  };
-  
-  const lowerMessage = message.toLowerCase();
-  let detectedSigns = [];
-  let urgencyLevel = 'low';
-  
-  for (const keyword of dangerKeywords.critical) {
-    if (lowerMessage.includes(keyword)) {
-      detectedSigns.push(keyword);
-      urgencyLevel = 'critical';
-    }
-  }
-  
-  if (urgencyLevel !== 'critical') {
-    for (const keyword of dangerKeywords.high) {
-      if (lowerMessage.includes(keyword)) {
-        detectedSigns.push(keyword);
-        urgencyLevel = 'high';
-      }
-    }
-  }
-  
-  if (urgencyLevel === 'low') {
-    for (const keyword of dangerKeywords.moderate) {
-      if (lowerMessage.includes(keyword)) {
-        detectedSigns.push(keyword);
-        urgencyLevel = 'moderate';
-      }
-    }
-  }
-  
-  return { dangerSigns: detectedSigns, urgencyLevel };
-}
-
-function getDangerSignResponse(urgencyLevel) {
-  const responses = {
-    critical: `⚠️ URGENT: What you're describing could be very serious and needs IMMEDIATE medical attention.
-
-Please do one of these RIGHT NOW:
-1. Go to the nearest hospital/health center
-2. Call an ambulance if available
-3. Ask someone to take you
-
-This cannot wait. Please go now and let me know once you're there. 💚`,
-    
-    high: `⚠️ Important: This symptom needs to be checked by a healthcare provider TODAY.
-
-Please visit your nearest clinic or hospital within the next few hours. Would you like help finding the closest facility?`,
-    
-    moderate: `This is something to discuss with your healthcare provider soon. Can you schedule a visit this week? 
-
-In the meantime, rest and monitor how you feel. Let me know if symptoms worsen.`
-  };
-  
-  return responses[urgencyLevel] || '';
-}
-
 module.exports = {
   getAmaaiiResponse,
-  analyzeForDangerSigns,
-  getDangerSignResponse
 };
