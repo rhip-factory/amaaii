@@ -1,5 +1,5 @@
 const { sendWhatsAppMessage } = require('../services/twilio');
-const { getAmaaiiResponse, analyzeForDangerSigns, getDangerSignResponse } = require('../services/amaaii');
+const { getAmaaiiResponse } = require('../services/amaaii');
 const { detectDangerSigns, assessMood, extractSymptoms } = require('../services/dangerSigns');
 const userManager = require('./userManager');
 const db = require('../services/database');
