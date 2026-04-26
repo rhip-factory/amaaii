@@ -25,6 +25,32 @@ async function processMessage(from, message, profileName) {
   let conversationContext = 'general';
   let dangerSignAnalysis = null;
 
+  // Onboarding takes precedence over every command except CRITICAL
+  // danger signs (per spec §7.4). Otherwise un-onboarded users could
+  // type `journal` (or paste anything) and bypass the profile capture
+  // entirely, leaving downstream features without context.
+  const earlyDanger = detectDangerSigns(message);
+  if (earlyDanger.urgencyLevel !== 'critical' && userContext.needsOnboarding) {
+    conversationContext = 'onboarding';
+    response = await handleOnboarding(user, message, from);
+    if (
+      earlyDanger.urgencyLevel === 'high' ||
+      earlyDanger.urgencyLevel === 'moderate'
+    ) {
+      response = `${earlyDanger.recommendedAction}\n\n${response}`;
+    }
+    const sx = extractSymptoms(message);
+    if (sx.length > 0) {
+      await db.saveSymptoms(from, sx, assessMood(message), earlyDanger.urgencyLevel);
+    }
+    await db.saveConversation(from, message, response, {
+      dangerSigns: earlyDanger.detectedSigns || [],
+      urgencyLevel: earlyDanger.urgencyLevel,
+      context: conversationContext,
+    });
+    return { response, urgencyLevel: earlyDanger.urgencyLevel, context: conversationContext };
+  }
+
   // Active journal session (DB-backed since 7.5).
   const activeJournalSession = await journalManager.getJournalSession(from);
 
@@ -61,27 +87,12 @@ async function processMessage(from, message, profileName) {
 
     log.info('Analysis', { urgencyLevel: dangerSignAnalysis.urgencyLevel, mood, symptoms });
 
-    // Routing precedence (per spec §7.4):
-    //   1. CRITICAL urgency → escalation copy, AI bypassed.
-    //   2. Otherwise, un-onboarded users → onboarding (HIGH/MOD escalation
-    //      copy may be appended so the user is still warned).
-    //   3. Otherwise, HIGH → escalation.
-    //   4. Otherwise → AI.
+    // Routing precedence (per spec §7.4): CRITICAL short-circuits;
+    // un-onboarded users were already routed above; HIGH escalates;
+    // everything else goes to the AI.
     if (dangerSignAnalysis.urgencyLevel === 'critical') {
       response = dangerSignAnalysis.recommendedAction;
       conversationContext = 'danger_sign_detected';
-      if (symptoms.length > 0) {
-        await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
-      }
-    } else if (userContext.needsOnboarding) {
-      conversationContext = 'onboarding';
-      response = await handleOnboarding(user, message, from);
-      if (
-        dangerSignAnalysis.urgencyLevel === 'high' ||
-        dangerSignAnalysis.urgencyLevel === 'moderate'
-      ) {
-        response = `${dangerSignAnalysis.recommendedAction}\n\n${response}`;
-      }
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }

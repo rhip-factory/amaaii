@@ -1,6 +1,24 @@
 const db = require('./database');
 const { detectDangerSigns, assessMood, extractSymptoms } = require('./dangerSigns');
 
+// Render physical_symptoms (which may arrive as a JSON-stringified array
+// of detector tags, the literal "none", or free text) as something a
+// human wants to read in the summary.
+function formatSymptoms(raw) {
+  if (!raw || raw === 'none') return 'No symptoms';
+  if (typeof raw !== 'string') return String(raw);
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr) && arr.length > 0) {
+        return arr.map((s) => String(s).replace(/_/g, ' ')).join(', ');
+      }
+    } catch (_) { /* fall through */ }
+  }
+  return trimmed;
+}
+
 class JournalManager {
   // Sessions are persisted to the journal_sessions table; this manager
   // is now stateless. (Phase 0 §7.5: drop in-memory Map so sessions
@@ -107,11 +125,17 @@ class JournalManager {
       case 'sleep': {
         // Quality and hours are independent captures so order doesn't
         // matter and "6 hours, 7/10" is parsed correctly. (D8.)
-        const qualityMatch = message.match(/(\d+)\s*(?:\/|out of)\s*10/i);
+        // Quality forms accepted: "7/10", "7 out of 10",
+        // "2 for sleep", "sleep was 2", "sleep 2".
+        const qualityMatch =
+          message.match(/(\d+)\s*(?:\/|out of)\s*10/i) ||
+          message.match(/\b(\d+)\s+for\s+sleep\b/i) ||
+          message.match(/\bsleep(?:\s+(?:was|is))?\s+(\d+)\b/i);
         const hoursMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:h(?:ours?|rs?)?\b)/i);
 
         if (qualityMatch) {
-          journalUpdate.sleep_quality = parseInt(qualityMatch[1], 10);
+          const q = parseInt(qualityMatch[1], 10);
+          if (q >= 1 && q <= 10) journalUpdate.sleep_quality = q;
         }
         if (hoursMatch) {
           journalUpdate.sleep_hours = parseFloat(hoursMatch[1]);
@@ -192,13 +216,36 @@ class JournalManager {
         break;
 
       case 'notes': {
-        if (!message.toLowerCase().includes('done') && !message.toLowerCase().includes('no')) {
+        const lowerNotes = message.toLowerCase().trim();
+        const isDoneSentinel = lowerNotes === 'done' || lowerNotes === 'no' || lowerNotes === 'none';
+        let noteHeadsUp = '';
+        if (!isDoneSentinel) {
           journalUpdate.special_notes = message;
+          // Re-scan the notes for symptoms / danger signs the user
+          // mentioned at the end. If we find anything, surface a
+          // heads-up above the summary so it isn't silently logged.
+          const noteSx = extractSymptoms(message);
+          const noteDanger = detectDangerSigns(message);
+          if (noteSx.length > 0) {
+            const existing = journalData.physical_symptoms;
+            let arr = [];
+            if (typeof existing === 'string' && existing.trim().startsWith('[')) {
+              try { const parsed = JSON.parse(existing); if (Array.isArray(parsed)) arr = parsed; } catch (_) {}
+            }
+            journalUpdate.physical_symptoms = JSON.stringify(Array.from(new Set([...arr, ...noteSx])));
+          }
+          if (noteDanger.urgencyLevel === 'critical' || noteDanger.urgencyLevel === 'high') {
+            journalUpdate.red_flags_detected = JSON.stringify(noteDanger.detectedSigns);
+            noteHeadsUp = `${noteDanger.recommendedAction}\n\n`;
+          } else if (noteSx.length > 0) {
+            const niceList = noteSx.map((s) => s.replace(/_/g, ' ')).join(', ');
+            noteHeadsUp = `Thanks for adding that — I noted **${niceList}**. Worth mentioning at your next visit.\n\n`;
+          }
         }
         journalUpdate.completed = 1;
         nextStage = 'completed';
         const summary = await this.generateJournalSummary(journalData, journalUpdate);
-        response = summary;
+        response = noteHeadsUp + summary;
         break;
       }
 
@@ -237,16 +284,14 @@ class JournalManager {
     }
 
     if (data.physical_symptoms) {
-      const symptoms = typeof data.physical_symptoms === 'string' && data.physical_symptoms !== 'none'
-        ? data.physical_symptoms
-        : 'No symptoms';
-      summary += `**Symptoms:** ${symptoms}\n`;
+      summary += `**Symptoms:** ${formatSymptoms(data.physical_symptoms)}\n`;
     }
 
-    if (data.sleep_quality) {
-      summary += `**Sleep:** ${data.sleep_quality}/10 quality`;
-      if (data.sleep_hours) summary += `, ${data.sleep_hours} hours`;
-      summary += '\n';
+    if (data.sleep_quality || data.sleep_hours) {
+      const parts = [];
+      if (data.sleep_quality) parts.push(`${data.sleep_quality}/10 quality`);
+      if (data.sleep_hours) parts.push(`${data.sleep_hours} hours`);
+      summary += `**Sleep:** ${parts.join(', ')}\n`;
     }
 
     if (data.baby_movement_count !== undefined && data.baby_movement_count !== null) {
