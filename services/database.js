@@ -2,7 +2,8 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const { log } = require('../utils/logger');
 
-const dbPath = path.join(__dirname, '..', 'amaaii.db');
+// Tests can override via DB_PATH=":memory:" for an isolated in-memory DB.
+const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'amaaii.db');
 const db = new sqlite3.Database(dbPath);
 
 function initializeDatabase() {
@@ -189,6 +190,22 @@ async function getConversationHistory(userPhone, limit = 10) {
   });
 }
 
+async function getLastBotMessage(userPhone) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT response, context FROM conversations
+       WHERE user_phone = ?
+       ORDER BY timestamp DESC
+       LIMIT 1`,
+      [userPhone],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row || null);
+      }
+    );
+  });
+}
+
 async function saveSymptoms(userPhone, symptoms, mood, urgency) {
   return new Promise((resolve, reject) => {
     db.run(
@@ -350,6 +367,7 @@ module.exports = {
   updateUser,
   saveConversation,
   getConversationHistory,
+  getLastBotMessage,
   saveSymptoms,
   scheduleANCVisit,
   getUpcomingANCVisits,
