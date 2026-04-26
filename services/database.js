@@ -125,16 +125,45 @@ function initializeDatabase() {
   });
 }
 
+// userData keys that can be persisted (UI / Twilio occasionally sends
+// `pregnancyWeek` camelCase — we map it to the snake_case column).
+const USER_FIELD_MAP = {
+  name: 'name',
+  age: 'age',
+  pregnancyWeek: 'pregnancy_week',
+  pregnancy_week: 'pregnancy_week',
+  edd: 'edd',
+  location: 'location',
+  lmp: 'lmp',
+  risk_level: 'risk_level',
+  anc_visits: 'anc_visits',
+};
+
 async function createUser(phoneNumber, userData = {}) {
+  // D15: don't INSERT OR REPLACE — that nulls out columns we didn't pass.
+  // If the row exists, UPDATE only the provided fields; otherwise INSERT.
+  const existing = await getUser(phoneNumber);
+  if (existing) {
+    const updates = {};
+    for (const [k, v] of Object.entries(userData)) {
+      const col = USER_FIELD_MAP[k];
+      if (col && v !== undefined) updates[col] = v;
+    }
+    if (Object.keys(updates).length > 0) {
+      await updateUser(phoneNumber, updates);
+    }
+    return existing.rowid || null;
+  }
+
   return new Promise((resolve, reject) => {
-    const { name, age, pregnancyWeek, edd, location, lmp } = userData;
-    
+    const { name, age, pregnancyWeek, pregnancy_week, edd, location, lmp } = userData;
+    const week = pregnancyWeek != null ? pregnancyWeek : pregnancy_week;
     db.run(
-      `INSERT OR REPLACE INTO users 
-       (phone_number, name, age, pregnancy_week, edd, location, lmp, updated_at) 
+      `INSERT INTO users
+         (phone_number, name, age, pregnancy_week, edd, location, lmp, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      [phoneNumber, name, age, pregnancyWeek, edd, location, lmp],
-      function(err) {
+      [phoneNumber, name, age, week, edd, location, lmp],
+      function (err) {
         if (err) reject(err);
         else resolve(this.lastID);
       }
@@ -155,8 +184,22 @@ async function getUser(phoneNumber) {
   });
 }
 
+// D14: defense in depth — reject unknown columns at the DB layer too.
+// The only allowed targets are real users-table columns. Aside from the
+// safety win, this means SQL identifiers can never be user-controlled.
+const UPDATE_USER_ALLOWED = new Set([
+  'name', 'age', 'pregnancy_week', 'edd',
+  'location', 'lmp', 'risk_level', 'anc_visits',
+]);
+
 async function updateUser(phoneNumber, updates) {
-  const fields = Object.keys(updates).map(key => `${key} = ?`).join(', ');
+  const keys = Object.keys(updates);
+  for (const key of keys) {
+    if (!UPDATE_USER_ALLOWED.has(key)) {
+      throw new Error(`updateUser: rejected non-whitelisted key "${key}"`);
+    }
+  }
+  const fields = keys.map((key) => `${key} = ?`).join(', ');
   const values = Object.values(updates);
   values.push(phoneNumber);
   
