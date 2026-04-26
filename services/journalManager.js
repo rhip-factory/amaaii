@@ -105,16 +105,16 @@ class JournalManager {
       }
 
       case 'sleep': {
-        const sleepMatch = message.match(/(\d+).*?(\d+(?:\.\d+)?)\s*h/i);
-        const qualityMatch = message.match(/(\d+)/);
+        // Quality and hours are independent captures so order doesn't
+        // matter and "6 hours, 7/10" is parsed correctly. (D8.)
+        const qualityMatch = message.match(/(\d+)\s*(?:\/|out of)\s*10/i);
+        const hoursMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:h(?:ours?|rs?)?\b)/i);
 
         if (qualityMatch) {
-          journalUpdate.sleep_quality = parseInt(qualityMatch[1]);
+          journalUpdate.sleep_quality = parseInt(qualityMatch[1], 10);
         }
-        if (sleepMatch && sleepMatch[2]) {
-          journalUpdate.sleep_hours = parseFloat(sleepMatch[2]);
-        } else if (message.match(/(\d+(?:\.\d+)?)\s*h/i)) {
-          journalUpdate.sleep_hours = parseFloat(message.match(/(\d+(?:\.\d+)?)\s*h/i)[1]);
+        if (hoursMatch) {
+          journalUpdate.sleep_hours = parseFloat(hoursMatch[1]);
         }
 
         nextStage = pregnancyWeek >= 20 ? 'baby_movement' : 'water';
@@ -161,11 +161,22 @@ class JournalManager {
       }
 
       case 'appetite': {
+        // Priority ladder (D9): "no appetite" / "poor" beats "good" beats
+        // "moderate"/"okay". Plain substring checks were ambiguous —
+        // "no good appetite" → poor, "not poor" → moderate, etc.
         const lower = message.toLowerCase();
-        const appetiteLevel =
-          lower.includes('good') ? 'good' :
-          lower.includes('poor') ? 'poor' :
-          lower.includes('no') ? 'poor' : 'moderate';
+        let appetiteLevel = 'moderate';
+        if (/\bpoor\b/.test(lower) || /\bno appetite\b/.test(lower) || /\bno good appetite\b/.test(lower)) {
+          appetiteLevel = 'poor';
+        } else if (/\bgood\b/.test(lower) || /\bgreat\b/.test(lower)) {
+          appetiteLevel = 'good';
+        } else if (/\bmoderate\b/.test(lower) || /\bok(?:ay)?\b/.test(lower)) {
+          appetiteLevel = 'moderate';
+        }
+        // "not poor" should NOT register as poor — re-check with negation guard.
+        if (/\bnot\s+poor\b/.test(lower)) {
+          appetiteLevel = 'moderate';
+        }
         journalUpdate.appetite = appetiteLevel;
         nextStage = 'questions';
         response = `Any questions or concerns you want to discuss with your doctor at your next visit? (or type 'none')`;
@@ -324,18 +335,17 @@ class JournalManager {
   extractWeeklySymptoms(history) {
     const symptomCount = {};
     history.forEach((entry) => {
-      if (entry.physical_symptoms && entry.physical_symptoms !== 'none') {
-        try {
-          const symptoms = JSON.parse(entry.physical_symptoms);
-          if (Array.isArray(symptoms)) {
-            symptoms.forEach((symptom) => {
-              symptomCount[symptom] = (symptomCount[symptom] || 0) + 1;
-            });
-          }
-        } catch (e) {
-          // Non-JSON entry — skip rather than crash. (D10 is fixed properly in 7.6.)
-        }
-      }
+      if (!entry.physical_symptoms || entry.physical_symptoms === 'none') return;
+      // Only attempt JSON.parse when the value is actually a JSON array
+      // payload. Free-text user input is ignored rather than silently
+      // swallowed by a try/catch. (D10.)
+      const value = entry.physical_symptoms.trim();
+      if (!value.startsWith('[')) return;
+      const symptoms = JSON.parse(value);
+      if (!Array.isArray(symptoms)) return;
+      symptoms.forEach((symptom) => {
+        symptomCount[symptom] = (symptomCount[symptom] || 0) + 1;
+      });
     });
 
     return Object.entries(symptomCount)
