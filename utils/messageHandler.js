@@ -6,6 +6,8 @@ const db = require('../services/database');
 const journalManager = require('../services/journalManager');
 const { log } = require('./logger');
 
+const JOURNAL_REMINDER_MARKER = "💡 Don't forget to do your daily journal! Type 'journal' to start.";
+
 async function handleIncomingMessage(from, message, profileName) {
   try {
     log.info(`Processing message from ${from}`, { profileName, message });
@@ -107,10 +109,17 @@ async function handleIncomingMessage(from, message, profileName) {
           await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
         }
         
-        // Add journal reminder if user hasn't journaled today
+        // Append the journal reminder iff the user hasn't journaled today
+        // AND we haven't already nudged them in this session (D19: was a
+        // 30 % random suffix that made replay non-deterministic).
         const todaysJournal = await db.getTodaysJournal(from);
-        if (!todaysJournal && Math.random() < 0.3) {
-          response += "\n\n💡 Don't forget to do your daily journal! Type 'journal' to start.";
+        if (!todaysJournal) {
+          const remindedRecently = (conversationHistory || []).some(
+            (turn) => turn.response && turn.response.includes(JOURNAL_REMINDER_MARKER)
+          );
+          if (!remindedRecently) {
+            response += `\n\n${JOURNAL_REMINDER_MARKER}`;
+          }
         }
       }
     }
