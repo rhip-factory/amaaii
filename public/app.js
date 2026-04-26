@@ -1,28 +1,123 @@
-// amaaii PWA chat client
-const $chat = document.getElementById('chat');
-const $form = document.getElementById('composer');
-const $input = document.getElementById('input');
-const $send = document.getElementById('sendBtn');
-const $reset = document.getElementById('resetBtn');
+// amaaii PWA chat client (Phase A: auth + shared-with-WhatsApp user)
 
-const SESSION_KEY = 'amaaii.sessionId';
+const TOKEN_KEY = 'amaaii.token';
+const USER_KEY = 'amaaii.user';
 
-function getSessionId() {
-  let id = localStorage.getItem(SESSION_KEY);
-  if (!id) {
-    id = (crypto.randomUUID && crypto.randomUUID()) ||
-      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(SESSION_KEY, id);
-  }
-  return id;
+const $ = (id) => document.getElementById(id);
+
+// View elements
+const $loginView = $('login-view');
+const $appView = $('app-view');
+
+// Login
+const $loginForm = $('loginForm');
+const $phone = $('phone');
+const $loginError = $('loginError');
+const $loginBtn = $('loginBtn');
+
+// Chat
+const $chat = $('chat');
+const $form = $('composer');
+const $input = $('input');
+const $send = $('sendBtn');
+const $reset = $('resetBtn');
+const $logout = $('logoutBtn');
+const $userBadge = $('userBadge');
+
+let welcomeNode; // snapshot for reset
+
+// ---- Auth helpers --------------------------------------------------------
+function getToken() { return localStorage.getItem(TOKEN_KEY); }
+function getUser() {
+  try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null'); }
+  catch { return null; }
+}
+function setSession(token, user) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+}
+function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
 }
 
+async function api(path, opts = {}) {
+  const headers = Object.assign(
+    { 'Content-Type': 'application/json' },
+    opts.headers || {}
+  );
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(path, { ...opts, headers });
+  if (res.status === 401) {
+    clearSession();
+    showLogin();
+    throw new Error('unauthorized');
+  }
+  return res;
+}
+
+// ---- View switching ------------------------------------------------------
+function showLogin() {
+  $appView.hidden = true;
+  $loginView.hidden = false;
+  document.body.classList.remove('app-mode');
+  document.body.classList.add('login-mode');
+  setTimeout(() => $phone.focus(), 50);
+}
+
+function showApp() {
+  $loginView.hidden = true;
+  $appView.hidden = false;
+  document.body.classList.remove('login-mode');
+  document.body.classList.add('app-mode');
+  const u = getUser();
+  if (u && u.phone) {
+    // strip the whatsapp:+ prefix for display
+    $userBadge.textContent = u.phone.replace(/^whatsapp:/, '');
+  }
+  setTimeout(() => $input.focus(), 50);
+}
+
+// ---- Login submit --------------------------------------------------------
+$loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $loginError.hidden = true;
+  $loginBtn.disabled = true;
+  $loginBtn.textContent = 'Signing in…';
+  try {
+    const raw = $phone.value.trim();
+    // Send as the user typed it; the server normalizes.
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: raw }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      $loginError.textContent = data.message || 'Could not sign in. Check the phone number.';
+      $loginError.hidden = false;
+      return;
+    }
+    setSession(data.token, data.user);
+    showApp();
+  } catch (err) {
+    $loginError.textContent = 'Network trouble. Please try again.';
+    $loginError.hidden = false;
+  } finally {
+    $loginBtn.disabled = false;
+    $loginBtn.textContent = 'Continue';
+  }
+});
+
+// ---- Chat ----------------------------------------------------------------
 function clearChat() {
   while ($chat.firstChild) $chat.removeChild($chat.firstChild);
 }
 
 function newSession() {
-  localStorage.removeItem(SESSION_KEY);
+  // Clears the on-screen conversation. The user (DB row) stays — this
+  // is just a UI reset, not a sign-out.
   $chat.classList.remove('has-messages');
   clearChat();
   $chat.appendChild(welcomeNode.cloneNode(true));
@@ -57,7 +152,6 @@ function hideTyping() {
 }
 
 function scrollToBottom() {
-  // rAF so the new node is laid out before we scroll.
   requestAnimationFrame(() => {
     $chat.scrollTo({ top: $chat.scrollHeight, behavior: 'smooth' });
   });
@@ -72,10 +166,9 @@ async function send(message) {
   showTyping();
 
   try {
-    const res = await fetch('/chat', {
+    const res = await api('/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: getSessionId(), message: trimmed }),
+      body: JSON.stringify({ message: trimmed }),
     });
     const data = await res.json();
     hideTyping();
@@ -85,8 +178,10 @@ async function send(message) {
       appendBubble('bot', data.response, data.urgencyLevel);
     }
   } catch (err) {
-    hideTyping();
-    appendBubble('bot', "Connection trouble — please try again in a moment.");
+    if (err.message !== 'unauthorized') {
+      hideTyping();
+      appendBubble('bot', "Connection trouble — please try again in a moment.");
+    }
   } finally {
     $send.disabled = false;
     $input.focus();
@@ -97,7 +192,14 @@ $form.addEventListener('submit', (e) => {
   e.preventDefault();
   send($input.value);
 });
+
 $reset.addEventListener('click', newSession);
+
+$logout.addEventListener('click', () => {
+  clearSession();
+  newSession(); // wipe visible chat
+  showLogin();
+});
 
 function wireSuggestions() {
   document.querySelectorAll('.suggest').forEach((btn) => {
@@ -105,10 +207,15 @@ function wireSuggestions() {
   });
 }
 
-// Snapshot the welcome block so we can restore it on reset.
-const welcomeNode = $chat.querySelector('.welcome').cloneNode(true);
+// ---- Boot ---------------------------------------------------------------
+welcomeNode = $chat.querySelector('.welcome').cloneNode(true);
 wireSuggestions();
-$input.focus();
+
+if (getToken()) {
+  showApp();
+} else {
+  showLogin();
+}
 
 // Service worker (best effort — non-blocking)
 if ('serviceWorker' in navigator) {

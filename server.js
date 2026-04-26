@@ -6,6 +6,7 @@ const { handleIncomingMessage, processMessage } = require('./utils/messageHandle
 const { initializeDatabase } = require('./services/database');
 const { log } = require('./utils/logger');
 const twilioSignature = require('./middleware/twilioSignature');
+const auth = require('./services/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,22 +31,44 @@ app.get('/webhook', (req, res) => {
   res.send('WhatsApp Bot Webhook is running!');
 });
 
-// PWA chat endpoint — same brain as the WhatsApp webhook, but the
-// response is returned directly instead of going through Twilio. PWA
-// users get a separate ID space (pwa:<sessionId>) so they don't collide
-// with WhatsApp test users.
-app.post('/chat', async (req, res) => {
+// --- Auth -----------------------------------------------------------------
+// Phase A demo auth: phone-only sign-in, no OTP. Real verification lands
+// in Phase 3. The token is HMAC-signed so the client can't forge a phone.
+app.post('/auth/login', (req, res) => {
+  const { phone } = req.body || {};
+  const normalized = auth.normalizePhone(phone);
+  if (!normalized) {
+    return res.status(400).json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' });
+  }
+  const token = auth.issueToken(normalized);
+  log.info('PWA login', { phone: normalized });
+  res.json({ token, user: { phone: normalized } });
+});
+
+// Bearer-token middleware. Attaches req.userPhone if a valid token is
+// present; rejects with 401 otherwise.
+function requireAuth(req, res, next) {
+  const header = req.get('authorization') || '';
+  const m = header.match(/^Bearer\s+(.+)$/i);
+  if (!m) return res.status(401).json({ error: 'missing_token' });
+  const payload = auth.verifyToken(m[1]);
+  if (!payload || !payload.sub) return res.status(401).json({ error: 'invalid_token' });
+  req.userPhone = payload.sub;
+  next();
+}
+
+// PWA chat endpoint — same brain as the WhatsApp webhook. The user phone
+// comes from the auth token; users keyed by `whatsapp:+E.164` so a phone
+// that has messaged the WhatsApp sandbox sees its conversation history
+// after logging in to the PWA.
+app.post('/chat', requireAuth, async (req, res) => {
   try {
-    const { sessionId, message, profileName } = req.body || {};
-    if (typeof sessionId !== 'string' || sessionId.length === 0) {
-      return res.status(400).json({ error: 'sessionId is required' });
-    }
+    const { message } = req.body || {};
     if (typeof message !== 'string' || message.trim().length === 0) {
       return res.status(400).json({ error: 'message is required' });
     }
-    const from = `pwa:${sessionId}`;
-    log.info('PWA message received', { sessionId, message, profileName });
-    const result = await processMessage(from, message, profileName || null);
+    log.info('PWA message received', { phone: req.userPhone, message });
+    const result = await processMessage(req.userPhone, message, null);
     res.json({
       response: result.response,
       urgencyLevel: result.urgencyLevel,

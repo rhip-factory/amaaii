@@ -259,9 +259,159 @@ html, body {
 /* Hide welcome once a real bubble exists */
 .chat.has-messages .welcome { display: none; }
 
+/* ============================================================
+ * LOGIN VIEW
+ * ============================================================ */
+
+body.login-mode {
+  background: linear-gradient(160deg, #F2ECFA 0%, #FBFAFD 60%, #FFFFFF 100%);
+}
+
+.login-view {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px 16px;
+}
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 20px;
+  padding: 32px 28px 28px;
+  box-shadow: var(--shadow-2);
+  text-align: center;
+  border: 1px solid var(--lavender);
+}
+.login-lockup {
+  height: 36px;
+  width: auto;
+  margin-bottom: 16px;
+}
+.login-card h1 {
+  font-size: 24px;
+  margin: 0 0 4px;
+  font-weight: 700;
+  color: var(--deep);
+  letter-spacing: -0.01em;
+}
+.login-card .lead {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.login-card label {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+  letter-spacing: .01em;
+}
+.phone-row {
+  display: flex;
+  align-items: stretch;
+  border: 1.5px solid var(--lavender);
+  border-radius: 12px;
+  background: var(--shell-bg);
+  overflow: hidden;
+  transition: border-color .15s ease, background .15s ease;
+}
+.phone-row:focus-within { border-color: var(--mid); background: #fff; }
+.phone-prefix {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  font-weight: 600;
+  color: var(--deep);
+  background: var(--lavender-soft);
+  border-right: 1px solid var(--lavender);
+  font-variant-numeric: tabular-nums;
+}
+#phone {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  padding: 14px 12px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
+}
+
+.login-error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #FEE6E6;
+  color: #6E1F1F;
+  font-size: 13px;
+  text-align: left;
+}
+
+.primary-btn {
+  margin-top: 18px;
+  width: 100%;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  letter-spacing: .01em;
+  transition: background .15s ease, transform .12s ease, box-shadow .15s ease;
+  box-shadow: 0 8px 22px rgba(124,71,175,.25);
+}
+.primary-btn:hover { background: var(--deep-press); }
+.primary-btn:active { transform: translateY(1px); }
+.primary-btn:disabled { background: var(--mid); cursor: progress; box-shadow: none; }
+
+.fineprint {
+  margin: 18px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.login-view .brand-footer {
+  margin-top: 24px;
+  background: transparent;
+  border: 0;
+}
+
+/* ============================================================
+ * APPBAR ACTIONS (chat header)
+ * ============================================================ */
+.appbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.user-badge {
+  font-size: 12px;
+  color: var(--deep);
+  font-weight: 600;
+  background: var(--lavender-soft);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* Tighter on small screens */
 @media (max-width: 480px) {
   .welcome { padding-top: 24px; }
   .welcome h1 { font-size: 24px; }
   .lockup { height: 24px; }
+  .user-badge { display: none; } /* save space; logout button still visible */
+  .login-card { padding: 26px 22px; }
 }
