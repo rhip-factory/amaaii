@@ -19,27 +19,21 @@ async function handleIncomingMessage(from, message, profileName) {
     let conversationContext = 'general';
     let dangerSignAnalysis = null;
     
-    // Check if user has active journal session
-    const activeJournalSession = journalManager.getJournalSession(from);
-    
+    // Check if user has an active journal session (DB-backed since 7.5).
+    const activeJournalSession = await journalManager.getJournalSession(from);
+
     // Check for journal commands
     if (journalManager.isJournalCommand(message) || activeJournalSession) {
       if (!activeJournalSession) {
-        // Start new journal session
         const session = await journalManager.startJournalSession(from, user);
         const result = await journalManager.processJournalResponse(from, message, session.currentStage);
         response = result.response;
         conversationContext = 'journaling';
       } else {
-        // Continue existing journal session
+        // The manager handles its own session deletion on completion.
         const result = await journalManager.processJournalResponse(from, message, activeJournalSession.currentStage);
         response = result.response;
         conversationContext = 'journaling';
-        
-        // Clear session if completed
-        if (result.completed) {
-          journalManager.journalSessions.delete(from);
-        }
       }
     } else if (journalManager.isSummaryCommand(message)) {
       if (message.toLowerCase().includes('weekly')) {
