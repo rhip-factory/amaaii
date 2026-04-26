@@ -97,8 +97,30 @@ function initializeDatabase() {
         )
       `, (err) => {
         if (err) log.error("Error creating journals table", err);
-        else resolve();
       });
+
+      db.run(`
+        CREATE TABLE IF NOT EXISTS journal_sessions (
+          user_phone TEXT PRIMARY KEY,
+          current_stage TEXT NOT NULL,
+          journal_data TEXT NOT NULL,
+          channel TEXT NOT NULL DEFAULT 'whatsapp',
+          started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_phone) REFERENCES users(phone_number)
+        )
+      `, (err) => {
+        if (err) log.error("Error creating journal_sessions table", err);
+      });
+
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_journal_sessions_updated
+         ON journal_sessions(updated_at)`,
+        (err) => {
+          if (err) log.error("Error creating journal_sessions index", err);
+          else resolve();
+        }
+      );
     });
   });
 }
@@ -185,6 +207,67 @@ async function getConversationHistory(userPhone, limit = 10) {
       (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
+      }
+    );
+  });
+}
+
+async function getJournalSession(userPhone) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT current_stage, journal_data, channel, started_at, updated_at
+       FROM journal_sessions WHERE user_phone = ?`,
+      [userPhone],
+      (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+        let parsed;
+        try {
+          parsed = JSON.parse(row.journal_data);
+        } catch (e) {
+          return reject(new Error(`journal_data not valid JSON for ${userPhone}: ${e.message}`));
+        }
+        resolve({
+          currentStage: row.current_stage,
+          journalData: parsed,
+          channel: row.channel,
+          startedAt: row.started_at,
+          updatedAt: row.updated_at,
+        });
+      }
+    );
+  });
+}
+
+async function upsertJournalSession(userPhone, { currentStage, journalData, channel = 'whatsapp' }) {
+  const payload = JSON.stringify(journalData || {});
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO journal_sessions
+         (user_phone, current_stage, journal_data, channel, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(user_phone) DO UPDATE SET
+         current_stage = excluded.current_stage,
+         journal_data  = excluded.journal_data,
+         channel       = excluded.channel,
+         updated_at    = datetime('now')`,
+      [userPhone, currentStage, payload, channel],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+async function deleteJournalSession(userPhone) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `DELETE FROM journal_sessions WHERE user_phone = ?`,
+      [userPhone],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
       }
     );
   });
@@ -368,6 +451,9 @@ module.exports = {
   saveConversation,
   getConversationHistory,
   getLastBotMessage,
+  getJournalSession,
+  upsertJournalSession,
+  deleteJournalSession,
   saveSymptoms,
   scheduleANCVisit,
   getUpcomingANCVisits,
