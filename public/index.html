@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#7C47AF" />
+  <title>amaaii — your pregnancy companion</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/img/logo-mark-purple.png" />
+  <link rel="apple-touch-icon" href="/img/logo-mark-purple.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="appbar">
+      <img src="/img/logo-lockup-purple.png" alt="amaaii" class="lockup" />
+      <button id="resetBtn" class="reset" title="Start a new conversation" aria-label="Reset session">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3.5-7.1"/><polyline points="3 4 3 10 9 10"/></svg>
+      </button>
+    </header>
+
+    <main id="chat" class="chat" aria-live="polite">
+      <div class="welcome">
+        <img src="/img/logo-mark-purple.png" alt="" class="welcome-mark" />
+        <h1>Hi, I'm Amaaii.</h1>
+        <p>Your pregnancy companion. I'm here to listen, journal your day, and flag anything that needs urgent care.</p>
+        <div class="suggestions">
+          <button class="suggest" data-msg="Hi">👋 Say hi</button>
+          <button class="suggest" data-msg="journal">📝 Daily journal</button>
+          <button class="suggest" data-msg="I have been feeling a bit anxious">💚 I'm feeling anxious</button>
+        </div>
+        <p class="footnote">Demo build · runs locally · powered by GPT-3.5</p>
+      </div>
+    </main>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <input
+        id="input"
+        type="text"
+        placeholder="Type a message…"
+        autocomplete="off"
+        autocapitalize="sentences"
+        enterkeyhint="send"
+      />
+      <button id="sendBtn" type="submit" aria-label="Send">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+      </button>
+    </form>
+
+    <footer class="brand-footer">By RHIP Factory</footer>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
