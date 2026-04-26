@@ -57,23 +57,44 @@ async function handleIncomingMessage(from, message, profileName) {
       response = await journalManager.generateDoctorReport(from, 30);
       conversationContext = 'doctor_report';
     } else {
-      // Regular message handling
+      // Regular message handling.
       dangerSignAnalysis = detectDangerSigns(message);
       const mood = assessMood(message);
       const symptoms = extractSymptoms(message);
-      
+
       log.info('Analysis', { urgencyLevel: dangerSignAnalysis.urgencyLevel, mood, symptoms });
-      
-      if (dangerSignAnalysis.urgencyLevel === 'critical' || dangerSignAnalysis.urgencyLevel === 'high') {
+
+      // Routing precedence (per spec §7.4):
+      //   1. CRITICAL urgency → escalation copy, AI bypassed.
+      //   2. Otherwise, un-onboarded users → onboarding (HIGH/MODERATE
+      //      escalation copy may be appended so the user is still warned).
+      //   3. Otherwise, HIGH/MODERATE → escalation.
+      //   4. Otherwise → AI.
+      if (dangerSignAnalysis.urgencyLevel === 'critical') {
         response = dangerSignAnalysis.recommendedAction;
         conversationContext = 'danger_sign_detected';
-        
         if (symptoms.length > 0) {
           await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
         }
       } else if (userContext.needsOnboarding) {
         conversationContext = 'onboarding';
-        response = await handleOnboarding(user, message);
+        response = await handleOnboarding(user, message, from);
+        if (
+          dangerSignAnalysis.urgencyLevel === 'high' ||
+          dangerSignAnalysis.urgencyLevel === 'moderate'
+        ) {
+          // Surface the escalation but keep onboarding flowing.
+          response = `${dangerSignAnalysis.recommendedAction}\n\n${response}`;
+        }
+        if (symptoms.length > 0) {
+          await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
+        }
+      } else if (dangerSignAnalysis.urgencyLevel === 'high') {
+        response = dangerSignAnalysis.recommendedAction;
+        conversationContext = 'danger_sign_detected';
+        if (symptoms.length > 0) {
+          await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
+        }
       } else {
         const conversationHistory = await db.getConversationHistory(from, 5);
         
@@ -144,13 +165,33 @@ async function handleIncomingMessage(from, message, profileName) {
   }
 }
 
-async function handleOnboarding(user, message) {
-  const lowerMessage = message.toLowerCase().trim();
-  
-  if (!user.name || user.name === null) {
-    return `Hello! 👋 I'm Amaaii, your pregnancy companion. I'm here to support you throughout your pregnancy journey. 
+// Marker phrase used to detect that the bot's most recent outbound was
+// the name prompt — lets us treat the next inbound as the user's name
+// without introducing a separate state column. (Phase 0 stays stateless;
+// the proper state machine is Phase 1.)
+const NAME_PROMPT_MARKER = "What's your name?";
 
-What's your name? You can call me by any name you're comfortable with.`;
+const NAME_PROMPT = `Hello! 👋 I'm Amaaii, your pregnancy companion. I'm here to support you throughout your pregnancy journey.
+
+${NAME_PROMPT_MARKER} You can call me by any name you're comfortable with.`;
+
+async function handleOnboarding(user, message, phoneNumber) {
+  const lowerMessage = message.toLowerCase().trim();
+
+  if (!user.name) {
+    // If the previous bot turn was the name prompt, the current inbound
+    // is the user's name — persist it and advance to the age question.
+    const lastBot = await db.getLastBotMessage(phoneNumber);
+    const previousWasNamePrompt =
+      lastBot && lastBot.response && lastBot.response.includes(NAME_PROMPT_MARKER);
+    if (previousWasNamePrompt) {
+      const trimmedName = message.trim();
+      if (trimmedName.length > 0) {
+        await userManager.updateUserProfile(phoneNumber, { name: trimmedName });
+        return `Thank you ${trimmedName}! 💚 To provide you with the best support, could you tell me your age?`;
+      }
+    }
+    return NAME_PROMPT;
   }
   
   if (!user.age) {
