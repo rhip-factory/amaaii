@@ -11,7 +11,7 @@ function getClient() {
   return cachedClient;
 }
 
-async function sendWhatsAppMessage(to, message) {
+async function defaultSend(to, message) {
   try {
     const response = await getClient().messages.create({
       body: message,
@@ -27,4 +27,22 @@ async function sendWhatsAppMessage(to, message) {
   }
 }
 
-module.exports = { sendWhatsAppMessage, getClient };
+// Test seam: callers (e.g. utils/messageHandler.js) destructure
+// `sendWhatsAppMessage` at require time, so we wrap a swappable impl
+// behind a stable function reference. Tests call __setSendImpl to inject
+// a no-op recorder; reset to defaultSend afterwards.
+let _impl = defaultSend;
+
+async function sendWhatsAppMessage(to, message) {
+  return _impl(to, message);
+}
+
+function __setSendImpl(fn) {
+  _impl = fn || defaultSend;
+}
+
+function __resetSendImpl() {
+  _impl = defaultSend;
+}
+
+module.exports = { sendWhatsAppMessage, getClient, __setSendImpl, __resetSendImpl };
