@@ -232,6 +232,37 @@ Output: {"gravida":3,"parity":2,"previous_deliveries":[{"mode":"cesarean","compl
   }
 }
 
+// Pregnancy-week / LMP extraction — used as the 3-strikes fallback in
+// onboarding when regex repeatedly fails to parse the user's answer.
+async function extractWeekOrLMP(text) {
+  const today = new Date().toISOString().split('T')[0];
+  const out = await extract(
+    `You convert a user's reply about their pregnancy stage into structured data.
+Today is ${today}.
+Return STRICT JSON: {"weeks": <int 1-42|null>, "lmp": "YYYY-MM-DD"|null}.
+- If they state weeks, set weeks. (Range 1-42; reject anything outside.)
+- If they state a date that is their last menstrual period (LMP), set lmp.
+- If they say a month name without a year, assume the most recent occurrence.
+- If they say "5 months along", convert to weeks (months × 4.33, round).
+- If you can't tell, return both null.
+
+Examples:
+- "22" → {"weeks": 22, "lmp": null}
+- "I'm 18 weeks" → {"weeks": 18, "lmp": null}
+- "5 months along" → {"weeks": 22, "lmp": null}
+- "my last period was 22 march" → {"weeks": null, "lmp": "${today.slice(0,4)}-03-22"}
+- "I think I'm in my second trimester" → {"weeks": 18, "lmp": null}
+- "no idea" → {"weeks": null, "lmp": null}
+- "niko mwezi wa nne" (4 months in SW) → {"weeks": 17, "lmp": null}`,
+    text
+  );
+  if (!out) return null;
+  const result = {};
+  if (Number.isInteger(out.weeks) && out.weeks >= 1 && out.weeks <= 42) result.weeks = out.weeks;
+  if (typeof out.lmp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(out.lmp)) result.lmp = out.lmp;
+  return Object.keys(result).length ? result : null;
+}
+
 module.exports = {
   extract,
   extractMood,
@@ -240,4 +271,5 @@ module.exports = {
   extractAppetite,
   extractMovement,
   extractMedicalHistory,
+  extractWeekOrLMP,
 };

@@ -18,7 +18,7 @@ const STRINGS = {
     age_prompt_again: "Thank you {name}! 💚 To provide you with the best support, could you tell me your age?",
     week_thanks: "Great! You're {weeks} weeks along. 🤰\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
     week_lmp_thanks: "Based on your last period, you're about {weeks} weeks pregnant. Your expected delivery date is around {edd}.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
-    week_prompt_again: "How many weeks pregnant are you? You can also tell me the date of your last menstrual period (LMP) if you remember it.",
+    week_prompt_again: "I didn't catch that — could you try again?\n\n• Just a number works: \"22\"\n• Or \"22 weeks\"\n• Or your last period date: \"22 March\" or \"22/3/2026\"",
     location_done: "Perfect! I now have your basic information:\n{summary}\n\nYou can:\n• Share how you're feeling today\n• Ask me any pregnancy questions\n• Tell me about any symptoms you're experiencing\n• Type \"help\" to see what I can do\n\nHow are you feeling today? 💚",
     welcome_back: "Welcome back {name}! How can I help you today?",
 
@@ -102,7 +102,7 @@ const STRINGS = {
     age_prompt_again: "Asante {name}! 💚 Ili nikupe msaada bora, je, una umri gani?",
     week_thanks: "Vizuri! Una wiki {weeks} za ujauzito. 🤰\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika)",
     week_lmp_thanks: "Kulingana na hedhi yako ya mwisho, una takriban wiki {weeks} za ujauzito. Tarehe ya kujifungua inakadiriwa kuwa karibu na {edd}.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu)",
-    week_prompt_again: "Una wiki ngapi za ujauzito? Au unaweza kuniambia tarehe ya hedhi yako ya mwisho ikiwa unakumbuka.",
+    week_prompt_again: "Sikuelewa — jaribu tena tafadhali.\n\n• Nambari peke yake inafaa: \"22\"\n• Au \"wiki 22\"\n• Au tarehe ya hedhi yako ya mwisho: \"22 Machi\" au \"22/3/2026\"",
     location_done: "Vizuri! Sasa nina taarifa zako za msingi:\n{summary}\n\nUnaweza:\n• Kushiriki unavyojisikia leo\n• Kuniuliza maswali yoyote ya ujauzito\n• Kuniambia kuhusu dalili zozote unazoona\n• Andika \"help\" kuona ninayoweza kufanya\n\nUnajisikiaje leo? 💚",
     welcome_back: "Karibu tena {name}! Ninawezaje kukusaidia leo?",
 
