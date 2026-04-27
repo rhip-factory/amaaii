@@ -2,6 +2,7 @@ const db = require('./database');
 const { detectDangerSigns, assessMood, extractSymptoms } = require('./dangerSigns');
 const { t, pickLang } = require('./i18n');
 const llm = require('./llmExtract');
+const { getRecentTrend } = require('./trend');
 
 function dangerCopy(level, lang) {
   if (level === 'critical') return t(lang, 'danger_critical');
@@ -62,25 +63,35 @@ class JournalManager {
   // survive restarts.)
 
   async startJournalSession(userPhone, user) {
+    // If there's an active session in the DB, resume it (e.g. after a
+    // server restart mid-flow). Otherwise create a fresh journal row
+    // and a new session pointing at it — this enables multi-checkin per
+    // day: each `journal` command after a previous one completes opens
+    // a brand-new row.
     const existingDbSession = await db.getJournalSession(userPhone);
     if (existingDbSession) {
       return {
         userPhone,
         currentStage: existingDbSession.currentStage,
         journalData: existingDbSession.journalData || {},
+        journalId: existingDbSession.journalId,
       };
     }
 
-    const existingJournal = await db.getTodaysJournal(userPhone);
+    // INSERT the row up front so we capture started_at the moment the
+    // user opens the check-in.
+    const journalId = await db.createOrUpdateJournal(userPhone, {});
+
     const session = {
       userPhone,
-      currentStage: existingJournal ? 'continue' : 'greeting',
-      journalData: existingJournal || {},
+      currentStage: 'greeting',
+      journalData: {},
+      journalId,
     };
-
     await db.upsertJournalSession(userPhone, {
       currentStage: session.currentStage,
       journalData: session.journalData,
+      journalId,
     });
     return session;
   }
@@ -92,6 +103,7 @@ class JournalManager {
       userPhone,
       currentStage: row.currentStage,
       journalData: row.journalData || {},
+      journalId: row.journalId,
     };
   }
 
@@ -102,6 +114,7 @@ class JournalManager {
     }
     const stage = currentStage || dbSession.currentStage;
     const journalData = dbSession.journalData || {};
+    const journalId = dbSession.journalId || null;
     const user = await db.getUser(userPhone);
     const pregnancyWeek = (user && user.pregnancy_week) || 0;
     const lang = pickLang(user && user.language);
@@ -112,14 +125,32 @@ class JournalManager {
 
     switch (stage) {
       case 'greeting':
+      case 'continue': {
         nextStage = 'mood';
-        response = t(lang, 'journal_greeting');
-        break;
+        const baseGreeting = stage === 'continue'
+          ? t(lang, 'journal_continue')
+          : t(lang, 'journal_greeting');
 
-      case 'continue':
-        nextStage = 'mood';
-        response = t(lang, 'journal_continue');
+        // Context-aware preamble: if yesterday's check-in flagged
+        // symptoms, ask about them first. Soft, no medical claims.
+        let preamble = '';
+        try {
+          const trend = await getRecentTrend(userPhone, 7);
+          if (trend) {
+            if (trend.yesterdaySymptoms.length === 1) {
+              preamble = t(lang, 'journal_yesterday_followup_one', { symptom: trend.yesterdaySymptoms[0] });
+            } else if (trend.yesterdaySymptoms.length > 1) {
+              preamble = t(lang, 'journal_yesterday_followup_many', { list: trend.yesterdaySymptoms.join(', ') });
+            } else if (trend.distinctDaysJournaled >= 5) {
+              // Reward consistency without nagging — only every several days.
+              preamble = t(lang, 'journal_streak', { days: trend.distinctDaysJournaled });
+            }
+          }
+        } catch (_) { /* trend is best-effort */ }
+
+        response = preamble + baseGreeting;
         break;
+      }
 
       case 'mood': {
         let moodScore = this.extractNumber(message);
@@ -148,9 +179,15 @@ class JournalManager {
         const symptoms = extractSymptoms(message);
         const dangerAnalysis = detectDangerSigns(message);
 
-        // Accept "none" in EN or "hapana" in SW as the no-symptoms sentinel.
+        // No-symptoms sentinels: "none" (EN), "hapana"/"la"/"sina"/
+        // "najisikia vyema" (SW common ways to say "no" / "I'm fine").
         const lower = message.toLowerCase();
-        const isNone = lower.includes('none') || lower.includes('hapana');
+        const isNone =
+          /\bnone\b/.test(lower) ||
+          /\bhapana\b/.test(lower) ||
+          /^la[\s,.]/.test(lower) || /^la$/.test(lower) ||
+          /\bsina\b/.test(lower) ||
+          /najisikia\s+(?:vyema|vizuri|sawa)/.test(lower);
         journalUpdate.physical_symptoms =
           symptoms.length > 0 ? JSON.stringify(symptoms) :
           isNone ? 'none' : message;
@@ -296,6 +333,9 @@ class JournalManager {
           noteHeadsUp = scanFreeText(message, journalData, journalUpdate, lang);
         }
         journalUpdate.completed = 1;
+        // Stamp the moment the user finished — pairs with started_at
+        // (set in startJournalSession) for full duration analytics.
+        journalUpdate.completed_at = new Date().toISOString();
         nextStage = 'completed';
         const summary = await this.generateJournalSummary(journalData, journalUpdate, lang);
         response = noteHeadsUp + summary;
@@ -308,7 +348,11 @@ class JournalManager {
     }
 
     if (Object.keys(journalUpdate).length > 0) {
-      await db.createOrUpdateJournal(userPhone, journalUpdate);
+      // All journal writes go to the SAME row created in
+      // startJournalSession — multi-checkin works because each
+      // `journal` command after a previous completion creates a fresh
+      // row before processJournalResponse is ever called.
+      await db.createOrUpdateJournal(userPhone, journalUpdate, journalId);
     }
 
     const mergedJournalData = { ...journalData, ...journalUpdate };
@@ -319,6 +363,7 @@ class JournalManager {
       await db.upsertJournalSession(userPhone, {
         currentStage: nextStage,
         journalData: mergedJournalData,
+        journalId,
       });
     }
 
@@ -357,7 +402,8 @@ class JournalManager {
     }
 
     if (data.appetite) {
-      summary += `${t(lang, 'journal_summary_appetite')} ${data.appetite}\n`;
+      const appetiteLabel = t(lang, `appetite_${data.appetite}`);
+      summary += `${t(lang, 'journal_summary_appetite')} ${appetiteLabel}\n`;
     }
 
     summary += '\n';

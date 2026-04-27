@@ -2,7 +2,7 @@
 // Caches static assets so the chrome loads offline; /chat always
 // hits the network (it needs the live model + DB).
 
-const VERSION = 'amaaii-shell-v3';
+const VERSION = 'amaaii-shell-v5';
 const SHELL = [
   '/',
   '/index.html',

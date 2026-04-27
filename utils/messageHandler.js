@@ -6,6 +6,7 @@ const db = require('../services/database');
 const journalManager = require('../services/journalManager');
 const { log } = require('./logger');
 const { t, pickLang } = require('../services/i18n');
+const { getRecentTrend, trendForPrompt } = require('../services/trend');
 
 function dangerCopy(level, lang) {
   if (level === 'critical') return t(lang, 'danger_critical');
@@ -124,12 +125,20 @@ async function processMessage(from, message, profileName) {
         conversationContext = 'mental_health';
       }
 
+      const trend = await getRecentTrend(from, 7);
+      const trendLine = trendForPrompt(trend);
+      const mh = await db.getMedicalHistory(from).catch(() => null);
+
       response = await getAmaaiiResponse(message, {
         userName: user.name,
+        pregnancyWeek: user.pregnancy_week,
+        location: user.location,
         isNewUser: userContext.isNewUser,
         conversationHistory,
         currentContext: conversationContext,
         language: lang,
+        trendLine,
+        medicalHistory: mh,
       });
 
       if (symptoms.length > 0) {

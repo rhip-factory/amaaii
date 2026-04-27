@@ -3,7 +3,9 @@ const path = require('path');
 const express = require('express');
 const bodyParser = require('body-parser');
 const { handleIncomingMessage, processMessage } = require('./utils/messageHandler');
-const { initializeDatabase, getUser, updateUser, getTodaysJournal, getJournalHistory, getConversationHistory } = require('./services/database');
+const { initializeDatabase, getUser, updateUser, getTodaysJournal, getTodaysJournals, getJournalHistory, getConversationHistory, getMedicalHistory, saveMedicalHistory } = require('./services/database');
+const { getRecentTrend } = require('./services/trend');
+const llmExtract = require('./services/llmExtract');
 const { log } = require('./utils/logger');
 const twilioSignature = require('./middleware/twilioSignature');
 const auth = require('./services/auth');
@@ -163,7 +165,9 @@ app.get('/me', requireAuth, async (req, res) => {
         tip: tipFor(null, null),
       });
     }
-    const todayJournal = await getTodaysJournal(req.userPhone);
+    const todaysJournals = await getTodaysJournals(req.userPhone);
+    const completedToday = todaysJournals.filter((j) => j.completed);
+    const lastJournal = todaysJournals[todaysJournals.length - 1] || null;
     res.json({
       user: {
         phone: user.phone_number,
@@ -175,17 +179,21 @@ app.get('/me', requireAuth, async (req, res) => {
         language: user.language || 'en',
         trimester: trimesterFromWeek(user.pregnancy_week),
       },
-      todayJournal: todayJournal
+      todayJournal: lastJournal
         ? {
-            completed: !!todayJournal.completed,
-            emotional_state: todayJournal.emotional_state,
-            sleep_hours: todayJournal.sleep_hours,
-            water_intake: todayJournal.water_intake,
-            appetite: todayJournal.appetite,
+            completed: !!lastJournal.completed,
+            emotional_state: lastJournal.emotional_state,
+            sleep_hours: lastJournal.sleep_hours,
+            water_intake: lastJournal.water_intake,
+            appetite: lastJournal.appetite,
+            started_at: lastJournal.started_at,
+            completed_at: lastJournal.completed_at,
           }
         : null,
+      todayCheckinCount: completedToday.length,
       weekDescription: weekDescription(user.pregnancy_week),
-      tip: tipFor(user, todayJournal),
+      tip: tipFor(user, lastJournal),
+      trend: await getRecentTrend(req.userPhone, 7),
     });
   } catch (err) {
     log.error('GET /me failed', err);
@@ -244,16 +252,58 @@ function formatJournalRow(j) {
   if (j.water_intake != null) rows.push({ label: 'Water', value: `${j.water_intake} glasses` });
   if (j.appetite) rows.push({ label: 'Appetite', value: j.appetite });
   if (j.red_flags_detected) rows.push({ label: '⚠️ Flagged', value: j.red_flags_detected });
+  if (j.completed_at && j.started_at) {
+    const dur = Math.max(1, Math.round((new Date(j.completed_at) - new Date(j.started_at)) / 1000));
+    rows.push({ label: 'Duration', value: dur < 60 ? `${dur}s` : `${Math.round(dur / 60)} min` });
+  }
   return rows;
 }
+
+function formatTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch (_) { return ''; }
+}
+
+// --- Medical history (Phase D) ---------------------------------------------
+app.get('/me/medical-history', requireAuth, async (req, res) => {
+  try {
+    const mh = await getMedicalHistory(req.userPhone);
+    res.json({ medicalHistory: mh });
+  } catch (err) {
+    log.error('GET /me/medical-history failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
+app.post('/me/medical-history', requireAuth, async (req, res) => {
+  try {
+    const { rawText } = req.body || {};
+    if (typeof rawText !== 'string' || rawText.trim().length < 5) {
+      return res.status(400).json({ error: 'rawText is required (min 5 chars).' });
+    }
+    const extracted = await llmExtract.extractMedicalHistory(rawText.trim());
+    await saveMedicalHistory(req.userPhone, { rawText: rawText.trim(), extracted: extracted || {} });
+    const mh = await getMedicalHistory(req.userPhone);
+    res.json({ medicalHistory: mh, extracted: extracted || null });
+  } catch (err) {
+    log.error('POST /me/medical-history failed', err);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
 
 app.get('/history', requireAuth, async (req, res) => {
   try {
     const journals = await getJournalHistory(req.userPhone, 30);
-    const days = (journals || []).map((j) => ({
-      label: j.date,
-      rows: formatJournalRow(j),
-    })).filter((d) => d.rows.length > 0);
+    const days = (journals || []).map((j) => {
+      const startTime = formatTime(j.started_at);
+      const status = j.completed
+        ? (j.completed_at ? `completed at ${formatTime(j.completed_at)}` : 'completed')
+        : 'in progress';
+      const label = startTime ? `${j.date} · started ${startTime} · ${status}` : `${j.date} · ${status}`;
+      return { label, rows: formatJournalRow(j) };
+    }).filter((d) => d.rows.length > 0);
     res.json({ days });
   } catch (err) {
     log.error('GET /history failed', err);

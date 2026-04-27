@@ -156,6 +156,62 @@ Examples:
   return null;
 }
 
+// Medical history (Phase D). Larger payload, longer timeout.
+async function extractMedicalHistory(text) {
+  if (!process.env.OPENAI_API_KEY) return null;
+  const instructions = `You convert a free-text obstetric/medical narrative from a pregnant or postpartum mother into a structured profile.
+
+Return STRICT JSON with this exact shape (omit fields the user didn't mention; never invent):
+{
+  "gravida": <int|null>,
+  "parity": <int|null>,
+  "miscarriages": <int|null>,
+  "previous_deliveries": [
+    {"mode": "vaginal"|"cesarean"|"assisted"|null, "complications": "<short string|null>", "year": <int|null>}
+  ],
+  "chronic_conditions": ["hypertension", "type 2 diabetes", ...],
+  "past_complications": ["pre-eclampsia", "gestational diabetes", "preterm labor", ...],
+  "medications": ["folic acid", "labetalol", ...],
+  "allergies": ["penicillin", ...],
+  "lifestyle": {"smoking": <bool|null>, "alcohol": <bool|null>}
+}
+
+Examples:
+- "I'm 28, this is my second pregnancy, I had a C-section last time because of pre-eclampsia. I take folic acid daily and have hypertension on labetalol. I'm allergic to penicillin." →
+{"gravida":2,"parity":1,"miscarriages":null,"previous_deliveries":[{"mode":"cesarean","complications":"pre-eclampsia","year":null}],"chronic_conditions":["hypertension"],"past_complications":["pre-eclampsia"],"medications":["folic acid","labetalol"],"allergies":["penicillin"],"lifestyle":{"smoking":null,"alcohol":null}}
+
+- "Hii ni mimba yangu ya kwanza. Sina magonjwa, lakini nilikuwa na hedhi nzito." →
+{"gravida":1,"parity":0,"miscarriages":null,"previous_deliveries":[],"chronic_conditions":[],"past_complications":[],"medications":[],"allergies":[],"lifestyle":{"smoking":null,"alcohol":null}}`;
+
+  try {
+    const completion = await withTimeout(
+      client().chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: instructions },
+          { role: 'user', content: text },
+        ],
+        max_tokens: 500,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+      }),
+      8000  // longer budget for the bigger payload
+    );
+    const raw = completion.choices?.[0]?.message?.content;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Soft normalization: strip empty arrays / nulls so callers get a tidy object.
+    for (const key of Object.keys(parsed)) {
+      if (Array.isArray(parsed[key]) && parsed[key].length === 0) delete parsed[key];
+      if (parsed[key] === null) delete parsed[key];
+    }
+    return parsed;
+  } catch (err) {
+    log.warn('Medical history extraction failed', { error: err.message });
+    return null;
+  }
+}
+
 module.exports = {
   extract,
   extractMood,
@@ -163,4 +219,5 @@ module.exports = {
   extractWater,
   extractAppetite,
   extractMovement,
+  extractMedicalHistory,
 };

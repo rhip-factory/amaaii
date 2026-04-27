@@ -233,11 +233,51 @@ document.body.addEventListener('click', (e) => {
 });
 
 // ---- HOME ----------------------------------------------------------------
+function showHomeSkeletons() {
+  const ids = ['homeGreeting', 'homeSubgreeting', 'weekHeadline', 'weekDescription',
+               'journalState', 'journalBody', 'tipHeadline', 'tipBody'];
+  ids.forEach((id) => $(id)?.classList.add('skeleton'));
+}
+function hideHomeSkeletons() {
+  document.querySelectorAll('.skeleton').forEach((el) => el.classList.remove('skeleton'));
+}
+
+function renderInsights(trend) {
+  const card = $('cardInsights');
+  if (!card) return;
+  if (!trend || trend.totalEntries === 0) { card.hidden = true; return; }
+  const list = $('insightsList');
+  while (list.firstChild) list.removeChild(list.firstChild);
+  const rows = [];
+  rows.push({ label: 'Days journaled', value: `${trend.distinctDaysJournaled} of ${trend.windowDays}` });
+  if (trend.avgMood != null) rows.push({ label: 'Avg mood', value: `${trend.avgMood}/10` });
+  if (trend.avgSleepHours != null) rows.push({ label: 'Avg sleep', value: `${trend.avgSleepHours}h` });
+  if (trend.avgWaterGlasses != null) rows.push({ label: 'Avg water', value: `${trend.avgWaterGlasses} glasses` });
+  if (trend.recurringSymptoms && trend.recurringSymptoms.length > 0) {
+    rows.push({
+      label: 'Recurring',
+      value: trend.recurringSymptoms.slice(0, 3).map((s) => `${s.symptom} (${s.days}d)`).join(', '),
+    });
+  }
+  if (trend.redFlagDays > 0) rows.push({ label: '⚠️ Flagged days', value: String(trend.redFlagDays) });
+
+  rows.forEach((r) => {
+    const li = document.createElement('li');
+    const lab = document.createElement('span'); lab.className = 'label'; lab.textContent = r.label;
+    const val = document.createElement('span'); val.className = 'value'; val.textContent = ' ' + r.value;
+    li.append(lab, val);
+    list.appendChild(li);
+  });
+  card.hidden = false;
+}
+
 async function loadHome() {
+  showHomeSkeletons();
   try {
     const res = await api('/me');
     if (!res.ok) return;
     const me = await res.json();
+    hideHomeSkeletons();
     homeLoaded = true;
 
     const name = (me.user && me.user.name) || 'friend';
@@ -253,17 +293,24 @@ async function loadHome() {
     }
 
     const j = me.todayJournal;
+    const count = me.todayCheckinCount || 0;
+    const cta = $('journalCta');
     if (j && j.completed) {
-      $('journalState').textContent = '✓ Done for today';
-      $('journalBody').textContent = `Mood ${j.emotional_state || '—'}/10. Tap History to see the full entry.`;
-      const cta = $('journalCta');
-      cta.textContent = 'View today →';
-      cta.setAttribute('href', '#/history');
-      cta.removeAttribute('data-msg');
+      const checkinWord = count === 1 ? 'check-in' : 'check-ins';
+      $('journalState').textContent = `✓ ${count} ${checkinWord} today`;
+      $('journalBody').textContent = `Latest mood ${j.emotional_state || '—'}/10. You can do another check-in anytime.`;
+      cta.textContent = 'New check-in →';
+      cta.setAttribute('href', '#/chat');
+      cta.setAttribute('data-msg', 'journal');
+    } else if (j && !j.completed) {
+      $('journalState').textContent = 'In progress';
+      $('journalBody').textContent = `Pick up where you left off.`;
+      cta.textContent = 'Continue →';
+      cta.setAttribute('href', '#/chat');
+      cta.setAttribute('data-msg', 'journal');
     } else {
       $('journalState').textContent = 'Not started';
       $('journalBody').textContent = `A 2-minute check-in helps me notice patterns over time.`;
-      const cta = $('journalCta');
       cta.textContent = 'Start journal →';
       cta.setAttribute('href', '#/chat');
       cta.setAttribute('data-msg', 'journal');
@@ -273,6 +320,7 @@ async function loadHome() {
       $('tipHeadline').textContent = me.tip.headline;
       $('tipBody').textContent = me.tip.body;
     }
+    renderInsights(me.trend);
   } catch (e) { /* surfaces 401 → login */ }
 }
 
@@ -298,6 +346,7 @@ async function loadProfile() {
     $('profLocation').value = me.user?.location || '';
     $('profilePhone').textContent = (me.user?.phone || '').replace(/^whatsapp:/, '') || '—';
     paintSegmented(me.user?.language || 'en');
+    await loadMedicalHistory();
   } catch (_) {}
 }
 
@@ -309,6 +358,133 @@ document.body.addEventListener('click', (e) => {
   if (!opt) return;
   paintSegmented(opt.dataset.lang);
 });
+
+// ---- Medical history (Phase D) -------------------------------------------
+function renderMHChips(mh) {
+  const wrap = $('mhChips');
+  if (!wrap) return;
+  while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
+  if (!mh) { wrap.hidden = true; return; }
+
+  function chip(label, value) {
+    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return;
+    const c = document.createElement('span');
+    c.className = 'chip';
+    const s = document.createElement('strong'); s.textContent = label;
+    c.appendChild(s);
+    c.appendChild(document.createTextNode(Array.isArray(value) ? value.join(', ') : String(value)));
+    wrap.appendChild(c);
+  }
+  chip('Gravida', mh.gravida);
+  chip('Parity', mh.parity);
+  chip('Miscarriages', mh.miscarriages);
+  chip('Conditions', mh.chronic_conditions);
+  chip('Past complications', mh.past_complications);
+  chip('Medications', mh.medications);
+  chip('Allergies', mh.allergies);
+  if (Array.isArray(mh.previous_deliveries) && mh.previous_deliveries.length) {
+    const pd = mh.previous_deliveries.map((d) => {
+      const bits = [d.mode || '?'];
+      if (d.complications) bits.push(d.complications);
+      if (d.year) bits.push(d.year);
+      return bits.join(' / ');
+    }).join('; ');
+    chip('Previous deliveries', pd);
+  }
+  wrap.hidden = !wrap.firstChild;
+}
+
+async function loadMedicalHistory() {
+  try {
+    const res = await api('/me/medical-history');
+    if (!res.ok) return;
+    const data = await res.json();
+    const mh = data.medicalHistory;
+    if (mh) {
+      $('mhText').value = mh.rawText || '';
+      renderMHChips(mh);
+      if (mh.updatedAt) {
+        const u = $('mhUpdated');
+        u.textContent = `Last updated ${new Date(mh.updatedAt).toLocaleString()}`;
+        u.hidden = false;
+      }
+    }
+  } catch (_) {}
+}
+
+$('mhSave')?.addEventListener('click', async () => {
+  const $btn = $('mhSave');
+  const $status = $('mhStatus');
+  const text = $('mhText').value.trim();
+  if (text.length < 5) {
+    $status.textContent = 'Please add a few more details first.';
+    $status.style.color = '#C53030';
+    $status.hidden = false;
+    return;
+  }
+  $status.hidden = true;
+  $btn.disabled = true;
+  $btn.textContent = 'Extracting…';
+  try {
+    const res = await api('/me/medical-history', { method: 'POST', body: JSON.stringify({ rawText: text }) });
+    const data = await res.json();
+    if (!res.ok) {
+      $status.textContent = data.error || 'Could not save.';
+      $status.style.color = '#C53030';
+      $status.hidden = false;
+      return;
+    }
+    renderMHChips(data.medicalHistory);
+    $status.textContent = 'Saved ✓';
+    $status.style.color = '';
+    $status.hidden = false;
+    if (data.medicalHistory?.updatedAt) {
+      const u = $('mhUpdated');
+      u.textContent = `Last updated ${new Date(data.medicalHistory.updatedAt).toLocaleString()}`;
+      u.hidden = false;
+    }
+  } finally {
+    $btn.disabled = false;
+    $btn.textContent = 'Save & extract';
+  }
+});
+
+// ---- Install prompt (PWA) ------------------------------------------------
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstall = e;
+  // Only show after user has signed in and visited at least twice.
+  const visits = (parseInt(localStorage.getItem('amaaii.visits') || '0', 10) + 1);
+  localStorage.setItem('amaaii.visits', String(visits));
+  if (getToken() && visits >= 2 && !localStorage.getItem('amaaii.installDismissed')) {
+    showInstallBanner();
+  }
+});
+
+function showInstallBanner() {
+  if (document.getElementById('installBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'installBanner';
+  banner.className = 'install-banner';
+  const text = document.createElement('span'); text.textContent = 'Add Amaaii to your home screen';
+  const install = document.createElement('button'); install.textContent = 'Install';
+  const dismiss = document.createElement('button'); dismiss.textContent = '✕'; dismiss.className = 'dismiss';
+  install.onclick = async () => {
+    if (deferredInstall) {
+      deferredInstall.prompt();
+      await deferredInstall.userChoice;
+      deferredInstall = null;
+    }
+    banner.remove();
+  };
+  dismiss.onclick = () => {
+    localStorage.setItem('amaaii.installDismissed', '1');
+    banner.remove();
+  };
+  banner.append(text, install, dismiss);
+  document.body.appendChild(banner);
+}
 
 $('profileForm').addEventListener('submit', async (e) => {
   e.preventDefault();

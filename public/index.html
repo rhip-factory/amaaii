@@ -128,6 +128,13 @@
               <a href="#/chat" class="card-cta">Open chat →</a>
             </article>
 
+            <article class="card card-insights" id="cardInsights" hidden>
+              <div class="card-eyebrow">Your last 7 days</div>
+              <h2 id="insightsHeadline">Insights</h2>
+              <ul class="insights-list" id="insightsList"></ul>
+              <a href="#/history" class="card-cta">See full history →</a>
+            </article>
+
             <article class="card card-safety">
               <div class="card-eyebrow">If something feels off</div>
               <h2>I'll always flag urgent signs</h2>
@@ -240,6 +247,26 @@
               Your phone is your account. Conversations on WhatsApp and the web stay
               in sync because they share this number.
             </p>
+          </div>
+
+          <div class="form-card">
+            <h3>Medical history</h3>
+            <p class="subhead small">
+              Tell me about previous pregnancies, conditions, allergies, medications —
+              in your own words. I'll structure it into clean fields so your nurse can read it at a glance.
+            </p>
+            <textarea
+              id="mhText"
+              class="mh-text"
+              rows="5"
+              placeholder="e.g. I'm 28, this is my second pregnancy. I had a C-section last time because of pre-eclampsia. I take folic acid and have hypertension on labetalol. I'm allergic to penicillin."
+            ></textarea>
+            <div class="profile-actions">
+              <button id="mhSave" type="button" class="primary-btn">Save & extract</button>
+              <span id="mhStatus" class="profile-status" hidden></span>
+            </div>
+            <div id="mhChips" class="mh-chips" hidden></div>
+            <p class="fineprint" id="mhUpdated" hidden></p>
           </div>
         </div>
       </section>
