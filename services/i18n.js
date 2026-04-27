@@ -76,10 +76,12 @@ const STRINGS = {
     // Reminder + reminder-marker (kept identical so detection works)
     journal_reminder: "💡 Don't forget to do your daily journal! Type 'journal' to start.",
 
-    // Danger sign canned escalations
-    danger_critical: "⚠️ URGENT: What you're describing could be very serious and needs IMMEDIATE medical attention.\n\nPlease do one of these RIGHT NOW:\n1. Go to the nearest hospital/health center\n2. Call an ambulance if available\n3. Ask someone to take you\n\nThis cannot wait. Please go now and let me know once you're there. 💚",
-    danger_high: "⚠️ Important: This symptom needs to be checked by a healthcare provider TODAY.\n\nPlease visit your nearest clinic or hospital within the next few hours. Would you like help finding the closest facility?",
-    danger_moderate: "This is something to discuss with your healthcare provider soon. Can you schedule a visit this week?\n\nIn the meantime, rest and monitor how you feel. Let me know if symptoms worsen. 💚",
+    // Danger sign canned escalations. Direct, command-tone, with concrete
+    // numbers — no hedging language ("could be"), because a hedged
+    // emergency message reduces compliance.
+    danger_critical: "🚨 URGENT — this is a medical emergency. Your safety and your baby's come first.\n\nGO TO HOSPITAL NOW:\n1. The nearest hospital or health centre — leave immediately\n2. Call 999 for an ambulance, or ask anyone to take you\n3. Don't wait, don't drive yourself if you can avoid it\n\nIf this is an emotional crisis, call Befrienders Kenya 0722 178 177.\n\nPlease go now. Tell me when you're safe. 💚",
+    danger_high: "⚠️ Important: this symptom needs to be checked by a healthcare provider TODAY.\n\nVisit your nearest clinic or hospital within the next few hours. Don't wait until tomorrow. If it worsens before you can get there, call 999.",
+    danger_moderate: "This is worth discussing with your healthcare provider soon. Try to schedule a visit this week.\n\nIn the meantime, rest and monitor how you feel. Tell me right away if symptoms worsen. 💚",
 
     // Recommendations
     rec_mood_low: "Consider talking to someone about how you're feeling",
@@ -156,10 +158,10 @@ const STRINGS = {
 
     journal_reminder: "💡 Usisahau kufanya jarida lako la kila siku! Andika 'journal' kuanza.",
 
-    // Danger sign canned escalations
-    danger_critical: "⚠️ HARAKA: Unayoyaelezea yanaweza kuwa makubwa sana na yanahitaji matibabu MARA MOJA.\n\nTafadhali fanya mojawapo ya haya SASA HIVI:\n1. Nenda hospitali/kituo cha afya cha karibu\n2. Piga simu kwa gari la wagonjwa ikiwa inapatikana\n3. Mwombe mtu akupeleke\n\nHili haliwezi kungoja. Tafadhali nenda sasa na uniarifu ukifika. 💚",
-    danger_high: "⚠️ Muhimu: Dalili hii inahitaji kuangaliwa na mtoa huduma wa afya LEO.\n\nTafadhali tembelea kliniki au hospitali ya karibu ndani ya masaa machache. Ungependa msaada kupata kituo cha karibu?",
-    danger_moderate: "Hili ni jambo la kuzungumza na mtoa huduma wako wa afya hivi karibuni. Unaweza kupanga ziara wiki hii?\n\nWakati huo, pumzika na ufuatilie unavyojisikia. Niarifu ikiwa dalili zinaongezeka. 💚",
+    // Danger sign canned escalations — Kiswahili, command tone, no hedging.
+    danger_critical: "🚨 HARAKA SANA — Hii ni dharura. Usalama wako na wa mtoto ni wa kwanza.\n\nNENDA HOSPITALI SASA HIVI:\n1. Kituo cha afya cha karibu zaidi — ondoka mara moja\n2. Piga 999 kwa gari la wagonjwa, au mwombe yeyote akupeleke\n3. Usisubiri. Usijiendeshe gari mwenyewe iwezekanavyo\n\nKama ni shida ya kiakili au unahisi kujidhuru, piga Befrienders Kenya 0722 178 177.\n\nNenda sasa hivi. Niarifu ukifika salama. 💚",
+    danger_high: "⚠️ Muhimu: dalili hii inahitaji kuangaliwa na mtoa huduma wa afya LEO.\n\nTembelea kliniki au hospitali ya karibu ndani ya masaa machache. Usisubiri hadi kesho. Ikiwa hali itazidi kabla hujafika, piga 999.",
+    danger_moderate: "Hii inafaa kuzungumza na mtoa huduma wako wa afya hivi karibuni. Jaribu kupanga ziara wiki hii.\n\nWakati huo, pumzika na ufuatilie unavyojisikia. Niambie mara moja ikiwa dalili zinaongezeka. 💚",
 
     // Recommendations
     rec_mood_low: "Fikiria kuzungumza na mtu kuhusu unavyojisikia",
