@@ -337,7 +337,7 @@ class JournalManager {
         // (set in startJournalSession) for full duration analytics.
         journalUpdate.completed_at = new Date().toISOString();
         nextStage = 'completed';
-        const summary = await this.generateJournalSummary(journalData, journalUpdate, lang);
+        const summary = await this.generateJournalSummary(journalData, journalUpdate, lang, pregnancyWeek);
         response = noteHeadsUp + summary;
         break;
       }
@@ -370,7 +370,7 @@ class JournalManager {
     return { response, nextStage, completed: nextStage === 'completed' };
   }
 
-  async generateJournalSummary(existingData, newData, lang = 'en') {
+  async generateJournalSummary(existingData, newData, lang = 'en', pregnancyWeek = 0) {
     const data = { ...existingData, ...newData };
     let summary = t(lang, 'journal_summary_title');
 
@@ -392,7 +392,11 @@ class JournalManager {
     }
 
     if (data.baby_movement_count !== undefined && data.baby_movement_count !== null) {
-      const movementStatus = data.baby_movement_count >= 10 ? '✅' : '⚠️';
+      // Only flag low movement counts as concerning when clinically
+      // relevant (after 28 weeks). Below 28w, regular movement isn't
+      // expected at high counts and a ⚠️ here is a false alarm.
+      const concerning = pregnancyWeek > 28 && data.baby_movement_count < 10;
+      const movementStatus = data.baby_movement_count >= 10 ? '✅' : (concerning ? '⚠️' : '👶');
       summary += `${t(lang, 'journal_summary_movement')} ${data.baby_movement_count} ${t(lang, 'journal_summary_movement_unit')} ${movementStatus}\n`;
     }
 
@@ -557,7 +561,12 @@ class JournalManager {
   }
 
   isJournalCommand(message) {
-    const commands = ['journal', 'daily check-in', 'check in', 'daily journal', 'start journal'];
+    const commands = [
+      // EN
+      'journal', 'daily check-in', 'check in', 'daily journal', 'start journal',
+      // SW
+      'jarida', 'anza jarida', 'jarida langu', 'ukaguzi wa kila siku',
+    ];
     return commands.some((cmd) => message.toLowerCase().includes(cmd));
   }
 

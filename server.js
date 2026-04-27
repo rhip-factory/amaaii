@@ -279,12 +279,37 @@ app.get('/me/medical-history', requireAuth, async (req, res) => {
 
 app.post('/me/medical-history', requireAuth, async (req, res) => {
   try {
-    const { rawText } = req.body || {};
-    if (typeof rawText !== 'string' || rawText.trim().length < 5) {
-      return res.status(400).json({ error: 'rawText is required (min 5 chars).' });
+    const { rawText, overwrite } = req.body || {};
+    if (typeof rawText !== 'string') {
+      return res.status(400).json({ error: 'rawText is required.' });
     }
-    const extracted = await llmExtract.extractMedicalHistory(rawText.trim());
-    await saveMedicalHistory(req.userPhone, { rawText: rawText.trim(), extracted: extracted || {} });
+    const trimmed = rawText.trim();
+    // Min length (20 chars) and word count (≥4) blocks gibberish like "12345"
+    // from silently wiping a real record.
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+    if (trimmed.length < 20 || wordCount < 4) {
+      return res.status(400).json({
+        error: 'rawText too short — please add a few more details.',
+      });
+    }
+    const extracted = await llmExtract.extractMedicalHistory(trimmed);
+    const isUseful = extracted && Object.keys(extracted).filter((k) => {
+      const v = extracted[k];
+      if (Array.isArray(v)) return v.length > 0;
+      if (v && typeof v === 'object') return Object.values(v).some((x) => x != null);
+      return v != null;
+    }).length > 0;
+    // If the LLM extracted nothing AND a richer record already exists,
+    // refuse the overwrite unless the caller explicitly opts in.
+    const existing = await getMedicalHistory(req.userPhone);
+    if (!isUseful && existing && existing.rawText && !overwrite) {
+      return res.status(409).json({
+        error: 'no_extractable_data',
+        message: "I couldn't extract any structured info from that. Pass overwrite=true to replace your saved history anyway.",
+        currentRecord: existing,
+      });
+    }
+    await saveMedicalHistory(req.userPhone, { rawText: trimmed, extracted: extracted || {} });
     const mh = await getMedicalHistory(req.userPhone);
     res.json({ medicalHistory: mh, extracted: extracted || null });
   } catch (err) {

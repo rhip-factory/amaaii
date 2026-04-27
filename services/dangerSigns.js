@@ -29,8 +29,10 @@ const DANGER_SIGNS = {
       { pattern: /\bsevere\s+bleeding\b|\bheavy\s+bleeding\b|\bbleeding\s+(?:heavily|severely|a\s+lot|profusely)\b|\bblood\s+clots\b|\bgushing\s+blood\b|\bsoaking\s+(?:a\s+)?pad\b|\b(?:nina|na|me|ina)?(?:tokwa|vuja)\s+(?:na\s+)?damu\b|\bkutokwa\s+na\s+damu\b|\bkuvuja\s+damu\b|\bdamu\s+(?:nyingi|sana)\b/i, sign: 'Severe vaginal bleeding' },
 
       // Severe headache + vision changes, or visual disturbance alone.
-      // SW: "kuona dots/madoa", "macho yanaona vibaya", "kichwa kinaniuma sana na kuona vibaya".
-      { pattern: /\bsevere\s+headache\b[^.]{0,40}\b(?:vision|seeing\s+spots|blurred)\b|\bvision\b[^.]{0,40}\bsevere\s+headache\b|\bseeing\s+spots\b|\bblurred\s+vision\b|\bkuona\s+(?:madoa|dots)\b|\bmacho\s+yanaona\s+vibaya\b/i, sign: 'Severe headache with vision changes' },
+      // SW: kuona/ninaona/anaona/unaona madoa (any tense/person of "see");
+      // macho yanaona vibaya. The \w*ona prefix catches any conjugation
+      // since "ona" is the SW root for "see".
+      { pattern: /\bsevere\s+headache\b[^.]{0,40}\b(?:vision|seeing\s+spots|blurred)\b|\bvision\b[^.]{0,40}\bsevere\s+headache\b|\bseeing\s+spots\b|\bblurred\s+vision\b|\b\w*ona\s+(?:madoa|dots)\b|\bmacho\s+\w+ona\s+vibaya\b/i, sign: 'Severe headache with vision changes' },
 
       // SW: "mshtuko" (seizure/shock), "kifafa" (epilepsy/fits).
       { pattern: /\bconvulsions?\b|\bseizures?\b|\bjerking\b|\bmshtuko\b|\bkifafa\b/i, sign: 'Convulsions or seizures' },
@@ -41,8 +43,10 @@ const DANGER_SIGNS = {
       // SW: "maumivu makali ya kifua" (severe chest pain).
       { pattern: /\bsevere\s+chest\s+pain\b|\bcrushing\s+chest\b|\bheart\s+attack\b|\bmaumivu\s+(?:makali\s+)?ya\s+kifua\b/i, sign: 'Severe chest pain' },
 
-      // Rupture of membranes. SW: "maji yamevunjika" / "maji yamepasuka".
-      { pattern: /\bwater\s+broke\b|\bwater\s+breaking\b|\bamniotic\s+fluid\b|\bfluid\s+gushing\b|\bgushing\s+fluid\b|\bfluid\s+down\s+(?:my\s+)?legs\b|\bmaji\s+yame(?:vunjika|pasuka)\b/i, sign: 'Rupture of membranes' },
+      // Rupture of membranes. EN: "water broke", "water has broken",
+      // "water just broke", "waters have broken" (UK English common in
+      // Kenya), "my waters broke". SW: "maji yamevunjika" / "yamepasuka".
+      { pattern: /\bwaters?\s+(?:has\s+|have\s+|just\s+|already\s+)?(?:been\s+)?broke(?:n)?\b|\bwater\s+breaking\b|\bamniotic\s+fluid\b|\bfluid\s+gushing\b|\bgushing\s+fluid\b|\bfluid\s+down\s+(?:my\s+)?legs\b|\bmaji\s+yame(?:vunjika|pasuka)\b/i, sign: 'Rupture of membranes' },
 
       // Self-harm. SW: "nataka kufa" (I want to die), "kujiua" (suicide), "kujidhuru" (self-harm).
       { pattern: /\bsuicide\b|\bkill\s+myself\b|\bwant\s+to\s+die\b|\bend\s+it\s+all\b|\bharm\s+myself\b|\bkujiua\b|\bnataka\s+kufa\b|\bkujidhuru\b/i, sign: 'Suicidal ideation' },
@@ -73,12 +77,16 @@ This cannot wait. Please go now and let me know once you're there. 💚`,
       { pattern: /\bsevere\s+pain\b|\bterrible\s+pain\b|\bunbearable\s+pain\b|\bmaumivu\s+makali\b/i, sign: 'Severe pain' },
       // Persistent vomiting. SW: "kutapika sana", "kutapika mfululizo", "ninatapika".
       { pattern: /\bpersistent\s+vomiting\b|\bcan'?t\s+keep\b[^.]{0,20}\bdown\b|\bthrowing\s+up\s+constantly\b|\bkutapika\s+(?:sana|mfululizo|mara\s+nyingi)\b|\b(?:nina|me|na)tapika\s+(?:sana|mfululizo)\b/i, sign: 'Persistent vomiting' },
-      // Face swelling. SW: "uso umevimba", "uvimbe wa uso".
-      { pattern: /\b(?:swelling|swollen|puffy)\b[^.]{0,15}\bface\b|\bface\b[^.]{0,15}\b(?:swelling|swollen|puffy)\b|\buso\s+ume(?:vimba|vimbiwa)\b|\buvimbe\s+(?:wa\s+)?uso\b/i, sign: 'Facial swelling' },
-      // Hand swelling. SW: "mikono imevimba".
-      { pattern: /\b(?:swelling|swollen|puffy)\b[^.]{0,15}\bhands?\b|\bhands?\b[^.]{0,20}\b(?:swelling|swollen|puffy)\b|\bmikono\s+ime(?:vimba|vimbiwa)\b|\buvimbe\s+(?:wa\s+)?mikono\b/i, sign: 'Hand swelling' },
-      // Reduced fetal movement. SW: "mtoto hatembei", "sijahisi mtoto", "mtoto hajatembea".
-      { pattern: /\bbaby\s+not\s+moving\b|\bno\s+(?:fetal\s+)?movement\b|\bhaven'?t\s+felt\b[^.]{0,30}\bbaby\b|\bdecreased\s+movement\b|\bbaby\s+(?:moved|moving)\s+less\b|\bless\s+(?:fetal\s+)?movement\b|\bmtoto\s+ha(?:tembei|jatembea)\b|\bsijahisi\s+mtoto\b|\bmtoto\s+hatembei\s+sana\b/i, sign: 'Reduced fetal movement' },
+      // Face swelling. SW grammar inserts possessive pronouns
+      // (uso wangu / uso wake umevimba). The `\w+\s+` slot allows the
+      // possessive without losing the noun-verb pairing.
+      { pattern: /\b(?:swelling|swollen|puffy)\b[^.]{0,15}\bface\b|\bface\b[^.]{0,15}\b(?:swelling|swollen|puffy)\b|\buso\s+(?:\w+\s+)?ume(?:vimba|vimbiwa)\b|\buvimbe\s+(?:wa\s+)?uso\b/i, sign: 'Facial swelling' },
+      // Hand swelling. SW: "mikono imevimba" / "mikono yangu imevimba".
+      { pattern: /\b(?:swelling|swollen|puffy)\b[^.]{0,15}\bhands?\b|\bhands?\b[^.]{0,20}\b(?:swelling|swollen|puffy)\b|\bmikono\s+(?:\w+\s+)?ime(?:vimba|vimbiwa)\b|\buvimbe\s+(?:wa\s+)?mikono\b/i, sign: 'Hand swelling' },
+      // Reduced fetal movement. EN forms naturally include "has/have/
+      // hasn't/haven't been" between "baby" and "moving". SW: "mtoto
+      // hatembei", "sijahisi mtoto", "mtoto hajatembea".
+      { pattern: /\bbaby\s+(?:has|have|hasn'?t|haven'?t|is|isn'?t)?(?:\s+been)?\s+not\s+(?:been\s+)?moving\b|\bbaby\s+(?:hasn'?t|haven'?t|isn'?t)\s+(?:been\s+)?moving\b|\bbaby\s+not\s+moving\b|\bno\s+(?:fetal\s+)?movement\b|\bhaven'?t\s+felt\b[^.]{0,30}\bbaby\b|\b(?:haven'?t|hasn'?t|isn'?t|not)\s+(?:been\s+)?(?:feeling|felt|feel)\s+(?:the\s+)?baby\s+(?:move|moving)\b|\bdecreased\s+movement\b|\bbaby\s+(?:moved|moving)\s+less\b|\bless\s+(?:fetal\s+)?movement\b|\bmtoto\s+ha(?:tembei|jatembea)\b|\bsijahisi\s+mtoto\b|\bmtoto\s+hatembei\s+sana\b/i, sign: 'Reduced fetal movement' },
       { pattern: /\bsudden\s+weight\s+gain\b|\bgained\b[^.]{0,15}\b(?:pounds|kg|kilos)\b[^.]{0,15}\bweek\b/i, sign: 'Sudden weight gain' },
     ],
     response: `⚠️ Important: This symptom needs to be checked by a healthcare provider TODAY.
@@ -94,8 +102,8 @@ Please visit your nearest clinic or hospital within the next few hours. Would yo
       { pattern: /\bcramping\b|\bcramps\b|\bperiod-?like\s+pain\b|\bminyong'?onyo\b|\btumbo\s+kuuma\b/i, sign: 'Cramping' },
       // Back pain. SW: "maumivu ya mgongo", "mgongo unauma".
       { pattern: /\bback\s+pain\b|\bbackache\b|\blower\s+back\b|\bmaumivu\s+ya\s+mgongo\b|\bmgongo\s+(?:una|wa)?uma\b/i, sign: 'Back pain' },
-      // Foot/ankle swelling. SW: "miguu imevimba", "uvimbe wa miguu".
-      { pattern: /\b(?:swelling|swollen|puffy)\b[^.]{0,15}\b(?:feet|ankles?)\b|\b(?:feet|ankles?)\b[^.]{0,15}\b(?:swelling|swollen|puffy)\b|\bmiguu\s+ime(?:vimba|vimbiwa)\b|\buvimbe\s+(?:wa\s+)?miguu\b/i, sign: 'Foot/ankle swelling' },
+      // Foot/ankle swelling. SW with optional possessive pronoun.
+      { pattern: /\b(?:swelling|swollen|puffy)\b[^.]{0,15}\b(?:feet|ankles?)\b|\b(?:feet|ankles?)\b[^.]{0,15}\b(?:swelling|swollen|puffy)\b|\bmiguu\s+(?:\w+\s+)?(?:ime|zime)(?:vimba|vimbiwa)\b|\buvimbe\s+(?:wa\s+)?miguu\b/i, sign: 'Foot/ankle swelling' },
       { pattern: /\b(?:vaginal|unusual|thick|foul|smelly)\s+discharge\b|\bdischarge\b|\buchafuzi\b/i, sign: 'Vaginal discharge' },
       { pattern: /\b(?:gushing|losing|watery)\s+(?:fluid|fluids|leak\w*)\b|\b(?:fluid|fluids|leak\w*)\s+(?:from\s+(?:my\s+)?vagina|down\s+(?:my\s+)?legs)\b|\bleaking\s+(?:from\s+(?:my\s+)?vagina|down\s+(?:my\s+)?legs)\b|\bmaji\s+yana(?:tiririka|toka)\b/i, sign: 'Vaginal discharge / fluid' },
       // Dizziness. SW: "kizunguzungu" (dizziness/vertigo).
