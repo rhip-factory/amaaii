@@ -1,6 +1,37 @@
 const db = require('./database');
 const { detectDangerSigns, assessMood, extractSymptoms } = require('./dangerSigns');
 
+// Free-text journal stages (questions, notes) re-run symptom + danger
+// detection so anything disclosed there isn't silently logged. Mutates
+// `journalUpdate` (merges new symptoms, sets red_flags_detected) and
+// returns a heads-up string to prepend to the bot's reply, or '' if
+// nothing was found.
+function scanFreeText(message, journalData, journalUpdate) {
+  const sx = extractSymptoms(message);
+  const danger = detectDangerSigns(message);
+
+  if (sx.length > 0) {
+    const existing = (journalUpdate.physical_symptoms != null)
+      ? journalUpdate.physical_symptoms
+      : (journalData && journalData.physical_symptoms);
+    let arr = [];
+    if (typeof existing === 'string' && existing.trim().startsWith('[')) {
+      try { const parsed = JSON.parse(existing); if (Array.isArray(parsed)) arr = parsed; } catch (_) {}
+    }
+    journalUpdate.physical_symptoms = JSON.stringify(Array.from(new Set([...arr, ...sx])));
+  }
+
+  if (danger.urgencyLevel === 'critical' || danger.urgencyLevel === 'high') {
+    journalUpdate.red_flags_detected = JSON.stringify(danger.detectedSigns);
+    return `${danger.recommendedAction}\n\n`;
+  }
+  if (sx.length > 0) {
+    const niceList = sx.map((s) => s.replace(/_/g, ' ')).join(', ');
+    return `Thanks for adding that — I noted **${niceList}**. Worth mentioning at your next visit.\n\n`;
+  }
+  return '';
+}
+
 // Render physical_symptoms (which may arrive as a JSON-stringified array
 // of detector tags, the literal "none", or free text) as something a
 // human wants to read in the summary.
@@ -126,11 +157,13 @@ class JournalManager {
         // Quality and hours are independent captures so order doesn't
         // matter and "6 hours, 7/10" is parsed correctly. (D8.)
         // Quality forms accepted: "7/10", "7 out of 10",
-        // "2 for sleep", "sleep was 2", "sleep 2".
+        // "2 for sleep", "sleep was 2", "sleep is a 2", "sleep 2".
+        // The (?:was|is)\s+(?:a|an)? wildcard also catches articles
+        // people throw in mid-sentence.
         const qualityMatch =
           message.match(/(\d+)\s*(?:\/|out of)\s*10/i) ||
           message.match(/\b(\d+)\s+for\s+sleep\b/i) ||
-          message.match(/\bsleep(?:\s+(?:was|is))?\s+(\d+)\b/i);
+          message.match(/\bsleep(?:\s+(?:was|is))?(?:\s+(?:a|an))?\s+(\d+)\b/i);
         const hoursMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:h(?:ours?|rs?)?\b)/i);
 
         if (qualityMatch) {
@@ -207,13 +240,18 @@ class JournalManager {
         break;
       }
 
-      case 'questions':
-        if (!message.toLowerCase().includes('none')) {
+      case 'questions': {
+        const isSkipping = message.toLowerCase().trim() === 'none';
+        let questionsHeadsUp = '';
+        if (!isSkipping) {
           journalUpdate.questions_for_doctor = message;
+          // Free-text → rescan for symptoms / danger signs.
+          questionsHeadsUp = scanFreeText(message, journalData, journalUpdate);
         }
         nextStage = 'notes';
-        response = `Any other notes about your day? How you're feeling overall? (or type 'done' to finish)`;
+        response = `${questionsHeadsUp}Any other notes about your day? How you're feeling overall? (or type 'done' to finish)`;
         break;
+      }
 
       case 'notes': {
         const lowerNotes = message.toLowerCase().trim();
@@ -221,26 +259,7 @@ class JournalManager {
         let noteHeadsUp = '';
         if (!isDoneSentinel) {
           journalUpdate.special_notes = message;
-          // Re-scan the notes for symptoms / danger signs the user
-          // mentioned at the end. If we find anything, surface a
-          // heads-up above the summary so it isn't silently logged.
-          const noteSx = extractSymptoms(message);
-          const noteDanger = detectDangerSigns(message);
-          if (noteSx.length > 0) {
-            const existing = journalData.physical_symptoms;
-            let arr = [];
-            if (typeof existing === 'string' && existing.trim().startsWith('[')) {
-              try { const parsed = JSON.parse(existing); if (Array.isArray(parsed)) arr = parsed; } catch (_) {}
-            }
-            journalUpdate.physical_symptoms = JSON.stringify(Array.from(new Set([...arr, ...noteSx])));
-          }
-          if (noteDanger.urgencyLevel === 'critical' || noteDanger.urgencyLevel === 'high') {
-            journalUpdate.red_flags_detected = JSON.stringify(noteDanger.detectedSigns);
-            noteHeadsUp = `${noteDanger.recommendedAction}\n\n`;
-          } else if (noteSx.length > 0) {
-            const niceList = noteSx.map((s) => s.replace(/_/g, ' ')).join(', ');
-            noteHeadsUp = `Thanks for adding that — I noted **${niceList}**. Worth mentioning at your next visit.\n\n`;
-          }
+          noteHeadsUp = scanFreeText(message, journalData, journalUpdate);
         }
         journalUpdate.completed = 1;
         nextStage = 'completed';

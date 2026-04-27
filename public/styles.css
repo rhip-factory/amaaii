@@ -27,6 +27,10 @@
 
 * { box-sizing: border-box; }
 
+/* Honor the hidden attribute even when an element has an explicit
+ * display rule (otherwise display: grid / flex defeats UA hidden). */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
