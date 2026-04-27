@@ -5,8 +5,22 @@ const userManager = require('./userManager');
 const db = require('../services/database');
 const journalManager = require('../services/journalManager');
 const { log } = require('./logger');
+const { t, pickLang } = require('../services/i18n');
 
-const JOURNAL_REMINDER_MARKER = "💡 Don't forget to do your daily journal! Type 'journal' to start.";
+function dangerCopy(level, lang) {
+  if (level === 'critical') return t(lang, 'danger_critical');
+  if (level === 'high') return t(lang, 'danger_high');
+  if (level === 'moderate') return t(lang, 'danger_moderate');
+  return '';
+}
+
+// We compare against BOTH the EN and SW reminder markers when checking
+// "did we already nudge the user this session?" — language can change
+// between turns.
+const JOURNAL_REMINDER_MARKERS = [
+  t('en', 'journal_reminder'),
+  t('sw', 'journal_reminder'),
+];
 
 // Pure(-ish) message processor: derives the bot's response from the
 // inbound message + DB state, persists the turn, and returns the result.
@@ -18,6 +32,7 @@ async function processMessage(from, message, profileName) {
 
   const user = await userManager.getOrCreateUser(from, profileName);
   const userContext = userManager.getUserContext(user);
+  const lang = pickLang(user.language);
 
   log.info('User context', userContext);
 
@@ -32,12 +47,12 @@ async function processMessage(from, message, profileName) {
   const earlyDanger = detectDangerSigns(message);
   if (earlyDanger.urgencyLevel !== 'critical' && userContext.needsOnboarding) {
     conversationContext = 'onboarding';
-    response = await handleOnboarding(user, message, from);
+    response = await handleOnboarding(user, message, from, lang);
     if (
       earlyDanger.urgencyLevel === 'high' ||
       earlyDanger.urgencyLevel === 'moderate'
     ) {
-      response = `${earlyDanger.recommendedAction}\n\n${response}`;
+      response = `${dangerCopy(earlyDanger.urgencyLevel, lang)}\n\n${response}`;
     }
     const sx = extractSymptoms(message);
     if (sx.length > 0) {
@@ -91,13 +106,13 @@ async function processMessage(from, message, profileName) {
     // un-onboarded users were already routed above; HIGH escalates;
     // everything else goes to the AI.
     if (dangerSignAnalysis.urgencyLevel === 'critical') {
-      response = dangerSignAnalysis.recommendedAction;
+      response = dangerCopy('critical', lang);
       conversationContext = 'danger_sign_detected';
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
     } else if (dangerSignAnalysis.urgencyLevel === 'high') {
-      response = dangerSignAnalysis.recommendedAction;
+      response = dangerCopy('high', lang);
       conversationContext = 'danger_sign_detected';
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
@@ -114,6 +129,7 @@ async function processMessage(from, message, profileName) {
         isNewUser: userContext.isNewUser,
         conversationHistory,
         currentContext: conversationContext,
+        language: lang,
       });
 
       if (symptoms.length > 0) {
@@ -121,14 +137,15 @@ async function processMessage(from, message, profileName) {
       }
 
       // Deterministic journal reminder (D19): append iff user hasn't
-      // journaled today AND no recent bot turn already nudged them.
+      // journaled today AND no recent bot turn already nudged them
+      // (in either language).
       const todaysJournal = await db.getTodaysJournal(from);
       if (!todaysJournal) {
         const remindedRecently = (conversationHistory || []).some(
-          (turn) => turn.response && turn.response.includes(JOURNAL_REMINDER_MARKER)
+          (turn) => turn.response && JOURNAL_REMINDER_MARKERS.some((m) => turn.response.includes(m))
         );
         if (!remindedRecently) {
-          response += `\n\n${JOURNAL_REMINDER_MARKER}`;
+          response += `\n\n${t(lang, 'journal_reminder')}`;
         }
       }
     }
@@ -178,39 +195,38 @@ async function handleIncomingMessage(from, message, profileName) {
   } catch (error) {
     log.error('Error in message handler', error);
     try {
-      await sendWhatsAppMessage(
-        from,
-        "I apologize, but I'm having trouble processing your message. Please try again or type 'help' for assistance. If this is urgent, please contact your healthcare provider immediately."
-      );
+      // We don't have user.language here (the lookup may be what failed),
+      // so default to English. Real localized error UX is Phase 1.
+      await sendWhatsAppMessage(from, t('en', 'error_generic'));
     } catch (sendError) {
       log.error('Failed to send error message', sendError);
     }
   }
 }
 
-// Marker phrase used to detect that the bot's most recent outbound was
-// the name prompt — lets us treat the next inbound as the user's name
-// without introducing a separate state column. (Phase 0 stays stateless;
-// the proper state machine is Phase 1.)
-const NAME_PROMPT_MARKER = "What's your name?";
+// Marker phrases used to detect that the bot's most recent outbound was
+// a name prompt — must check both languages because the user can switch
+// language between turns. (Phase 0 stays stateless; the proper state
+// machine is Phase 1.)
+const NAME_PROMPT_MARKERS = [
+  "What's your name?",  // EN
+  "Jina lako ni nani?", // SW
+];
 
-const NAME_PROMPT = `Hello! 👋 I'm Amaaii, your pregnancy companion. I'm here to support you throughout your pregnancy journey.
-
-${NAME_PROMPT_MARKER} You can call me by any name you're comfortable with.`;
-
-async function handleOnboarding(user, message, phoneNumber) {
+async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   if (!user.name) {
     const lastBot = await db.getLastBotMessage(phoneNumber);
     const previousWasNamePrompt =
-      lastBot && lastBot.response && lastBot.response.includes(NAME_PROMPT_MARKER);
+      lastBot && lastBot.response &&
+      NAME_PROMPT_MARKERS.some((m) => lastBot.response.includes(m));
     if (previousWasNamePrompt) {
       const trimmedName = message.trim();
       if (trimmedName.length > 0) {
         await userManager.updateUserProfile(phoneNumber, { name: trimmedName });
-        return `Thank you ${trimmedName}! 💚 To provide you with the best support, could you tell me your age?`;
+        return t(lang, 'name_thanks', { name: trimmedName });
       }
     }
-    return NAME_PROMPT;
+    return t(lang, 'name_prompt');
   }
 
   if (!user.age) {
@@ -218,59 +234,41 @@ async function handleOnboarding(user, message, phoneNumber) {
     if (ageMatch) {
       const age = parseInt(ageMatch[0]);
       await userManager.updateUserProfile(user.phone_number, { age });
-      return `Thank you! How many weeks pregnant are you? (If you're not sure, you can tell me the date of your last period)`;
+      return t(lang, 'age_thanks');
     }
-    return `Thank you ${user.name}! 💚 To provide you with the best support, could you tell me your age?`;
+    return t(lang, 'age_prompt_again', { name: user.name });
   }
 
   if (!user.pregnancy_week) {
-    const weeksMatch = message.match(/(\d+)\s*weeks?/i);
+    // Accept "20 weeks" (EN) or "wiki 20" / "20 wiki" (SW).
+    const weeksMatch =
+      message.match(/(\d+)\s*weeks?/i) ||
+      message.match(/(\d+)\s*wiki/i) ||
+      message.match(/wiki\s*(\d+)/i);
     const lmpMatch = message.match(/\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/);
 
     if (weeksMatch) {
       const weeks = parseInt(weeksMatch[1]);
       const edd = calculateEDDFromWeeks(weeks);
-      await userManager.updateUserProfile(user.phone_number, {
-        pregnancy_week: weeks,
-        edd,
-      });
-      return `Great! You're ${weeks} weeks along. 🤰
-
-Where are you located? (This helps me suggest nearby health facilities when needed)`;
+      await userManager.updateUserProfile(user.phone_number, { pregnancy_week: weeks, edd });
+      return t(lang, 'week_thanks', { weeks });
     } else if (lmpMatch) {
       const lmp = lmpMatch[0];
       const weeks = userManager.calculatePregnancyWeek(lmp);
       const edd = userManager.calculateEDD(lmp);
-      await userManager.updateUserProfile(user.phone_number, {
-        pregnancy_week: weeks,
-        edd,
-        lmp,
-      });
-      return `Based on your last period, you're about ${weeks} weeks pregnant. Your expected delivery date is around ${edd}.
-
-Where are you located? (This helps me suggest nearby health facilities when needed)`;
+      await userManager.updateUserProfile(user.phone_number, { pregnancy_week: weeks, edd, lmp });
+      return t(lang, 'week_lmp_thanks', { weeks, edd });
     }
-
-    return `How many weeks pregnant are you? You can also tell me the date of your last menstrual period (LMP) if you remember it.`;
+    return t(lang, 'week_prompt_again');
   }
 
   if (!user.location) {
     await userManager.updateUserProfile(user.phone_number, { location: message });
-
     const summary = userManager.formatUserSummary(user);
-    return `Perfect! I now have your basic information:
-${summary}
-
-You can:
-• Share how you're feeling today
-• Ask me any pregnancy questions
-• Tell me about any symptoms you're experiencing
-• Type "help" to see what I can do
-
-How are you feeling today? 💚`;
+    return t(lang, 'location_done', { summary });
   }
 
-  return `Welcome back ${user.name}! How can I help you today?`;
+  return t(lang, 'welcome_back', { name: user.name });
 }
 
 function calculateEDDFromWeeks(currentWeeks) {

@@ -20,11 +20,25 @@ function initializeDatabase() {
           risk_level TEXT DEFAULT 'low',
           lmp DATE,
           anc_visits INTEGER DEFAULT 0,
+          language TEXT DEFAULT 'en',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `, (err) => {
         if (err) log.error("Error creating users table", err);
+      });
+
+      // Idempotent migration: add language column on existing DBs.
+      // PRAGMA-based check avoids the "duplicate column" error from a
+      // bare ALTER TABLE on a fresh schema.
+      db.all(`PRAGMA table_info(users)`, (err, rows) => {
+        if (err) return;
+        const hasLanguage = (rows || []).some((r) => r.name === 'language');
+        if (!hasLanguage) {
+          db.run(`ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'`, (e) => {
+            if (e) log.error("Error adding users.language column", e);
+          });
+        }
       });
 
       db.run(`
@@ -137,6 +151,7 @@ const USER_FIELD_MAP = {
   lmp: 'lmp',
   risk_level: 'risk_level',
   anc_visits: 'anc_visits',
+  language: 'language',
 };
 
 async function createUser(phoneNumber, userData = {}) {
@@ -190,6 +205,7 @@ async function getUser(phoneNumber) {
 const UPDATE_USER_ALLOWED = new Set([
   'name', 'age', 'pregnancy_week', 'edd',
   'location', 'lmp', 'risk_level', 'anc_visits',
+  'language',
 ]);
 
 async function updateUser(phoneNumber, updates) {

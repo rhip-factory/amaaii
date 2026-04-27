@@ -345,6 +345,35 @@ body.app-mode { background: var(--shell-bg); }
 }
 .field input:focus { border-color: var(--mid); background: #fff; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+/* Segmented control (language toggle) */
+.seg {
+  display: inline-flex;
+  border: 1.5px solid var(--lavender);
+  border-radius: 999px;
+  background: var(--shell-bg);
+  padding: 4px;
+  gap: 2px;
+  width: fit-content;
+}
+.seg-opt {
+  border: 0;
+  background: transparent;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.seg-opt[aria-checked="true"] {
+  background: var(--deep);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(124,71,175,.25);
+}
+.seg-opt:hover:not([aria-checked="true"]) { color: var(--deep); background: var(--lavender-soft); }
 .profile-actions { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
 .profile-status { font-size: 13px; color: var(--mid); font-weight: 600; }
 

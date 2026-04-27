@@ -115,11 +115,11 @@ SUPPORTIVE RESPONSES:
 
 async function getAmaaiiResponse(userMessage, context = {}) {
   try {
-    const { userName, isNewUser, conversationHistory, currentContext } = context;
-    
+    const { userName, isNewUser, conversationHistory, currentContext, language } = context;
+
     let systemPrompt = BASE_SYSTEM_PROMPT;
     let contextualPrompt = '';
-    
+
     if (isNewUser) {
       contextualPrompt = ONBOARDING_PROMPT;
     } else if (currentContext === 'mental_health') {
@@ -127,9 +127,18 @@ async function getAmaaiiResponse(userMessage, context = {}) {
     }
     // 'journaling' context never reaches the AI path — the journal flow
     // returns its own response — so JOURNALING_PROMPT was removed in 7.6.
-    
+
+    // Language hint. We trust GPT-3.5 to honor "reply in Kiswahili"
+    // reliably for short conversational responses.
+    let langPrompt = '';
+    if (language === 'sw') {
+      langPrompt = `\n\nLANGUAGE: The user prefers Kiswahili (sw). Reply in clear, warm Kiswahili sanifu. Use English only for medical terms that have no common Kiswahili equivalent.`;
+    } else {
+      langPrompt = `\n\nLANGUAGE: Reply in English. If the user writes in Kiswahili, you may briefly mirror a phrase but otherwise stay in English.`;
+    }
+
     let messages = [
-      { role: "system", content: systemPrompt + '\n\n' + contextualPrompt }
+      { role: "system", content: systemPrompt + '\n\n' + contextualPrompt + langPrompt }
     ];
     
     if (conversationHistory && conversationHistory.length > 0) {

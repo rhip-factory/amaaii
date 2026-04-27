@@ -277,6 +277,15 @@ async function loadHome() {
 }
 
 // ---- PROFILE -------------------------------------------------------------
+let profileLang = 'en';
+
+function paintSegmented(lang) {
+  profileLang = lang;
+  $$('.seg-opt').forEach((b) => {
+    b.setAttribute('aria-checked', String(b.dataset.lang === lang));
+  });
+}
+
 async function loadProfile() {
   try {
     const res = await api('/me');
@@ -288,8 +297,18 @@ async function loadProfile() {
     $('profWeek').value = me.user?.pregnancy_week || '';
     $('profLocation').value = me.user?.location || '';
     $('profilePhone').textContent = (me.user?.phone || '').replace(/^whatsapp:/, '') || '—';
+    paintSegmented(me.user?.language || 'en');
   } catch (_) {}
 }
+
+// Wire segmented language control. Click toggles the visual selection;
+// the actual save happens on form submit (alongside other profile fields)
+// — keeps a single round-trip and a single 'Saved ✓' confirmation.
+document.body.addEventListener('click', (e) => {
+  const opt = e.target.closest('.seg-opt');
+  if (!opt) return;
+  paintSegmented(opt.dataset.lang);
+});
 
 $('profileForm').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -304,6 +323,7 @@ $('profileForm').addEventListener('submit', async (e) => {
       age: $('profAge').value ? parseInt($('profAge').value, 10) : null,
       pregnancy_week: $('profWeek').value ? parseInt($('profWeek').value, 10) : null,
       location: $('profLocation').value.trim() || null,
+      language: profileLang,
     };
     const res = await api('/me', { method: 'PUT', body: JSON.stringify(body) });
     if (!res.ok) {

@@ -84,7 +84,7 @@ app.post('/chat', requireAuth, async (req, res) => {
 });
 
 // --- /me + /history --------------------------------------------------------
-const PROFILE_FIELDS = ['name', 'age', 'pregnancy_week', 'location'];
+const PROFILE_FIELDS = ['name', 'age', 'pregnancy_week', 'location', 'language'];
 
 function trimesterFromWeek(w) {
   if (!w) return null;
@@ -172,6 +172,7 @@ app.get('/me', requireAuth, async (req, res) => {
         pregnancy_week: user.pregnancy_week,
         edd: user.edd,
         location: user.location,
+        language: user.language || 'en',
         trimester: trimesterFromWeek(user.pregnancy_week),
       },
       todayJournal: todayJournal
