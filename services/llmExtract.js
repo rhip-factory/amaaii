@@ -176,12 +176,32 @@ Return STRICT JSON with this exact shape (omit fields the user didn't mention; n
   "lifestyle": {"smoking": <bool|null>, "alcohol": <bool|null>}
 }
 
-Examples:
-- "I'm 28, this is my second pregnancy, I had a C-section last time because of pre-eclampsia. I take folic acid daily and have hypertension on labetalol. I'm allergic to penicillin." →
-{"gravida":2,"parity":1,"miscarriages":null,"previous_deliveries":[{"mode":"cesarean","complications":"pre-eclampsia","year":null}],"chronic_conditions":["hypertension"],"past_complications":["pre-eclampsia"],"medications":["folic acid","labetalol"],"allergies":["penicillin"],"lifestyle":{"smoking":null,"alcohol":null}}
+CRITICAL RULE FOR COMPLICATIONS:
+- When a complication is described alongside a specific delivery
+  ("the first had pre-eclampsia", "C-section due to pre-eclampsia",
+  "second baby had gestational diabetes"), you MUST set the
+  complications field on THAT delivery's object, AND also add it to
+  the top-level past_complications array. Both places — never just one.
+- Use the order the deliveries are described (first mentioned = index 0).
+- If a complication is mentioned without tying to a specific pregnancy
+  ("I've had pre-eclampsia before"), only add it to past_complications.
 
-- "Hii ni mimba yangu ya kwanza. Sina magonjwa, lakini nilikuwa na hedhi nzito." →
-{"gravida":1,"parity":0,"miscarriages":null,"previous_deliveries":[],"chronic_conditions":[],"past_complications":[],"medications":[],"allergies":[],"lifestyle":{"smoking":null,"alcohol":null}}`;
+EXAMPLES (study the previous_deliveries[].complications carefully):
+
+Input: "I'm 28, this is my second pregnancy, I had a C-section last time because of pre-eclampsia. I take folic acid daily and have hypertension on labetalol. I'm allergic to penicillin."
+Output: {"gravida":2,"parity":1,"previous_deliveries":[{"mode":"cesarean","complications":"pre-eclampsia","year":null}],"chronic_conditions":["hypertension"],"past_complications":["pre-eclampsia"],"medications":["folic acid","labetalol"],"allergies":["penicillin"],"lifestyle":{"smoking":null,"alcohol":null}}
+
+Input: "4th pregnancy. 2 living children, both C-sections. First had pre-eclampsia at 36 weeks. Second was a planned C-section. One miscarriage at 8 weeks. Type 2 diabetes on metformin, on folic acid and aspirin. No allergies."
+Output: {"gravida":4,"parity":2,"miscarriages":1,"previous_deliveries":[{"mode":"cesarean","complications":"pre-eclampsia","year":null},{"mode":"cesarean","complications":"planned","year":null}],"chronic_conditions":["type 2 diabetes"],"past_complications":["pre-eclampsia"],"medications":["metformin","folic acid","aspirin"],"allergies":[],"lifestyle":{"smoking":null,"alcohol":null}}
+
+Input: "I had a baby vaginally last year, no problems, and a year before that I lost a pregnancy at 14 weeks."
+Output: {"gravida":3,"parity":1,"miscarriages":1,"previous_deliveries":[{"mode":"vaginal","complications":null,"year":null}],"past_complications":[],"lifestyle":{"smoking":null,"alcohol":null}}
+
+Input: "Hii ni mimba yangu ya kwanza. Sina magonjwa."
+Output: {"gravida":1,"parity":0,"previous_deliveries":[],"chronic_conditions":[],"past_complications":[],"medications":[],"allergies":[],"lifestyle":{"smoking":null,"alcohol":null}}
+
+Input: "Mtoto wangu wa kwanza alizaliwa kwa upasuaji kwa sababu ya shinikizo la damu. Wa pili alizaliwa vizuri."
+Output: {"gravida":3,"parity":2,"previous_deliveries":[{"mode":"cesarean","complications":"hypertension","year":null},{"mode":"vaginal","complications":null,"year":null}],"past_complications":["hypertension"],"lifestyle":{"smoking":null,"alcohol":null}}`;
 
   try {
     const completion = await withTimeout(
