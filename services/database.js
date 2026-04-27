@@ -20,11 +20,25 @@ function initializeDatabase() {
           risk_level TEXT DEFAULT 'low',
           lmp DATE,
           anc_visits INTEGER DEFAULT 0,
+          language TEXT DEFAULT 'en',
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `, (err) => {
         if (err) log.error("Error creating users table", err);
+      });
+
+      // Idempotent migration: add language column on existing DBs.
+      // PRAGMA-based check avoids the "duplicate column" error from a
+      // bare ALTER TABLE on a fresh schema.
+      db.all(`PRAGMA table_info(users)`, (err, rows) => {
+        if (err) return;
+        const hasLanguage = (rows || []).some((r) => r.name === 'language');
+        if (!hasLanguage) {
+          db.run(`ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'`, (e) => {
+            if (e) log.error("Error adding users.language column", e);
+          });
+        }
       });
 
       db.run(`
@@ -92,6 +106,8 @@ function initializeDatabase() {
           special_notes TEXT,
           red_flags_detected TEXT,
           completed BOOLEAN DEFAULT 0,
+          started_at DATETIME,
+          completed_at DATETIME,
           timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
@@ -99,18 +115,64 @@ function initializeDatabase() {
         if (err) log.error("Error creating journals table", err);
       });
 
+      // Idempotent migration for journals.started_at / completed_at on
+      // existing DBs. PRAGMA-based check avoids the "duplicate column"
+      // error from a bare ALTER TABLE on a fresh schema.
+      db.all(`PRAGMA table_info(journals)`, (err, rows) => {
+        if (err) return;
+        const have = new Set((rows || []).map((r) => r.name));
+        if (!have.has('started_at')) {
+          db.run(`ALTER TABLE journals ADD COLUMN started_at DATETIME`, (e) => {
+            if (e) log.error('Error adding journals.started_at', e);
+          });
+        }
+        if (!have.has('completed_at')) {
+          db.run(`ALTER TABLE journals ADD COLUMN completed_at DATETIME`, (e) => {
+            if (e) log.error('Error adding journals.completed_at', e);
+          });
+        }
+      });
+
       db.run(`
         CREATE TABLE IF NOT EXISTS journal_sessions (
           user_phone TEXT PRIMARY KEY,
           current_stage TEXT NOT NULL,
           journal_data TEXT NOT NULL,
+          journal_id INTEGER,
           channel TEXT NOT NULL DEFAULT 'whatsapp',
           started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_phone) REFERENCES users(phone_number),
+          FOREIGN KEY (journal_id) REFERENCES journals(id)
+        )
+      `, (err) => {
+        if (err) log.error("Error creating journal_sessions table", err);
+      });
+
+      // Idempotent migration: journal_sessions.journal_id on older DBs.
+      db.all(`PRAGMA table_info(journal_sessions)`, (err, rows) => {
+        if (err) return;
+        const have = new Set((rows || []).map((r) => r.name));
+        if (!have.has('journal_id')) {
+          db.run(`ALTER TABLE journal_sessions ADD COLUMN journal_id INTEGER`, (e) => {
+            if (e) log.error('Error adding journal_sessions.journal_id', e);
+          });
+        }
+      });
+
+      // Medical history (Phase D). 1:1 with users. raw_text is the
+      // narrative the user typed; extracted_json is the LLM-structured
+      // version (gravida/parity/conditions/etc.) for downstream use.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS medical_history (
+          user_phone TEXT PRIMARY KEY,
+          raw_text TEXT,
+          extracted_json TEXT,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
       `, (err) => {
-        if (err) log.error("Error creating journal_sessions table", err);
+        if (err) log.error("Error creating medical_history table", err);
       });
 
       db.run(
@@ -137,6 +199,7 @@ const USER_FIELD_MAP = {
   lmp: 'lmp',
   risk_level: 'risk_level',
   anc_visits: 'anc_visits',
+  language: 'language',
 };
 
 async function createUser(phoneNumber, userData = {}) {
@@ -190,6 +253,7 @@ async function getUser(phoneNumber) {
 const UPDATE_USER_ALLOWED = new Set([
   'name', 'age', 'pregnancy_week', 'edd',
   'location', 'lmp', 'risk_level', 'anc_visits',
+  'language',
 ]);
 
 async function updateUser(phoneNumber, updates) {
@@ -258,7 +322,7 @@ async function getConversationHistory(userPhone, limit = 10) {
 async function getJournalSession(userPhone) {
   return new Promise((resolve, reject) => {
     db.get(
-      `SELECT current_stage, journal_data, channel, started_at, updated_at
+      `SELECT current_stage, journal_data, journal_id, channel, started_at, updated_at
        FROM journal_sessions WHERE user_phone = ?`,
       [userPhone],
       (err, row) => {
@@ -273,6 +337,7 @@ async function getJournalSession(userPhone) {
         resolve({
           currentStage: row.current_stage,
           journalData: parsed,
+          journalId: row.journal_id || null,
           channel: row.channel,
           startedAt: row.started_at,
           updatedAt: row.updated_at,
@@ -282,19 +347,20 @@ async function getJournalSession(userPhone) {
   });
 }
 
-async function upsertJournalSession(userPhone, { currentStage, journalData, channel = 'whatsapp' }) {
+async function upsertJournalSession(userPhone, { currentStage, journalData, journalId = null, channel = 'whatsapp' }) {
   const payload = JSON.stringify(journalData || {});
   return new Promise((resolve, reject) => {
     db.run(
       `INSERT INTO journal_sessions
-         (user_phone, current_stage, journal_data, channel, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'))
+         (user_phone, current_stage, journal_data, journal_id, channel, updated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
        ON CONFLICT(user_phone) DO UPDATE SET
          current_stage = excluded.current_stage,
          journal_data  = excluded.journal_data,
+         journal_id    = excluded.journal_id,
          channel       = excluded.channel,
          updated_at    = datetime('now')`,
-      [userPhone, currentStage, payload, channel],
+      [userPhone, currentStage, payload, journalId, channel],
       function (err) {
         if (err) reject(err);
         else resolve(this.changes);
@@ -308,6 +374,43 @@ async function deleteJournalSession(userPhone) {
     db.run(
       `DELETE FROM journal_sessions WHERE user_phone = ?`,
       [userPhone],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+async function getMedicalHistory(userPhone) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT raw_text, extracted_json, updated_at FROM medical_history WHERE user_phone = ?`,
+      [userPhone],
+      (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+        let parsed = null;
+        if (row.extracted_json) {
+          try { parsed = JSON.parse(row.extracted_json); } catch (_) { /* ignore */ }
+        }
+        resolve({ rawText: row.raw_text, ...(parsed || {}), updatedAt: row.updated_at });
+      }
+    );
+  });
+}
+
+async function saveMedicalHistory(userPhone, { rawText, extracted }) {
+  const json = JSON.stringify(extracted || {});
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO medical_history (user_phone, raw_text, extracted_json, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(user_phone) DO UPDATE SET
+         raw_text = excluded.raw_text,
+         extracted_json = excluded.extracted_json,
+         updated_at = datetime('now')`,
+      [userPhone, rawText || null, json],
       function (err) {
         if (err) reject(err);
         else resolve(this.changes);
@@ -386,63 +489,92 @@ async function markANCVisitAttended(visitId) {
   });
 }
 
-async function createOrUpdateJournal(userPhone, journalData) {
+// Whitelisted journal columns. SQL identifiers are never user-controlled.
+const JOURNAL_COLUMNS = new Set([
+  'journal_stage', 'physical_symptoms', 'emotional_state', 'mood_description',
+  'energy_level', 'sleep_quality', 'sleep_hours', 'appetite',
+  'baby_movement_count', 'baby_movement_time', 'water_intake',
+  'medications_taken', 'questions_for_doctor', 'special_notes',
+  'red_flags_detected', 'completed', 'started_at', 'completed_at',
+]);
+
+// Insert a NEW journal row OR update an existing one by id. Multi-checkin
+// support: passing journalId=null always inserts a fresh row, so users
+// can complete several check-ins per day. journalManager owns the id
+// after startJournalSession() and threads it through every stage update.
+async function createOrUpdateJournal(userPhone, journalData, journalId = null) {
+  // Strip any keys that aren't whitelisted columns. Defense in depth —
+  // the only writer is journalManager which controls its own keys, but
+  // this protects against future regressions.
+  const safe = {};
+  for (const [k, v] of Object.entries(journalData || {})) {
+    if (JOURNAL_COLUMNS.has(k)) safe[k] = v;
+  }
+
+  return new Promise((resolve, reject) => {
+    if (journalId) {
+      const fields = Object.keys(safe);
+      if (fields.length === 0) return resolve(journalId);
+      const setClause = fields.map((f) => `${f} = ?`).join(', ');
+      const values = fields.map((f) => safe[f]);
+      values.push(journalId);
+      db.run(
+        `UPDATE journals SET ${setClause} WHERE id = ?`,
+        values,
+        function (err) {
+          if (err) reject(err);
+          else resolve(journalId);
+        }
+      );
+    } else {
+      // Fresh check-in — record start time even if journalData is empty.
+      const fields = ['user_phone', 'started_at', ...Object.keys(safe)];
+      const placeholders = fields.map(() => '?').join(', ');
+      const values = [userPhone, new Date().toISOString(), ...Object.values(safe)];
+      db.run(
+        `INSERT INTO journals (${fields.join(', ')}) VALUES (${placeholders})`,
+        values,
+        function (err) {
+          if (err) reject(err);
+          else resolve(this.lastID);
+        }
+      );
+    }
+  });
+}
+
+// Returns the most recent journal row for today (could be in-progress
+// or completed). With multi-checkin, "today's journal" means "the one
+// the user is working on or just finished".
+async function getTodaysJournal(userPhone) {
   return new Promise((resolve, reject) => {
     const today = new Date().toISOString().split('T')[0];
-    
     db.get(
-      'SELECT id FROM journals WHERE user_phone = ? AND date = ?',
+      `SELECT * FROM journals
+       WHERE user_phone = ? AND date = ?
+       ORDER BY COALESCE(started_at, timestamp) DESC, id DESC
+       LIMIT 1`,
       [userPhone, today],
-      (err, existingJournal) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        
-        if (existingJournal) {
-          const fields = Object.keys(journalData).map(key => `${key} = ?`).join(', ');
-          const values = Object.values(journalData);
-          values.push(existingJournal.id);
-          
-          db.run(
-            `UPDATE journals SET ${fields} WHERE id = ?`,
-            values,
-            function(err) {
-              if (err) reject(err);
-              else resolve(existingJournal.id);
-            }
-          );
-        } else {
-          const fields = Object.keys(journalData);
-          fields.push('user_phone');
-          const placeholders = fields.map(() => '?').join(', ');
-          const values = Object.values(journalData);
-          values.push(userPhone);
-          
-          db.run(
-            `INSERT INTO journals (${fields.join(', ')}) VALUES (${placeholders})`,
-            values,
-            function(err) {
-              if (err) reject(err);
-              else resolve(this.lastID);
-            }
-          );
-        }
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
       }
     );
   });
 }
 
-async function getTodaysJournal(userPhone) {
+// All journals for today, oldest first.
+async function getTodaysJournals(userPhone) {
   return new Promise((resolve, reject) => {
     const today = new Date().toISOString().split('T')[0];
-    
-    db.get(
-      'SELECT * FROM journals WHERE user_phone = ? AND date = ?',
+    db.all(
+      `SELECT * FROM journals
+       WHERE user_phone = ? AND date = ?
+       ORDER BY COALESCE(started_at, timestamp) ASC, id ASC`,
       [userPhone, today],
-      (err, row) => {
+      (err, rows) => {
         if (err) reject(err);
-        else resolve(row);
+        else resolve(rows || []);
       }
     );
   });
@@ -494,6 +626,8 @@ module.exports = {
   saveConversation,
   getConversationHistory,
   getLastBotMessage,
+  getMedicalHistory,
+  saveMedicalHistory,
   getJournalSession,
   upsertJournalSession,
   deleteJournalSession,
@@ -503,6 +637,7 @@ module.exports = {
   markANCVisitAttended,
   createOrUpdateJournal,
   getTodaysJournal,
+  getTodaysJournals,
   getJournalHistory,
   getJournalAnalytics
 };

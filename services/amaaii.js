@@ -5,54 +5,49 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const BASE_SYSTEM_PROMPT = `You are Amaaii, a compassionate AI maternal health assistant supporting pregnant and postpartum mothers in Kenya. You communicate via WhatsApp and help mothers track their pregnancy journey, identify health risks, and access care.
+const BASE_SYSTEM_PROMPT = `You are Amaaii — a warm, knowledgeable companion for pregnant and postpartum mothers in Kenya. The name comes from the Sanskrit word for "mother". You are not a doctor; you are the friend who remembers, listens, and says "let's check with the nurse" when something feels off.
 
-CORE RESPONSIBILITIES:
-- Provide emotional support and encouragement
-- Help mothers journal their daily experiences
-- Identify potential health risks and danger signs
-- Guide mothers on when and where to seek medical care
-- Answer questions about pregnancy, childbirth, and postpartum care
-- Track ANC visits and health milestones
+VOICE
+- Talk like a trusted friend who has done midwife training: warm, plain, never preachy.
+- USE HER NAME in every reply that is longer than one sentence — at least once. Not just at the start. Not "Hello {name}" every time, but woven naturally into the sentence ("Grace, that's completely normal at week 18..." or "It makes sense, Grace — week 18 is when...").
+- REFERENCE HER CURRENT WEEK when the answer changes by trimester or week (food, exercise, kick counts, milestones, common symptoms). Saying "at 18 weeks your baby is..." is far better than "during pregnancy your baby is...".
+- Acknowledge what she just said before answering. ("That sounds exhausting." → then the answer.)
+- Keep replies SHORT — 1–4 sentences for chit-chat, up to ~6 for educational answers. Never walls of text.
+- Use emojis sparingly: 💚 for support, 🌼 for warmth, 🤰 for milestones. Never decoration.
+- Kenyan context: refer to "your nurse" / "the clinic" / "ANC visit" — not "your OB" or "appointment". Common Kenyan foods you can reference when relevant: ugali, sukuma wiki, githeri, mboga, ndengu, nyama choro, mandazi, uji wa wimbi, samaki, maharagwe. Mention "matatu", "duka" when natural; never forced.
 
-COMMUNICATION GUIDELINES:
-- Use simple, clear language (5th-8th grade reading level)
-- Keep messages concise (2-4 sentences per message ideally)
-- Be culturally sensitive to Kenyan traditions and healthcare context
-- Use Kiswahili terms when helpful for clarity
-- Never use medical jargon without explanation
-- Use emojis sparingly for warmth, not excess
+CARE WITH HISTORY
+- When a USER_CONTEXT block is provided, use it to sound like you remember her. WHEN SHE ASKS FOR ADVICE AND CONTEXT IS RELEVANT, REFERENCE AT LEAST ONE SPECIFIC DATA POINT. Examples:
+  * Q "would exercise help me sleep?" + context shows avg sleep 4h → "Walking 20 minutes after dinner can help, especially since your sleep has been around 4 hours lately."
+  * Q "should I be worried?" + context shows headache 3 days running → "You've mentioned the headache for three days now — that's worth telling your nurse this week."
+  * Q general → still use her name; reference week when relevant.
+- DO NOT invent specifics ("at 3am you...") that aren't in the context.
+- DO NOT escalate triage from history alone — that is handled separately by deterministic rules. You may say "this has been bothering you for a few days, it would be worth telling your nurse this week" — never imply emergency from a pattern.
 
-CRITICAL SAFETY RULES:
-1. NEVER diagnose medical conditions
-2. NEVER prescribe medications or treatments
-3. ALWAYS encourage seeking medical care when uncertain
-4. IMMEDIATELY flag danger signs and urge urgent care
-5. Be trauma-informed (screen gently for domestic violence)
-6. Respect privacy and confidentiality
-7. Never pressure users to share information
-8. Acknowledge emotional distress with compassion
+VARY YOUR CLOSINGS
+- Do NOT end every reply with the same "your nurse at your next ANC visit can give you more details" line. That phrase is allowed once per session at most. Other ways to suggest professional input:
+  * "Worth bringing up at your next clinic visit."
+  * "Your nurse will have more specific advice for your case."
+  * "If it persists, call the clinic — don't wait for the next ANC."
+  * "Add it to your list of things to ask the midwife."
+  * (often, NO closer is needed — answer the question and stop.)
 
-DANGER SIGNS (require urgent care recommendation):
-- Severe bleeding or heavy vaginal bleeding
-- Severe headache with vision changes
-- Severe abdominal or chest pain
-- Fever above 38°C (100.4°F)
-- Convulsions or loss of consciousness
-- Severe swelling of face and hands
-- Sudden gush of fluid from vagina
-- No fetal movement for 12+ hours (after 20 weeks)
-- Thoughts of self-harm or suicide
-- Severe breathing difficulty
+ANSWERING QUESTIONS
+- "Should I exercise?" / "What can I eat?" / "Is X normal?" → answer plainly using the woman's specific week, recent symptoms, and any conditions mentioned in USER_CONTEXT. No copy-pasted disclaimers.
+- For things you don't know: "I'm not sure about that — your nurse will know."
+- One follow-up question at most per reply.
 
-WHEN RESPONDING:
-- Always validate emotions first
-- Ask one question at a time
-- Offer choices when possible
-- Explain "why" behind recommendations
-- End with clear next step
+SAFETY (LOAD-BEARING)
+- NEVER diagnose. NEVER prescribe medications, supplements, or remedies (including traditional/herbal — refer to her healthcare provider).
+- If she describes a danger sign in plain text mid-conversation, the system will already escalate before you see it. You will not be asked to triage.
+- Mental health: validate ("many mothers feel this", "you're not alone"), normalize, gently suggest support — never label. For severe distress, mention Befrienders Kenya 0722 178 177 (mental health support line) [Inference — verify in production].
+- Self-harm or harming the baby: respond with calm urgency and the helpline / clinic recommendation.
+- Trauma-informed: don't push for details about losses, IPV, or HIV status. Let her share at her own pace.
 
-REMEMBER: You are a guide and companion, not a replacement for healthcare providers.`;
+YOU ARE
+- A guide, not a doctor.
+- A companion across her pregnancy and postpartum.
+- The voice that helps her ask the right question at her next ANC visit.`;
 
 const ONBOARDING_PROMPT = `
 CURRENT CONTEXT: Onboarding new user
@@ -115,38 +110,97 @@ SUPPORTIVE RESPONSES:
 
 async function getAmaaiiResponse(userMessage, context = {}) {
   try {
-    const { userName, isNewUser, conversationHistory, currentContext } = context;
-    
+    const {
+      userName,
+      pregnancyWeek,
+      location,
+      isNewUser,
+      conversationHistory,
+      currentContext,
+      language,
+      trendLine,        // pre-rendered string from services/trend.js#trendForPrompt
+      medicalHistory,   // optional structured medical history (Phase D)
+    } = context;
+
     let systemPrompt = BASE_SYSTEM_PROMPT;
     let contextualPrompt = '';
-    
+
     if (isNewUser) {
       contextualPrompt = ONBOARDING_PROMPT;
     } else if (currentContext === 'mental_health') {
       contextualPrompt = MENTAL_HEALTH_PROMPT;
     }
-    // 'journaling' context never reaches the AI path — the journal flow
-    // returns its own response — so JOURNALING_PROMPT was removed in 7.6.
-    
-    let messages = [
-      { role: "system", content: systemPrompt + '\n\n' + contextualPrompt }
+
+    // Compact USER_CONTEXT block — what the AI should "remember".
+    const ctxLines = [];
+    if (userName) ctxLines.push(`Name: ${userName}`);
+    if (pregnancyWeek) ctxLines.push(`Pregnancy week: ${pregnancyWeek}`);
+    if (location) ctxLines.push(`Location: ${location}`);
+    if (trendLine) ctxLines.push(`Recent 7d: ${trendLine}`);
+    if (medicalHistory && Object.keys(medicalHistory).length > 0) {
+      const mh = medicalHistory;
+      const bits = [];
+      if (mh.gravida != null) bits.push(`G${mh.gravida}`);
+      if (mh.parity != null) bits.push(`P${mh.parity}`);
+      if (Array.isArray(mh.chronic_conditions) && mh.chronic_conditions.length) {
+        bits.push(`conditions: ${mh.chronic_conditions.join(', ')}`);
+      }
+      if (Array.isArray(mh.past_complications) && mh.past_complications.length) {
+        bits.push(`past complications: ${mh.past_complications.join(', ')}`);
+      }
+      if (Array.isArray(mh.medications) && mh.medications.length) {
+        bits.push(`medications: ${mh.medications.join(', ')}`);
+      }
+      if (bits.length) ctxLines.push(`Medical history: ${bits.join(' · ')}`);
+    }
+    const userContextBlock = ctxLines.length
+      ? `\n\nUSER_CONTEXT:\n- ${ctxLines.join('\n- ')}\n(Use this naturally — like a friend who remembers. Do not list it back.)`
+      : '';
+
+    // Language hint — STRICT. The user's stored language preference
+    // wins over whatever language they typed in this turn. Otherwise a
+    // SW user who code-switches to English under stress gets EN replies
+    // exactly when they need their preferred language most.
+    const langPrompt = (language === 'sw')
+      ? `\n\nLANGUAGE: The user has chosen Kiswahili as her preferred language. Reply in warm Kiswahili sanifu — that's the default for everything you say. Use English only for medical terms with no common Kiswahili equivalent (then gloss them briefly).`
+      : `\n\nLANGUAGE: Reply in English.`;
+
+    const messages = [
+      { role: 'system', content: systemPrompt + '\n\n' + contextualPrompt + userContextBlock + langPrompt },
     ];
-    
+
     if (conversationHistory && conversationHistory.length > 0) {
-      const recentHistory = conversationHistory.slice(-3);
-      recentHistory.forEach(conv => {
-        messages.push({ role: "user", content: conv.message });
-        messages.push({ role: "assistant", content: conv.response });
+      // Last 3 exchanges. Reversed because db returns DESC.
+      const recent = conversationHistory.slice(0, 3).reverse();
+      recent.forEach((conv) => {
+        messages.push({ role: 'user', content: conv.message });
+        messages.push({ role: 'assistant', content: conv.response });
       });
     }
-    
-    messages.push({ role: "user", content: userMessage });
-    
+
+    messages.push({ role: 'user', content: userMessage });
+
+    // Tail directive — most recent context wins for GPT-3.5. A short
+    // language reminder right before completion keeps the bot from
+    // mirroring the user's input language when it differs from the
+    // stored preference.
+    if (language === 'sw') {
+      messages.push({
+        role: 'system',
+        content: 'Reminder: respond in Kiswahili sanifu, regardless of what language the user just wrote in.',
+      });
+    } else {
+      messages.push({
+        role: 'system',
+        content: 'Reminder: respond in English, regardless of what language the user just wrote in.',
+      });
+    }
+
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: messages,
-      max_tokens: 500,
-      temperature: 0.7,
+      model: 'gpt-3.5-turbo',
+      messages,
+      max_tokens: 320,
+      temperature: 0.55, // tighter than before; warmer + less rambly
     });
 
     return completion.choices[0].message.content;

@@ -1,5 +1,61 @@
 const db = require('./database');
 const { detectDangerSigns, assessMood, extractSymptoms } = require('./dangerSigns');
+const { t, pickLang } = require('./i18n');
+const llm = require('./llmExtract');
+const { getRecentTrend } = require('./trend');
+
+function dangerCopy(level, lang) {
+  if (level === 'critical') return t(lang, 'danger_critical');
+  if (level === 'high') return t(lang, 'danger_high');
+  if (level === 'moderate') return t(lang, 'danger_moderate');
+  return '';
+}
+
+// Free-text journal stages (questions, notes) re-run symptom + danger
+// detection so anything disclosed there isn't silently logged. Mutates
+// `journalUpdate` (merges new symptoms, sets red_flags_detected) and
+// returns a heads-up string to prepend to the bot's reply, or '' if
+// nothing was found.
+function scanFreeText(message, journalData, journalUpdate, lang = 'en') {
+  const sx = extractSymptoms(message);
+  const danger = detectDangerSigns(message);
+
+  if (sx.length > 0) {
+    const existing = (journalUpdate.physical_symptoms != null)
+      ? journalUpdate.physical_symptoms
+      : (journalData && journalData.physical_symptoms);
+    let arr = [];
+    if (typeof existing === 'string' && existing.trim().startsWith('[')) {
+      try { const parsed = JSON.parse(existing); if (Array.isArray(parsed)) arr = parsed; } catch (_) {}
+    }
+    journalUpdate.physical_symptoms = JSON.stringify(Array.from(new Set([...arr, ...sx])));
+  }
+
+  if (danger.urgencyLevel === 'critical' || danger.urgencyLevel === 'high') {
+    journalUpdate.red_flags_detected = JSON.stringify(danger.detectedSigns);
+    return `${dangerCopy(danger.urgencyLevel, lang)}\n\n`;
+  }
+  if (sx.length > 0) {
+    const niceList = sx.map((s) => s.replace(/_/g, ' ')).join(', ');
+    return t(lang, 'heads_up_symptoms', { list: niceList });
+  }
+  return '';
+}
+
+function formatSymptoms(raw, lang = 'en') {
+  if (!raw || raw === 'none') return t(lang, 'journal_no_symptoms');
+  if (typeof raw !== 'string') return String(raw);
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr) && arr.length > 0) {
+        return arr.map((s) => String(s).replace(/_/g, ' ')).join(', ');
+      }
+    } catch (_) { /* fall through */ }
+  }
+  return trimmed;
+}
 
 class JournalManager {
   // Sessions are persisted to the journal_sessions table; this manager
@@ -7,25 +63,35 @@ class JournalManager {
   // survive restarts.)
 
   async startJournalSession(userPhone, user) {
+    // If there's an active session in the DB, resume it (e.g. after a
+    // server restart mid-flow). Otherwise create a fresh journal row
+    // and a new session pointing at it — this enables multi-checkin per
+    // day: each `journal` command after a previous one completes opens
+    // a brand-new row.
     const existingDbSession = await db.getJournalSession(userPhone);
     if (existingDbSession) {
       return {
         userPhone,
         currentStage: existingDbSession.currentStage,
         journalData: existingDbSession.journalData || {},
+        journalId: existingDbSession.journalId,
       };
     }
 
-    const existingJournal = await db.getTodaysJournal(userPhone);
+    // INSERT the row up front so we capture started_at the moment the
+    // user opens the check-in.
+    const journalId = await db.createOrUpdateJournal(userPhone, {});
+
     const session = {
       userPhone,
-      currentStage: existingJournal ? 'continue' : 'greeting',
-      journalData: existingJournal || {},
+      currentStage: 'greeting',
+      journalData: {},
+      journalId,
     };
-
     await db.upsertJournalSession(userPhone, {
       currentStage: session.currentStage,
       journalData: session.journalData,
+      journalId,
     });
     return session;
   }
@@ -37,6 +103,7 @@ class JournalManager {
       userPhone,
       currentStage: row.currentStage,
       journalData: row.journalData || {},
+      journalId: row.journalId,
     };
   }
 
@@ -45,12 +112,12 @@ class JournalManager {
     if (!dbSession) {
       return { error: true, message: 'No active journal session' };
     }
-    // Stage from caller wins over DB if explicitly passed (preserves
-    // existing handler call shape); fall back to the DB stage.
     const stage = currentStage || dbSession.currentStage;
     const journalData = dbSession.journalData || {};
+    const journalId = dbSession.journalId || null;
     const user = await db.getUser(userPhone);
     const pregnancyWeek = (user && user.pregnancy_week) || 0;
+    const lang = pickLang(user && user.language);
 
     let nextStage;
     let response;
@@ -58,29 +125,52 @@ class JournalManager {
 
     switch (stage) {
       case 'greeting':
+      case 'continue': {
         nextStage = 'mood';
-        response = `Let's do your daily check-in! 📝\n\nFirst, how are you feeling emotionally today? (Rate 1-10, where 1 is very low and 10 is excellent)`;
-        break;
+        const baseGreeting = stage === 'continue'
+          ? t(lang, 'journal_continue')
+          : t(lang, 'journal_greeting');
 
-      case 'continue':
-        nextStage = 'mood';
-        response = `Welcome back! Let's continue your daily check-in 📝\n\nHow are you feeling emotionally right now? (1-10)`;
+        // Context-aware preamble: if yesterday's check-in flagged
+        // symptoms, ask about them first. Soft, no medical claims.
+        let preamble = '';
+        try {
+          const trend = await getRecentTrend(userPhone, 7);
+          if (trend) {
+            if (trend.yesterdaySymptoms.length === 1) {
+              preamble = t(lang, 'journal_yesterday_followup_one', { symptom: trend.yesterdaySymptoms[0] });
+            } else if (trend.yesterdaySymptoms.length > 1) {
+              preamble = t(lang, 'journal_yesterday_followup_many', { list: trend.yesterdaySymptoms.join(', ') });
+            } else if (trend.distinctDaysJournaled >= 5) {
+              // Reward consistency without nagging — only every several days.
+              preamble = t(lang, 'journal_streak', { days: trend.distinctDaysJournaled });
+            }
+          }
+        } catch (_) { /* trend is best-effort */ }
+
+        response = preamble + baseGreeting;
         break;
+      }
 
       case 'mood': {
-        const moodScore = this.extractNumber(message);
+        let moodScore = this.extractNumber(message);
+        if (!(moodScore && moodScore >= 1 && moodScore <= 10)) {
+          // Regex missed → ask the LLM to interpret.
+          const out = await llm.extractMood(message);
+          if (out && out.mood) moodScore = out.mood;
+        }
         if (moodScore && moodScore >= 1 && moodScore <= 10) {
           journalUpdate.emotional_state = moodScore;
           journalUpdate.mood_description = message;
           nextStage = 'symptoms';
-          const moodResponse =
-            moodScore >= 7 ? "That's wonderful to hear! 😊" :
-            moodScore >= 5 ? 'Thank you for sharing.' :
-            "I'm here for you. 💚";
-          response = `${moodResponse}\n\nAny physical symptoms today? (e.g., nausea, headache, back pain, or type 'none')`;
+          const ack =
+            moodScore >= 7 ? t(lang, 'journal_mood_good') :
+            moodScore >= 5 ? t(lang, 'journal_mood_ok') :
+            t(lang, 'journal_mood_low');
+          response = t(lang, 'journal_mood_followup', { ack });
         } else {
           nextStage = 'mood';
-          response = 'Please rate your mood from 1 to 10 (1 being very low, 10 being excellent)';
+          response = t(lang, 'journal_mood_invalid');
         }
         break;
       }
@@ -89,126 +179,180 @@ class JournalManager {
         const symptoms = extractSymptoms(message);
         const dangerAnalysis = detectDangerSigns(message);
 
+        // No-symptoms sentinels: "none" (EN), "hapana"/"la"/"sina"/
+        // "najisikia vyema" (SW common ways to say "no" / "I'm fine").
+        const lower = message.toLowerCase();
+        const isNone =
+          /\bnone\b/.test(lower) ||
+          /\bhapana\b/.test(lower) ||
+          /^la[\s,.]/.test(lower) || /^la$/.test(lower) ||
+          /\bsina\b/.test(lower) ||
+          /najisikia\s+(?:vyema|vizuri|sawa)/.test(lower);
         journalUpdate.physical_symptoms =
           symptoms.length > 0 ? JSON.stringify(symptoms) :
-          message.toLowerCase().includes('none') ? 'none' : message;
+          isNone ? 'none' : message;
 
         if (dangerAnalysis.urgencyLevel === 'critical' || dangerAnalysis.urgencyLevel === 'high') {
           journalUpdate.red_flags_detected = JSON.stringify(dangerAnalysis.detectedSigns);
-          response = dangerAnalysis.recommendedAction + "\n\nWe'll pause the journal for now. Please seek care first!";
+          response = `${dangerCopy(dangerAnalysis.urgencyLevel, lang)}\n\n${t(lang, 'journal_pause')}`;
           nextStage = 'completed';
         } else {
           nextStage = 'sleep';
-          response = `I've noted your symptoms.\n\nHow was your sleep last night? Rate quality (1-10) and hours slept (e.g., "7/10, 6 hours")`;
+          response = t(lang, 'journal_symptoms_noted');
         }
         break;
       }
 
       case 'sleep': {
-        // Quality and hours are independent captures so order doesn't
-        // matter and "6 hours, 7/10" is parsed correctly. (D8.)
-        const qualityMatch = message.match(/(\d+)\s*(?:\/|out of)\s*10/i);
+        const qualityMatch =
+          message.match(/(\d+)\s*(?:\/|out of)\s*10/i) ||
+          message.match(/\b(\d+)\s+for\s+sleep\b/i) ||
+          message.match(/\bsleep(?:\s+(?:was|is))?(?:\s+(?:a|an))?\s+(\d+)\b/i);
         const hoursMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:h(?:ours?|rs?)?\b)/i);
 
         if (qualityMatch) {
-          journalUpdate.sleep_quality = parseInt(qualityMatch[1], 10);
+          const q = parseInt(qualityMatch[1], 10);
+          if (q >= 1 && q <= 10) journalUpdate.sleep_quality = q;
         }
         if (hoursMatch) {
           journalUpdate.sleep_hours = parseFloat(hoursMatch[1]);
         }
+        // LLM fallback if either signal is missing — covers phrasings
+        // like "really bad, only 3 hours" or Kiswahili input.
+        if (journalUpdate.sleep_quality == null || journalUpdate.sleep_hours == null) {
+          const out = await llm.extractSleep(message);
+          if (out) {
+            if (journalUpdate.sleep_quality == null && out.quality != null) {
+              journalUpdate.sleep_quality = out.quality;
+            }
+            if (journalUpdate.sleep_hours == null && out.hours != null) {
+              journalUpdate.sleep_hours = out.hours;
+            }
+          }
+        }
 
         nextStage = pregnancyWeek >= 20 ? 'baby_movement' : 'water';
         response = pregnancyWeek >= 20
-          ? `How many times did you feel baby move today? (It's okay if you're not sure yet)`
-          : `How many glasses of water did you drink today? (Aim for 8-10 glasses)`;
+          ? t(lang, 'journal_baby_movement_q')
+          : t(lang, 'journal_water_q');
         break;
       }
 
       case 'baby_movement': {
-        const movementCount = this.extractNumber(message);
+        let movementCount = this.extractNumber(message);
+        if (movementCount === null) {
+          const out = await llm.extractMovement(message);
+          if (out && out.count != null) movementCount = out.count;
+        }
+        const water_q = t(lang, 'journal_water_q');
         if (movementCount !== null) {
           journalUpdate.baby_movement_count = movementCount;
           if (movementCount === 0 && pregnancyWeek > 28) {
             journalUpdate.red_flags_detected = JSON.stringify(['no_fetal_movement']);
-            response = `⚠️ No movement detected. If you haven't felt baby move in the last 12 hours, please contact your healthcare provider immediately.\n\nHow many glasses of water did you drink today?`;
+            response = t(lang, 'journal_movement_warn', { water_q });
           } else if (movementCount < 10 && pregnancyWeek > 28) {
-            response = `Movement seems low. Try having a cold drink and lying on your left side for an hour to count movements.\n\nHow many glasses of water did you drink today?`;
+            response = t(lang, 'journal_movement_low', { water_q });
           } else {
-            response = `Good! Regular movement is a great sign. 👶\n\nHow many glasses of water did you drink today?`;
+            response = t(lang, 'journal_movement_good', { water_q });
           }
         } else {
           journalUpdate.baby_movement_time = message;
-          response = `I've noted that. How many glasses of water did you drink today?`;
+          response = t(lang, 'journal_movement_noted', { water_q });
         }
         nextStage = 'water';
         break;
       }
 
       case 'water': {
-        const waterCount = this.extractNumber(message);
+        let waterCount = this.extractNumber(message);
+        if (waterCount === null) {
+          const out = await llm.extractWater(message);
+          if (out && out.glasses != null) waterCount = out.glasses;
+        }
         if (waterCount !== null) {
           journalUpdate.water_intake = waterCount;
-          const waterAdvice =
-            waterCount >= 8 ? 'Excellent hydration! 💧' :
-            waterCount >= 6 ? 'Good! Try to increase a bit more.' :
-            "Try to drink more water tomorrow. It's important for you and baby.";
-          response = `${waterAdvice}\n\nHow was your appetite today? (good/moderate/poor)`;
+          const ack =
+            waterCount >= 8 ? t(lang, 'journal_water_great') :
+            waterCount >= 6 ? t(lang, 'journal_water_ok') :
+            t(lang, 'journal_water_low');
+          response = t(lang, 'journal_water_followup', { ack });
         } else {
-          response = "Please tell me how many glasses of water (e.g., '6' or '8 glasses')";
+          response = t(lang, 'journal_water_invalid');
         }
         nextStage = 'appetite';
         break;
       }
 
       case 'appetite': {
-        // Priority ladder (D9): "no appetite" / "poor" beats "good" beats
-        // "moderate"/"okay". Plain substring checks were ambiguous —
-        // "no good appetite" → poor, "not poor" → moderate, etc.
+        // Priority ladder. Recognise EN + SW words: "nzuri" (good),
+        // "wastani" (moderate), "mbaya"/"hapana" (poor).
         const lower = message.toLowerCase();
-        let appetiteLevel = 'moderate';
-        if (/\bpoor\b/.test(lower) || /\bno appetite\b/.test(lower) || /\bno good appetite\b/.test(lower)) {
-          appetiteLevel = 'poor';
-        } else if (/\bgood\b/.test(lower) || /\bgreat\b/.test(lower)) {
-          appetiteLevel = 'good';
-        } else if (/\bmoderate\b/.test(lower) || /\bok(?:ay)?\b/.test(lower)) {
-          appetiteLevel = 'moderate';
+        let appetiteLevel = null;
+        let regexHit = false;
+        if (/\bpoor\b/.test(lower) || /\bno appetite\b/.test(lower) || /\bno good appetite\b/.test(lower) || /\bmbaya\b/.test(lower)) {
+          appetiteLevel = 'poor'; regexHit = true;
+        } else if (/\bgood\b/.test(lower) || /\bgreat\b/.test(lower) || /\bnzuri\b/.test(lower)) {
+          appetiteLevel = 'good'; regexHit = true;
+        } else if (/\bmoderate\b/.test(lower) || /\bok(?:ay)?\b/.test(lower) || /\bwastani\b/.test(lower)) {
+          appetiteLevel = 'moderate'; regexHit = true;
         }
-        // "not poor" should NOT register as poor — re-check with negation guard.
-        if (/\bnot\s+poor\b/.test(lower)) {
-          appetiteLevel = 'moderate';
+        if (/\bnot\s+poor\b/.test(lower) || /\bsi\s+mbaya\b/.test(lower)) {
+          appetiteLevel = 'moderate'; regexHit = true;
         }
-        journalUpdate.appetite = appetiteLevel;
+        if (!regexHit) {
+          const out = await llm.extractAppetite(message);
+          if (out && out.appetite) appetiteLevel = out.appetite;
+        }
+        journalUpdate.appetite = appetiteLevel || 'moderate';
         nextStage = 'questions';
-        response = `Any questions or concerns you want to discuss with your doctor at your next visit? (or type 'none')`;
+        response = t(lang, 'journal_questions_q');
         break;
       }
 
-      case 'questions':
-        if (!message.toLowerCase().includes('none')) {
+      case 'questions': {
+        const lower = message.toLowerCase().trim();
+        const isSkipping = lower === 'none' || lower === 'hapana';
+        let questionsHeadsUp = '';
+        if (!isSkipping) {
           journalUpdate.questions_for_doctor = message;
+          questionsHeadsUp = scanFreeText(message, journalData, journalUpdate, lang);
         }
         nextStage = 'notes';
-        response = `Any other notes about your day? How you're feeling overall? (or type 'done' to finish)`;
+        response = `${questionsHeadsUp}${t(lang, 'journal_notes_q')}`;
         break;
+      }
 
       case 'notes': {
-        if (!message.toLowerCase().includes('done') && !message.toLowerCase().includes('no')) {
+        const lowerNotes = message.toLowerCase().trim();
+        const isDoneSentinel =
+          lowerNotes === 'done' || lowerNotes === 'no' || lowerNotes === 'none' ||
+          lowerNotes === 'maliza' || lowerNotes === 'hapana';
+        let noteHeadsUp = '';
+        if (!isDoneSentinel) {
           journalUpdate.special_notes = message;
+          noteHeadsUp = scanFreeText(message, journalData, journalUpdate, lang);
         }
         journalUpdate.completed = 1;
+        // Stamp the moment the user finished — pairs with started_at
+        // (set in startJournalSession) for full duration analytics.
+        journalUpdate.completed_at = new Date().toISOString();
         nextStage = 'completed';
-        const summary = await this.generateJournalSummary(journalData, journalUpdate);
-        response = summary;
+        const summary = await this.generateJournalSummary(journalData, journalUpdate, lang, pregnancyWeek);
+        response = noteHeadsUp + summary;
         break;
       }
 
       case 'completed':
-        response = "Today's journal is complete! Type 'journal summary' to see it again or 'weekly summary' for your week's progress.";
+        response = t(lang, 'journal_done');
         break;
     }
 
     if (Object.keys(journalUpdate).length > 0) {
-      await db.createOrUpdateJournal(userPhone, journalUpdate);
+      // All journal writes go to the SAME row created in
+      // startJournalSession — multi-checkin works because each
+      // `journal` command after a previous completion creates a fresh
+      // row before processJournalResponse is ever called.
+      await db.createOrUpdateJournal(userPhone, journalUpdate, journalId);
     }
 
     const mergedJournalData = { ...journalData, ...journalUpdate };
@@ -219,83 +363,85 @@ class JournalManager {
       await db.upsertJournalSession(userPhone, {
         currentStage: nextStage,
         journalData: mergedJournalData,
+        journalId,
       });
     }
 
     return { response, nextStage, completed: nextStage === 'completed' };
   }
 
-  async generateJournalSummary(existingData, newData) {
+  async generateJournalSummary(existingData, newData, lang = 'en', pregnancyWeek = 0) {
     const data = { ...existingData, ...newData };
-
-    let summary = "📊 **Today's Journal Summary**\n\n";
+    let summary = t(lang, 'journal_summary_title');
 
     if (data.emotional_state) {
       const moodEmoji = data.emotional_state >= 7 ? '😊' :
                        data.emotional_state >= 5 ? '😐' : '😔';
-      summary += `**Mood:** ${data.emotional_state}/10 ${moodEmoji}\n`;
+      summary += `${t(lang, 'journal_summary_mood')} ${data.emotional_state}/10 ${moodEmoji}\n`;
     }
 
     if (data.physical_symptoms) {
-      const symptoms = typeof data.physical_symptoms === 'string' && data.physical_symptoms !== 'none'
-        ? data.physical_symptoms
-        : 'No symptoms';
-      summary += `**Symptoms:** ${symptoms}\n`;
+      summary += `${t(lang, 'journal_summary_symptoms')} ${formatSymptoms(data.physical_symptoms, lang)}\n`;
     }
 
-    if (data.sleep_quality) {
-      summary += `**Sleep:** ${data.sleep_quality}/10 quality`;
-      if (data.sleep_hours) summary += `, ${data.sleep_hours} hours`;
-      summary += '\n';
+    if (data.sleep_quality || data.sleep_hours) {
+      const parts = [];
+      if (data.sleep_quality) parts.push(`${data.sleep_quality}${t(lang, 'journal_summary_quality')}`);
+      if (data.sleep_hours) parts.push(`${data.sleep_hours} ${t(lang, 'journal_summary_hours')}`);
+      summary += `${t(lang, 'journal_summary_sleep')} ${parts.join(', ')}\n`;
     }
 
     if (data.baby_movement_count !== undefined && data.baby_movement_count !== null) {
-      const movementStatus = data.baby_movement_count >= 10 ? '✅' : '⚠️';
-      summary += `**Baby Movement:** ${data.baby_movement_count} times ${movementStatus}\n`;
+      // Only flag low movement counts as concerning when clinically
+      // relevant (after 28 weeks). Below 28w, regular movement isn't
+      // expected at high counts and a ⚠️ here is a false alarm.
+      const concerning = pregnancyWeek > 28 && data.baby_movement_count < 10;
+      const movementStatus = data.baby_movement_count >= 10 ? '✅' : (concerning ? '⚠️' : '👶');
+      summary += `${t(lang, 'journal_summary_movement')} ${data.baby_movement_count} ${t(lang, 'journal_summary_movement_unit')} ${movementStatus}\n`;
     }
 
     if (data.water_intake) {
       const waterStatus = data.water_intake >= 8 ? '✅' : '💧';
-      summary += `**Water:** ${data.water_intake} glasses ${waterStatus}\n`;
+      summary += `${t(lang, 'journal_summary_water')} ${data.water_intake} ${t(lang, 'journal_summary_water_unit')} ${waterStatus}\n`;
     }
 
     if (data.appetite) {
-      summary += `**Appetite:** ${data.appetite}\n`;
+      const appetiteLabel = t(lang, `appetite_${data.appetite}`);
+      summary += `${t(lang, 'journal_summary_appetite')} ${appetiteLabel}\n`;
     }
 
     summary += '\n';
 
     if (data.red_flags_detected) {
-      summary += '⚠️ **Important:** Some concerning symptoms detected. Please follow up with your healthcare provider.\n\n';
+      summary += t(lang, 'journal_summary_red_flag');
     }
 
-    const recommendations = this.generateRecommendations(data);
+    const recommendations = this.generateRecommendations(data, lang);
     if (recommendations.length > 0) {
-      summary += '**Recommendations:**\n';
+      summary += t(lang, 'journal_summary_recs');
       recommendations.forEach((rec) => (summary += `• ${rec}\n`));
     }
 
-    summary += '\n✅ Journal saved! Great job taking care of yourself and baby today! 💚';
-
+    summary += t(lang, 'journal_summary_done');
     return summary;
   }
 
-  generateRecommendations(data) {
+  generateRecommendations(data, lang = 'en') {
     const recommendations = [];
     if (data.emotional_state < 5) {
-      recommendations.push("Consider talking to someone about how you're feeling");
+      recommendations.push(t(lang, 'rec_mood_low'));
     }
     if (data.sleep_hours && data.sleep_hours < 6) {
-      recommendations.push('Try to get more rest - aim for 7-9 hours');
+      recommendations.push(t(lang, 'rec_sleep'));
     }
     if (data.water_intake && data.water_intake < 8) {
-      recommendations.push('Increase water intake to 8-10 glasses daily');
+      recommendations.push(t(lang, 'rec_water'));
     }
     if (data.appetite === 'poor') {
-      recommendations.push('Try small, frequent meals if appetite is low');
+      recommendations.push(t(lang, 'rec_appetite_poor'));
     }
     if (data.baby_movement_count !== undefined && data.baby_movement_count < 10) {
-      recommendations.push('Monitor baby movements closely today');
+      recommendations.push(t(lang, 'rec_movement'));
     }
     return recommendations;
   }
@@ -415,7 +561,12 @@ class JournalManager {
   }
 
   isJournalCommand(message) {
-    const commands = ['journal', 'daily check-in', 'check in', 'daily journal', 'start journal'];
+    const commands = [
+      // EN
+      'journal', 'daily check-in', 'check in', 'daily journal', 'start journal',
+      // SW
+      'jarida', 'anza jarida', 'jarida langu', 'ukaguzi wa kila siku',
+    ];
     return commands.some((cmd) => message.toLowerCase().includes(cmd));
   }
 
