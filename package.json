@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-pregnancy-bot",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "WhatsApp bot for pregnant mothers using GPT",
   "main": "server.js",
   "packageManager": "pnpm@10.33.0",
