@@ -1,19 +1,30 @@
-// Lightweight auth for the PWA demo. Phase 0/demo only — no real OTP
-// challenge (Phase 3 will add proper SMS/email verification). The token
-// is an HMAC-signed payload {phone, iat, exp} so we don't trust the
-// client to keep it honest. Real production deployments swap this for
-// OAuth / Twilio Verify.
+// P1-E: ported 1:1 from services/auth.js (final step of the TS migration
+// — see CLAUDE.md). Lightweight auth for the PWA demo. Phase 0/demo
+// only — no real OTP challenge (Phase 3 will add proper SMS/email
+// verification). The token is an HMAC-signed payload {phone, iat, exp}
+// so we don't trust the client to keep it honest. Real production
+// deployments swap this for OAuth / Twilio Verify.
 
-const crypto = require('node:crypto');
+import crypto from 'node:crypto';
 
 const SECRET = process.env.AUTH_SECRET || 'amaaii-dev-secret-change-me';
 const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days for the demo
 
-function b64url(buf) {
-  return Buffer.from(buf).toString('base64url');
+export interface TokenPayload {
+  sub: string;
+  iat: number;
+  exp: number;
 }
 
-function fromB64url(s) {
+// Accepts either a string (JSON payload) or an already-binary digest —
+// both call sites below pass one or the other. Avoids the ambiguous
+// `Buffer.from(buf: string | Buffer)` overload call the original's
+// single-signature helper relied on implicitly.
+function b64url(buf: string | Buffer): string {
+  return (typeof buf === 'string' ? Buffer.from(buf) : buf).toString('base64url');
+}
+
+function fromB64url(s: string): Buffer {
   return Buffer.from(s, 'base64url');
 }
 
@@ -23,7 +34,10 @@ function fromB64url(s) {
 //   "whatsapp:+1..."      → "whatsapp:+1..." (passthrough)
 //
 // Returns null if the input doesn't look like a phone we can use.
-function normalizePhone(raw, defaultCountry = '254') {
+// `raw: unknown` — callers pass req.body.phone, which is untyped JSON
+// input; the original JS's `typeof raw !== 'string'` guard is the real
+// validation, so `unknown` (not `any`) is the honest input type.
+export function normalizePhone(raw: unknown, defaultCountry = '254'): string | null {
   if (typeof raw !== 'string') return null;
   let s = raw.trim();
   if (s.startsWith('whatsapp:')) s = s.slice('whatsapp:'.length);
@@ -39,7 +53,7 @@ function normalizePhone(raw, defaultCountry = '254') {
   return `whatsapp:+${s}`;
 }
 
-function signToken(payload) {
+export function signToken(payload: TokenPayload): string {
   const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const body = b64url(JSON.stringify(payload));
   const sig = b64url(
@@ -48,7 +62,7 @@ function signToken(payload) {
   return `${header}.${body}.${sig}`;
 }
 
-function verifyToken(token) {
+export function verifyToken(token: unknown): TokenPayload | null {
   if (typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length !== 3) return null;
@@ -61,7 +75,10 @@ function verifyToken(token) {
   const b = Buffer.from(expected);
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
-    const payload = JSON.parse(fromB64url(body).toString('utf8'));
+    // JSON.parse is inherently untyped; `as TokenPayload` documents the
+    // trust boundary (the payload was HMAC-signed by us above) rather
+    // than validating field-by-field, matching the original.
+    const payload = JSON.parse(fromB64url(body).toString('utf8')) as TokenPayload;
     if (typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
@@ -71,9 +88,7 @@ function verifyToken(token) {
   }
 }
 
-function issueToken(phone) {
+export function issueToken(phone: string): string {
   const now = Math.floor(Date.now() / 1000);
   return signToken({ sub: phone, iat: now, exp: now + TOKEN_TTL_SECONDS });
 }
-
-module.exports = { normalizePhone, signToken, verifyToken, issueToken };

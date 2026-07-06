@@ -2,7 +2,12 @@
 set -euo pipefail
 
 node -e "
-const { detectDangerSigns } = require('./services/dangerSigns');
+// P1-E: services/dangerSigns.js is gone; detectDangerSigns lives in
+// packages/core/src/dangerSigns.ts. Plain 'node -e' has no TypeScript
+// loader by default, so we register tsx's require hook first — same
+// mechanism 'tsx server.js' used under the hood before this migration.
+require('tsx/cjs');
+const { detectDangerSigns } = require('./packages/core/src/dangerSigns');
 const cases = [
   ['my blood pressure was fine at the clinic', 'low'],
   [\"I'm tired of waiting for my ANC appointment\", 'low'],

@@ -3,6 +3,13 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import request from 'supertest';
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+// Registers Node module hooks so this native `require()` can load
+// apps/server/src/middleware/twilioSignature.ts directly, same as `tsx`
+// does for `pnpm start`/`pnpm dev`.
+require('tsx/cjs');
 
 const TOKEN = 'test-auth-token-123';
 
@@ -17,7 +24,7 @@ function expectedSignature(url, params) {
 function buildApp() {
   vi.resetModules();
   // Defer require until env is set so the middleware sees current env.
-  const twilioSignature = require('../middleware/twilioSignature');
+  const twilioSignature = require('../apps/server/src/middleware/twilioSignature');
   const app = express();
   app.use(bodyParser.urlencoded({ extended: false }));
   app.post('/webhook', twilioSignature, (req, res) => {

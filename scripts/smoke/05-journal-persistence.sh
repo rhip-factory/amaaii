@@ -25,9 +25,9 @@ rm -f "$DB_FILE"
 
 # Boot once just to create the schema, then pre-seed the user (avoids
 # racing the schema creation against our INSERT).
-# P1-B: server.js now pulls in TypeScript from packages/core via
-# services/*.js shims, so every boot below runs under tsx, not plain node.
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx server.js > /tmp/amaaii-05a.log 2>&1 &
+# P1-E: server.js is gone — the entry point is now
+# apps/server/src/index.ts, assembled from TypeScript throughout, so every boot below runs under tsx, not plain node.
+PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-05a.log 2>&1 &
 SID=$!
 sleep 2
 kill "$SID"; wait "$SID" 2>/dev/null || true; SID=""
@@ -42,7 +42,7 @@ db.run(\"INSERT OR REPLACE INTO users (phone_number, name, age, pregnancy_week, 
 "
 
 # --- First run: drive partway through the journal -------------------------
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx server.js > /tmp/amaaii-05b.log 2>&1 &
+PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-05b.log 2>&1 &
 SID=$!
 sleep 2
 
@@ -63,7 +63,7 @@ db.get('SELECT current_stage FROM journal_sessions WHERE user_phone = ?', ['$PHO
 
 # --- Restart the server mid-flow ---------------------------------------
 kill "$SID"; wait "$SID" 2>/dev/null || true
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx server.js > /tmp/amaaii-05c.log 2>&1 &
+PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-05c.log 2>&1 &
 SID=$!
 sleep 2
 

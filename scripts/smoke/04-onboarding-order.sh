@@ -26,9 +26,9 @@ trap cleanup EXIT
 # Start fresh; we don't want a stale row for $PHONE.
 rm -f "$DB_FILE"
 
-# P1-B: server.js now pulls in TypeScript from packages/core via
-# services/*.js shims, so it must run under tsx, not plain node.
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx server.js > /tmp/amaaii-04.log 2>&1 &
+# P1-E: server.js is gone — the entry point is now
+# apps/server/src/index.ts, assembled from TypeScript throughout, so it must run under tsx, not plain node.
+PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-04.log 2>&1 &
 SID=$!
 sleep 2
 

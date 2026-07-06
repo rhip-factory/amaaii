@@ -1,20 +1,30 @@
-// P1-B: deterministic onboarding parsers (cleanName, parseWeekOrLMP,
-// weeksFromLMP, inferLMPYear, calculateEDDFromWeeks) now live in
-// packages/core/src/onboarding.ts. The 3-strikes LLM fallback stays
-// here, since it's orchestration (reads conversation history from the
-// DB, calls services/llmExtract.js).
-require('tsx/cjs');
-const { sendWhatsAppMessage } = require('../services/twilio');
-const { getAmaaiiResponse } = require('../services/amaaii');
-const { detectDangerSigns, assessMood, extractSymptoms } = require('../services/dangerSigns');
-const userManager = require('./userManager');
-const db = require('../services/database');
-const journalManager = require('../services/journalManager');
-const { log } = require('./logger');
-const { t, pickLang, dangerCopy } = require('../services/i18n');
-const { getRecentTrend, trendForPrompt } = require('../services/trend');
-const llm = require('../services/llmExtract');
-const core = require('../packages/core/src/index.ts');
+// P1-E: ported 1:1 from utils/messageHandler.js (final step of the TS
+// migration — see CLAUDE.md). Deterministic onboarding parsers
+// (cleanName, parseWeekOrLMP, weeksFromLMP, inferLMPYear,
+// calculateEDDFromWeeks) live in packages/core/src/onboarding.ts. The
+// 3-strikes LLM fallback stays here, since it's orchestration (reads
+// conversation history from the DB, calls ./llmExtract).
+
+import { sendWhatsAppMessage } from '@amaaii/adapters';
+import { getAmaaiiResponse } from './amaaii';
+import {
+  detectDangerSigns,
+  assessMood,
+  extractSymptoms,
+  t,
+  pickLang,
+  dangerCopy,
+  cleanName,
+  parseWeekOrLMP,
+  calculateEDDFromWeeks,
+} from '@amaaii/core';
+import type { UpdateUserInput } from '@amaaii/core';
+import userManager, { type UserWithFlag } from './userManager';
+import * as db from './database';
+import journalManager from './journalManager';
+import { log } from './logger';
+import { getRecentTrend, trendForPrompt } from './trend';
+import * as llm from './llmExtract';
 
 // We compare against BOTH the EN and SW reminder markers when checking
 // "did we already nudge the user this session?" — language can change
@@ -24,12 +34,20 @@ const JOURNAL_REMINDER_MARKERS = [
   t('sw', 'journal_reminder'),
 ];
 
+export interface ProcessMessageResult {
+  response: string;
+  urgencyLevel: string;
+  context: string;
+}
+
 // Pure(-ish) message processor: derives the bot's response from the
 // inbound message + DB state, persists the turn, and returns the result.
 // No outbound transport (Twilio / HTTP) — callers handle delivery.
-//
-// Returns: { response, urgencyLevel, context }
-async function processMessage(from, message, profileName) {
+export async function processMessage(
+  from: string,
+  message: string,
+  profileName: string | null
+): Promise<ProcessMessageResult> {
   log.info(`Processing message from ${from}`, { profileName, message });
 
   const user = await userManager.getOrCreateUser(from, profileName);
@@ -40,7 +58,7 @@ async function processMessage(from, message, profileName) {
 
   let response = '';
   let conversationContext = 'general';
-  let dangerSignAnalysis = null;
+  let dangerSignAnalysis: ReturnType<typeof detectDangerSigns> | null = null;
 
   // Onboarding takes precedence over every command except CRITICAL
   // danger signs (per spec §7.4). Otherwise un-onboarded users could
@@ -74,11 +92,16 @@ async function processMessage(from, message, profileName) {
   if (journalManager.isJournalCommand(message) || activeJournalSession) {
     if (!activeJournalSession) {
       const session = await journalManager.startJournalSession(from, user);
-      const result = await journalManager.processJournalResponse(from, message, session.currentStage);
+      // processJournalResponse only returns the {error} shape when there
+      // is no active session in the DB — we just created/fetched one, so
+      // this narrows away that compile-time-only variant. If it were
+      // ever wrong at runtime, `.response` would simply read as
+      // `undefined`, same as the original JS's unchecked property access.
+      const result = await journalManager.processJournalResponse(from, message, session.currentStage) as { response: string };
       response = result.response;
     } else {
       // Manager handles its own session deletion on completion.
-      const result = await journalManager.processJournalResponse(from, message, activeJournalSession.currentStage);
+      const result = await journalManager.processJournalResponse(from, message, activeJournalSession.currentStage) as { response: string };
       response = result.response;
     }
     conversationContext = 'journaling';
@@ -88,7 +111,12 @@ async function processMessage(from, message, profileName) {
     } else {
       const todaysJournal = await db.getTodaysJournal(from);
       if (todaysJournal) {
-        response = await journalManager.generateJournalSummary(todaysJournal, {});
+        // JournalRow (a concrete DB row shape) vs. JournalSummaryData
+        // (a loosely-typed bag with a catch-all index signature) are
+        // structurally compatible in practice but TS's assignability
+        // rules don't bridge "no index signature" -> "has one" for two
+        // separately-declared interfaces without a cast.
+        response = await journalManager.generateJournalSummary(todaysJournal as typeof todaysJournal & Record<string, unknown>, {});
       } else {
         response = "You haven't completed today's journal yet. Type 'journal' to start!";
       }
@@ -151,9 +179,10 @@ async function processMessage(from, message, profileName) {
       // (in either language).
       const todaysJournal = await db.getTodaysJournal(from);
       if (!todaysJournal) {
-        const remindedRecently = (conversationHistory || []).some(
-          (turn) => turn.response && JOURNAL_REMINDER_MARKERS.some((m) => turn.response.includes(m))
-        );
+        const remindedRecently = (conversationHistory || []).some((turn) => {
+          const resp = turn.response;
+          return !!resp && JOURNAL_REMINDER_MARKERS.some((m) => resp.includes(m));
+        });
         if (!remindedRecently) {
           response += `\n\n${t(lang, 'journal_reminder')}`;
         }
@@ -165,7 +194,7 @@ async function processMessage(from, message, profileName) {
     conversationContext === 'journaling' ||
     conversationContext === 'journal_summary' ||
     conversationContext === 'doctor_report'
-      ? { dangerSigns: [], urgencyLevel: 'low', context: conversationContext }
+      ? { dangerSigns: [] as unknown[], urgencyLevel: 'low', context: conversationContext }
       : {
           dangerSigns: dangerSignAnalysis?.detectedSigns || [],
           urgencyLevel: dangerSignAnalysis?.urgencyLevel || 'low',
@@ -182,7 +211,11 @@ async function processMessage(from, message, profileName) {
 }
 
 // Twilio WhatsApp transport: process + send + schedule follow-up.
-async function handleIncomingMessage(from, message, profileName) {
+export async function handleIncomingMessage(
+  from: string,
+  message: string,
+  profileName: string | null
+): Promise<void> {
   try {
     const { response, urgencyLevel } = await processMessage(from, message, profileName);
 
@@ -219,7 +252,7 @@ async function handleIncomingMessage(from, message, profileName) {
 // language between turns. (Phase 0 stays stateless; the proper state
 // machine is Phase 1.)
 const NAME_PROMPT_MARKERS = [
-  "What's your name?",  // EN
+  "What's your name?", // EN
   "Jina lako ni nani?", // SW
 ];
 
@@ -233,18 +266,22 @@ const WEEK_REPROMPT_MARKERS = [
 
 // Liberal parser for the pregnancy-week answer, name cleaning, and the
 // EDD-from-weeks calculation are all deterministic and now live in
-// packages/core/src/onboarding.ts: core.parseWeekOrLMP, core.cleanName,
-// core.calculateEDDFromWeeks (core.weeksFromLMP / core.inferLMPYear are
-// internal helpers used by parseWeekOrLMP itself).
-
-async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
+// packages/core/src/onboarding.ts: parseWeekOrLMP, cleanName,
+// calculateEDDFromWeeks (weeksFromLMP / inferLMPYear are internal
+// helpers used by parseWeekOrLMP itself).
+async function handleOnboarding(
+  user: UserWithFlag,
+  message: string,
+  phoneNumber: string,
+  lang: string = 'en'
+): Promise<string> {
   if (!user.name) {
     const lastBot = await db.getLastBotMessage(phoneNumber);
     const previousWasNamePrompt =
-      lastBot && lastBot.response &&
+      !!lastBot && !!lastBot.response &&
       NAME_PROMPT_MARKERS.some((m) => lastBot.response.includes(m));
     if (previousWasNamePrompt) {
-      const cleaned = core.cleanName(message);
+      const cleaned = cleanName(message);
       // Sanity bounds — a reasonable name is 1-40 chars and has at least one letter.
       if (cleaned.length > 0 && cleaned.length <= 40 && /[a-zA-Z]/.test(cleaned)) {
         await userManager.updateUserProfile(phoneNumber, { name: cleaned });
@@ -257,7 +294,7 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   if (!user.age) {
     const ageMatch = message.match(/\d+/);
     if (ageMatch) {
-      const age = parseInt(ageMatch[0]);
+      const age = parseInt(ageMatch[0], 10);
       await userManager.updateUserProfile(user.phone_number, { age });
       return t(lang, 'age_thanks');
     }
@@ -265,7 +302,7 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   }
 
   if (!user.pregnancy_week) {
-    let parsed = core.parseWeekOrLMP(message);
+    let parsed = parseWeekOrLMP(message);
 
     // 3-strikes LLM fallback: if regex missed AND the bot has already
     // sent the re-prompt twice in the recent history, this is the
@@ -274,16 +311,17 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
     // along", "second trimester", "I'm not really sure but maybe...").
     if (!parsed) {
       const recent = await db.getConversationHistory(phoneNumber, 5);
-      const reprompts = (recent || []).filter(
-        (turn) => turn.response && WEEK_REPROMPT_MARKERS.some((m) => turn.response.includes(m))
-      ).length;
+      const reprompts = (recent || []).filter((turn) => {
+        const resp = turn.response;
+        return !!resp && WEEK_REPROMPT_MARKERS.some((m) => resp.includes(m));
+      }).length;
       if (reprompts >= 2) {
         log.info('Onboarding week: 3-strikes LLM fallback triggered', { phoneNumber, reprompts });
         const out = await llm.extractWeekOrLMP(message).catch(() => null);
         if (out && (out.weeks || out.lmp)) {
           if (out.lmp) {
             const wk = userManager.calculatePregnancyWeek(out.lmp);
-            if (wk >= 1 && wk <= 42) parsed = { weeks: wk, lmp: out.lmp };
+            if (wk !== null && wk >= 1 && wk <= 42) parsed = { weeks: wk, lmp: out.lmp };
           } else if (out.weeks) {
             parsed = { weeks: out.weeks };
           }
@@ -294,12 +332,16 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
     if (parsed && parsed.weeks && parsed.weeks >= 1 && parsed.weeks <= 42) {
       const edd = parsed.lmp
         ? userManager.calculateEDD(parsed.lmp)
-        : core.calculateEDDFromWeeks(parsed.weeks);
-      const update = { pregnancy_week: parsed.weeks, edd };
+        : calculateEDDFromWeeks(parsed.weeks);
+      const update: UpdateUserInput = { pregnancy_week: parsed.weeks, edd };
       if (parsed.lmp) update.lmp = parsed.lmp;
-      await userManager.updateUserProfile(user.phone_number, update);
+      // UpdateUserInput (no index signature) vs. updateUserProfile's
+      // Record<string, unknown> parameter (accepts arbitrary keys and
+      // whitelist-filters them at runtime) — same "no index signature ->
+      // has one" assignability gap as above.
+      await userManager.updateUserProfile(user.phone_number, update as Record<string, unknown>);
       return parsed.lmp
-        ? t(lang, 'week_lmp_thanks', { weeks: parsed.weeks, edd })
+        ? t(lang, 'week_lmp_thanks', { weeks: parsed.weeks, edd: edd ?? '' })
         : t(lang, 'week_thanks', { weeks: parsed.weeks });
     }
     return t(lang, 'week_prompt_again');
@@ -314,7 +356,7 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   return t(lang, 'welcome_back', { name: user.name });
 }
 
-function checkIfMentalHealth(message) {
+function checkIfMentalHealth(message: string): boolean {
   const mentalHealthKeywords = [
     'sad', 'depressed', 'anxious', 'worried', 'scared', 'afraid',
     'crying', 'mood', 'emotional', 'stressed', 'overwhelmed',
@@ -323,5 +365,3 @@ function checkIfMentalHealth(message) {
   const lowerMessage = message.toLowerCase();
   return mentalHealthKeywords.some((keyword) => lowerMessage.includes(keyword));
 }
-
-module.exports = { handleIncomingMessage, processMessage };

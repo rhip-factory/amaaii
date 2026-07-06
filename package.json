@@ -2,7 +2,7 @@
   "name": "whatsapp-pregnancy-bot",
   "version": "0.1.0",
   "description": "WhatsApp bot for pregnant mothers using GPT",
-  "main": "server.js",
+  "main": "apps/server/src/index.ts",
   "packageManager": "pnpm@10.33.0",
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -10,8 +10,8 @@
     ]
   },
   "scripts": {
-    "start": "tsx server.js",
-    "dev": "tsx watch server.js",
+    "start": "tsx apps/server/src/index.ts",
+    "dev": "tsx watch apps/server/src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

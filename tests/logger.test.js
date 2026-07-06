@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { log } from '../utils/logger.js';
+import { log } from '../apps/server/src/logger';
 
 describe('logger redaction', () => {
   let stdout;

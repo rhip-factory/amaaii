@@ -1,12 +1,19 @@
-// P1-D: the OpenAI SDK is no longer imported here — every completion
-// request goes through the single chokepoint in
-// packages/adapters/src/llm.ts (see CLAUDE.md's "LLM redaction layer"
-// work package), which redacts user/assistant message content before it
-// reaches OpenAI. That chokepoint also owns the lazy client init, so
-// this file no longer needs OPENAI_API_KEY to be set just to load.
-require('tsx/cjs');
-const { chat } = require('../packages/adapters/src/index.ts');
-const { log } = require('../utils/logger');
+// P1-E: ported 1:1 from services/amaaii.js (final step of the TS
+// migration — see CLAUDE.md). The OpenAI SDK is not imported here —
+// every completion request goes through the single chokepoint in
+// packages/adapters/src/llm.ts (P1-D's "LLM redaction layer"), which
+// redacts user/assistant message content before it reaches OpenAI. That
+// chokepoint also owns the lazy client init, so this file doesn't need
+// OPENAI_API_KEY to be set just to load.
+//
+// The three prompt constants below are byte-identical to the JS
+// original — this is load-bearing product copy (see
+// amaaii_ai_prompts_guardrails.md), not something to "clean up" while
+// porting.
+
+import { chat } from '@amaaii/adapters';
+import type { ConversationRow, MedicalHistoryRecord } from '@amaaii/core';
+import { log } from './logger';
 
 const BASE_SYSTEM_PROMPT = `You are Amaaii — a warm, knowledgeable companion for pregnant and postpartum mothers in Kenya. The name comes from the Sanskrit word for "mother". You are not a doctor; you are the friend who remembers, listens, and says "let's check with the nurse" when something feels off.
 
@@ -111,7 +118,21 @@ SUPPORTIVE RESPONSES:
 - Moderate: "What you're experiencing sounds really hard. These feelings can be addressed with support."
 - Severe: "Thank you for trusting me with this. You don't have to go through this alone."`;
 
-async function getAmaaiiResponse(userMessage, context = {}) {
+export interface AmaaiiContext {
+  userName?: string | null;
+  pregnancyWeek?: number | null;
+  location?: string | null;
+  isNewUser?: boolean;
+  conversationHistory?: ConversationRow[];
+  currentContext?: string;
+  language?: string | null;
+  /** pre-rendered string from apps/server/src/trend.ts#trendForPrompt */
+  trendLine?: string;
+  /** optional structured medical history (Phase D) */
+  medicalHistory?: MedicalHistoryRecord | null;
+}
+
+export async function getAmaaiiResponse(userMessage: string, context: AmaaiiContext = {}): Promise<string> {
   try {
     const {
       userName,
@@ -121,11 +142,11 @@ async function getAmaaiiResponse(userMessage, context = {}) {
       conversationHistory,
       currentContext,
       language,
-      trendLine,        // pre-rendered string from services/trend.js#trendForPrompt
-      medicalHistory,   // optional structured medical history (Phase D)
+      trendLine,
+      medicalHistory,
     } = context;
 
-    let systemPrompt = BASE_SYSTEM_PROMPT;
+    const systemPrompt = BASE_SYSTEM_PROMPT;
     let contextualPrompt = '';
 
     if (isNewUser) {
@@ -144,14 +165,14 @@ async function getAmaaiiResponse(userMessage, context = {}) {
     const firstName = userName ? userName.trim().split(/\s+/)[0] : undefined;
 
     // Compact USER_CONTEXT block — what the AI should "remember".
-    const ctxLines = [];
+    const ctxLines: string[] = [];
     if (firstName) ctxLines.push(`Name: ${firstName}`);
     if (pregnancyWeek) ctxLines.push(`Pregnancy week: ${pregnancyWeek}`);
     if (location) ctxLines.push(`Location: ${location}`);
     if (trendLine) ctxLines.push(`Recent 7d: ${trendLine}`);
     if (medicalHistory && Object.keys(medicalHistory).length > 0) {
       const mh = medicalHistory;
-      const bits = [];
+      const bits: string[] = [];
       if (mh.gravida != null) bits.push(`G${mh.gravida}`);
       if (mh.parity != null) bits.push(`P${mh.parity}`);
       if (Array.isArray(mh.chronic_conditions) && mh.chronic_conditions.length) {
@@ -177,7 +198,7 @@ async function getAmaaiiResponse(userMessage, context = {}) {
       ? `\n\nLANGUAGE: The user has chosen Kiswahili as her preferred language. Reply in warm Kiswahili sanifu — that's the default for everything you say. Use English only for medical terms with no common Kiswahili equivalent (then gloss them briefly).`
       : `\n\nLANGUAGE: Reply in English.`;
 
-    const messages = [
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
       { role: 'system', content: systemPrompt + '\n\n' + contextualPrompt + userContextBlock + langPrompt },
     ];
 
@@ -185,8 +206,8 @@ async function getAmaaiiResponse(userMessage, context = {}) {
       // Last 3 exchanges. Reversed because db returns DESC.
       const recent = conversationHistory.slice(0, 3).reverse();
       recent.forEach((conv) => {
-        messages.push({ role: 'user', content: conv.message });
-        messages.push({ role: 'assistant', content: conv.response });
+        messages.push({ role: 'user', content: conv.message ?? '' });
+        messages.push({ role: 'assistant', content: conv.response ?? '' });
       });
     }
 
@@ -222,13 +243,14 @@ async function getAmaaiiResponse(userMessage, context = {}) {
       user: { name: userName },
     });
 
-    return completion.choices[0].message.content;
+    // OpenAI's SDK types `message.content` as `string | null` (nullable
+    // for tool-call-only responses). This integration never requests
+    // tool calls, so content is always a string in practice — matching
+    // the original JS's implicit assumption. Cast documents that, rather
+    // than silently loosening this function's return type.
+    return completion.choices[0].message.content as string;
   } catch (error) {
     log.error('OpenAI API error', error);
     return "I'm sorry, I'm having trouble processing your message right now. Please try again later or contact your healthcare provider if this is urgent. 💚";
   }
 }
-
-module.exports = {
-  getAmaaiiResponse,
-};

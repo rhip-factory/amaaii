@@ -9,7 +9,12 @@ DB_FILE="$(pwd)/amaaii.db"
 rm -f "$DB_FILE"
 
 node -e "
-const db = require('./services/database');
+// P1-E: services/database.js is gone; the module now lives at
+// apps/server/src/database.ts. Plain 'node -e' has no TypeScript loader
+// by default, so we register tsx's require hook first — same mechanism
+// 'tsx server.js' used under the hood before this migration.
+require('tsx/cjs');
+const db = require('./apps/server/src/database');
 (async () => {
   await db.initializeDatabase();
   const phone = 'whatsapp:+254700000098';

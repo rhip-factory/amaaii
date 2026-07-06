@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import golden from './fixtures/danger-signs-golden.json' with { type: 'json' };
-import { detectDangerSigns } from '../services/dangerSigns.js';
+import { detectDangerSigns } from '@amaaii/core';
 
 describe('detectDangerSigns golden set', () => {
   for (const entry of golden) {

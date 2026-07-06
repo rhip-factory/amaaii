@@ -27,16 +27,15 @@ export function createConnection(dbPath?: string): sqlite3.Database {
   return new sqlite3.Database(resolveDbPath(dbPath));
 }
 
-// `require`, not `import` — utils/logger.js is a plain CJS module with no
-// .d.ts, and this package's tsconfig has allowJs: false, so importing it
-// via ES `import` would fail module resolution at typecheck time. A bare
-// `require()` call is untyped (resolves to `any`) and isn't subject to
-// that resolution check, mirroring — in reverse — how the services/*.js
-// shims `require()` this package's .ts sources via tsx/cjs.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { log } = require('../../../../utils/logger') as {
-  log: { error: (msg: string, err?: unknown) => void };
-};
+// P1-E: utils/logger.js is gone — the logger now lives in
+// apps/server/src/logger.ts as real TypeScript, so this can be a normal
+// `import` instead of the untyped `require()` the old CJS shim needed.
+// This does mean packages/adapters depends on a file inside apps/server
+// (the reverse of the usual app -> package direction); that's an
+// intentional, pre-existing shortcut carried over unchanged from P1-C
+// (it previously depended on utils/logger.js the same way) — not
+// something introduced by this migration.
+import { log } from '../../../../apps/server/src/logger';
 
 /**
  * Creates tables/indexes and runs idempotent migrations. Ported 1:1 from

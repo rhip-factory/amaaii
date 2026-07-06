@@ -17,6 +17,6 @@ fi
 echo
 echo "Next steps:"
 echo "  1. Restart the server (it auto-recreates the schema):"
-echo "       PORT=3030 node server.js"
+echo "       PORT=3030 pnpm start"
 echo "  2. (PWA) clear the browser localStorage or click the ↻ button"
 echo "     in the app header to start a fresh session."

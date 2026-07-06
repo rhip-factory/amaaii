@@ -1,28 +1,28 @@
-// LLM fallback for soft journal fields. Used ONLY when regex fails to
-// extract the expected shape — never for triage (danger signs stay
-// rule-based per spec §6.2).
+// P1-E: ported 1:1 from services/llmExtract.js (final step of the TS
+// migration — see CLAUDE.md). LLM fallback for soft journal fields. Used
+// ONLY when regex fails to extract the expected shape — never for
+// triage (danger signs stay rule-based per spec §6.2).
 //
 // Calls GPT-3.5 with response_format json_object, a 3-second timeout,
 // and returns null on any failure so callers can fall back to "ask the
 // user to rephrase".
+//
+// The OpenAI SDK is not imported here — every completion request goes
+// through the single chokepoint in packages/adapters/src/llm.ts (P1-D's
+// "LLM redaction layer"), which redacts message content before it
+// reaches OpenAI and owns the lazy client init itself.
 
-// P1-D: the OpenAI SDK is no longer imported here — every completion
-// request goes through the single chokepoint in
-// packages/adapters/src/llm.ts (see CLAUDE.md's "LLM redaction layer"
-// work package), which redacts message content before it reaches
-// OpenAI and owns the lazy client init itself.
-require('tsx/cjs');
-const { chat } = require('../packages/adapters/src/index.ts');
-const { log } = require('../utils/logger');
+import { chat } from '@amaaii/adapters';
+import { log } from './logger';
 
 const TIMEOUT_MS = 3000;
 
-async function withTimeout(promise, ms) {
-  let timer;
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       promise,
-      new Promise((_, reject) => {
+      new Promise<T>((_, reject) => {
         timer = setTimeout(() => reject(new Error('llm_timeout')), ms);
       }),
     ]);
@@ -34,7 +34,13 @@ async function withTimeout(promise, ms) {
 // Generic helper. `instructions` should describe the field shape;
 // `userText` is the message we couldn't parse. Returns the parsed JSON
 // or null.
-async function extract(instructions, userText) {
+//
+// Return type is `Promise<any>` deliberately: this is a raw
+// `JSON.parse()` of free-form LLM output, genuinely dynamic in shape.
+// Every field-specific extractor below does its own runtime validation
+// on the result before trusting a field — exactly mirroring the
+// original JS, which never had a static shape here either.
+export async function extract(instructions: string, userText: string): Promise<any> {
   if (!process.env.OPENAI_API_KEY) return null;
   try {
     const completion = await withTimeout(
@@ -56,7 +62,7 @@ async function extract(instructions, userText) {
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (err) {
-    log.warn('LLM extraction failed', { error: err.message });
+    log.warn('LLM extraction failed', { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -64,7 +70,7 @@ async function extract(instructions, userText) {
 // ---- Field-specific extractors -------------------------------------------
 
 // Mood 1-10. Returns { mood: int|null }.
-async function extractMood(text) {
+export async function extractMood(text: string): Promise<{ mood: number } | null> {
   const out = await extract(
     `You convert a user's reply into a mood score for a daily wellbeing journal.
 Return strict JSON: {"mood": <integer 1-10 or null>}.
@@ -83,7 +89,7 @@ Examples:
 }
 
 // Sleep. Returns { quality: int|null, hours: number|null }.
-async function extractSleep(text) {
+export async function extractSleep(text: string): Promise<{ quality?: number; hours?: number } | null> {
   const out = await extract(
     `Extract a user's sleep details for a daily wellbeing journal.
 Return strict JSON: {"quality": <integer 1-10 or null>, "hours": <number or null>}.
@@ -97,14 +103,14 @@ Examples:
     text
   );
   if (!out) return null;
-  const result = {};
+  const result: { quality?: number; hours?: number } = {};
   if (Number.isInteger(out.quality) && out.quality >= 1 && out.quality <= 10) result.quality = out.quality;
   if (typeof out.hours === 'number' && out.hours >= 0 && out.hours <= 24) result.hours = out.hours;
   return Object.keys(result).length ? result : null;
 }
 
 // Water glasses. Returns { glasses: int|null }.
-async function extractWater(text) {
+export async function extractWater(text: string): Promise<{ glasses: number } | null> {
   const out = await extract(
     `Extract glasses of water consumed today.
 Return strict JSON: {"glasses": <integer or null>}.
@@ -122,7 +128,7 @@ Examples:
 }
 
 // Appetite. Returns { appetite: 'good'|'moderate'|'poor'|null }.
-async function extractAppetite(text) {
+export async function extractAppetite(text: string): Promise<{ appetite: 'good' | 'moderate' | 'poor' } | null> {
   const out = await extract(
     `Classify appetite into one of: "good", "moderate", "poor".
 Return strict JSON: {"appetite": "good"|"moderate"|"poor"|null}.
@@ -140,7 +146,7 @@ Examples:
 }
 
 // Baby movement count. Returns { count: int|null }.
-async function extractMovement(text) {
+export async function extractMovement(text: string): Promise<{ count: number } | null> {
   const out = await extract(
     `Extract the count of fetal movements the user noticed today.
 Return strict JSON: {"count": <integer or null>}.
@@ -158,7 +164,7 @@ Examples:
 }
 
 // Medical history (Phase D). Larger payload, longer timeout.
-async function extractMedicalHistory(text) {
+export async function extractMedicalHistory(text: string): Promise<Record<string, unknown> | null> {
   if (!process.env.OPENAI_API_KEY) return null;
   const instructions = `You convert a free-text obstetric/medical narrative from a pregnant or postpartum mother into a structured profile.
 
@@ -218,26 +224,27 @@ Output: {"gravida":3,"parity":2,"previous_deliveries":[{"mode":"cesarean","compl
           response_format: { type: 'json_object' },
         }
       ),
-      8000  // longer budget for the bigger payload
+      8000 // longer budget for the bigger payload
     );
     const raw = completion.choices?.[0]?.message?.content;
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     // Soft normalization: strip empty arrays / nulls so callers get a tidy object.
     for (const key of Object.keys(parsed)) {
-      if (Array.isArray(parsed[key]) && parsed[key].length === 0) delete parsed[key];
+      const v = parsed[key];
+      if (Array.isArray(v) && v.length === 0) delete parsed[key];
       if (parsed[key] === null) delete parsed[key];
     }
     return parsed;
   } catch (err) {
-    log.warn('Medical history extraction failed', { error: err.message });
+    log.warn('Medical history extraction failed', { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
 
 // Pregnancy-week / LMP extraction — used as the 3-strikes fallback in
 // onboarding when regex repeatedly fails to parse the user's answer.
-async function extractWeekOrLMP(text) {
+export async function extractWeekOrLMP(text: string): Promise<{ weeks?: number; lmp?: string } | null> {
   const today = new Date().toISOString().split('T')[0];
   const out = await extract(
     `You convert a user's reply about their pregnancy stage into structured data.
@@ -253,26 +260,15 @@ Examples:
 - "22" → {"weeks": 22, "lmp": null}
 - "I'm 18 weeks" → {"weeks": 18, "lmp": null}
 - "5 months along" → {"weeks": 22, "lmp": null}
-- "my last period was 22 march" → {"weeks": null, "lmp": "${today.slice(0,4)}-03-22"}
+- "my last period was 22 march" → {"weeks": null, "lmp": "${today.slice(0, 4)}-03-22"}
 - "I think I'm in my second trimester" → {"weeks": 18, "lmp": null}
 - "no idea" → {"weeks": null, "lmp": null}
 - "niko mwezi wa nne" (4 months in SW) → {"weeks": 17, "lmp": null}`,
     text
   );
   if (!out) return null;
-  const result = {};
+  const result: { weeks?: number; lmp?: string } = {};
   if (Number.isInteger(out.weeks) && out.weeks >= 1 && out.weeks <= 42) result.weeks = out.weeks;
   if (typeof out.lmp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(out.lmp)) result.lmp = out.lmp;
   return Object.keys(result).length ? result : null;
 }
-
-module.exports = {
-  extract,
-  extractMood,
-  extractSleep,
-  extractWater,
-  extractAppetite,
-  extractMovement,
-  extractMedicalHistory,
-  extractWeekOrLMP,
-};

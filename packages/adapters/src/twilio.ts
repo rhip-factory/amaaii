@@ -5,15 +5,13 @@
 
 import twilio from 'twilio';
 
-// `require`, not `import` — utils/logger.js is a plain CJS module with
-// no .d.ts, and this package's tsconfig has allowJs: false, so an ES
-// `import` would fail module resolution at typecheck time. A bare
-// `require()` call is untyped (resolves to `any`) and isn't subject to
-// that resolution check.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { log } = require('../../../utils/logger') as {
-  log: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void };
-};
+// P1-E: utils/logger.js is gone — the logger now lives in
+// apps/server/src/logger.ts as real TypeScript, so this can be a normal
+// `import` instead of the untyped `require()` the old CJS shim needed.
+// See packages/adapters/src/sqlite/connection.ts for the note on why
+// this package depends on a file inside apps/server (pre-existing
+// shortcut, carried over unchanged from P1-C).
+import { log } from '../../../apps/server/src/logger';
 
 export type SendImpl = (to: string, message: string) => Promise<unknown>;
 
