@@ -1,16 +1,25 @@
 'use strict';
 
-const PHONE_PATTERNS = [
-  /whatsapp:\+\d+/gi,
-  /\+\d{10,}/g,
-];
+// Text-pattern redaction (phone/email/url/long-digit-run) now lives in
+// packages/core/src/redaction.ts (P1-D: LLM redaction layer — see
+// CLAUDE.md) so log-redaction and LLM-redaction share one source of
+// truth instead of each keeping its own copy of "what does a phone
+// number look like". This module used to define PHONE_PATTERNS locally
+// (`/whatsapp:\+\d+/gi`, `/\+\d{10,}/g`); redactText() below covers both
+// of those exactly, plus emails/URLs-with-userinfo/long digit runs —
+// strictly more coverage, same "leave short numbers alone" guarantee
+// (weeks/ages/mood scores never match).
+//
+// `tsx/cjs` registers Node module hooks that let a plain CommonJS
+// `require()` load TypeScript sources under vitest, tsx, and plain
+// `node` alike. Safe/idempotent to call from multiple files.
+require('tsx/cjs');
+const { redactText } = require('../packages/core/src/index.ts');
 
 const REDACT_KEYS = new Set(['name', 'location', 'body', 'profilename', 'message']);
 
 function redactString(s) {
-  let out = s;
-  for (const re of PHONE_PATTERNS) out = out.replace(re, '[PHONE]');
-  return out;
+  return redactText(s);
 }
 
 function redact(value) {

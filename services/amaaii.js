@@ -1,9 +1,12 @@
-const OpenAI = require('openai');
+// P1-D: the OpenAI SDK is no longer imported here — every completion
+// request goes through the single chokepoint in
+// packages/adapters/src/llm.ts (see CLAUDE.md's "LLM redaction layer"
+// work package), which redacts user/assistant message content before it
+// reaches OpenAI. That chokepoint also owns the lazy client init, so
+// this file no longer needs OPENAI_API_KEY to be set just to load.
+require('tsx/cjs');
+const { chat } = require('../packages/adapters/src/index.ts');
 const { log } = require('../utils/logger');
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 const BASE_SYSTEM_PROMPT = `You are Amaaii — a warm, knowledgeable companion for pregnant and postpartum mothers in Kenya. The name comes from the Sanskrit word for "mother". You are not a doctor; you are the friend who remembers, listens, and says "let's check with the nurse" when something feels off.
 
@@ -131,9 +134,18 @@ async function getAmaaiiResponse(userMessage, context = {}) {
       contextualPrompt = MENTAL_HEALTH_PROMPT;
     }
 
+    // FIRST-NAME POLICY (P1-D, see packages/core/src/redaction.ts): the
+    // system prompt — trusted, built by our own code, never redacted —
+    // is the ONLY place allowed to carry a piece of the user's stored
+    // name, and even then only the first token. The full stored name
+    // (userName) is still used below, but only as the `user` option
+    // passed to chat(), so redactForLLM can strip it out of
+    // conversation-history / current-turn content instead.
+    const firstName = userName ? userName.trim().split(/\s+/)[0] : undefined;
+
     // Compact USER_CONTEXT block — what the AI should "remember".
     const ctxLines = [];
-    if (userName) ctxLines.push(`Name: ${userName}`);
+    if (firstName) ctxLines.push(`Name: ${firstName}`);
     if (pregnancyWeek) ctxLines.push(`Pregnancy week: ${pregnancyWeek}`);
     if (location) ctxLines.push(`Location: ${location}`);
     if (trendLine) ctxLines.push(`Recent 7d: ${trendLine}`);
@@ -196,11 +208,18 @@ async function getAmaaiiResponse(userMessage, context = {}) {
       });
     }
 
-    const completion = await openai.chat.completions.create({
+    // P1-D: routed through the single LLM chokepoint. It redacts every
+    // 'user'/'assistant' message (conversation history + userMessage)
+    // via redactForLLM(content, user) before this ever reaches OpenAI —
+    // `user: { name: userName }` supplies the FULL stored name so any
+    // mention of it in history/current text gets masked, independent of
+    // the first-name-only slice already baked into the system prompt
+    // above.
+    const completion = await chat(messages, {
       model: 'gpt-3.5-turbo',
-      messages,
       max_tokens: 320,
       temperature: 0.55, // tighter than before; warmer + less rambly
+      user: { name: userName },
     });
 
     return completion.choices[0].message.content;

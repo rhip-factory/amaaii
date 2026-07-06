@@ -1,0 +1,221 @@
+[
+  {
+    "fn": "redactText",
+    "note": "whatsapp: prefixed international number",
+    "input": "inbound from whatsapp:+254700000011",
+    "expected": "inbound from [PHONE]"
+  },
+  {
+    "fn": "redactText",
+    "note": "whatsapp: prefixed number mid-sentence",
+    "input": "inbound from whatsapp:+254700000099 just now",
+    "expected": "inbound from [PHONE] just now"
+  },
+  {
+    "fn": "redactText",
+    "note": "bare international +254 number",
+    "input": "call me at +254700000022",
+    "expected": "call me at [PHONE]"
+  },
+  {
+    "fn": "redactText",
+    "note": "local 07XX 10-digit form",
+    "input": "my number is 0700000033, call anytime",
+    "expected": "my number is [PHONE], call anytime"
+  },
+  {
+    "fn": "redactText",
+    "note": "local 01XX 10-digit form",
+    "input": "reach me on 0100000044 after 6pm",
+    "expected": "reach me on [PHONE] after 6pm"
+  },
+  {
+    "fn": "redactText",
+    "note": "local 9-digit form, no leading zero, starts with 7",
+    "input": "no zero: 700000055 is the number",
+    "expected": "no zero: [PHONE] is the number"
+  },
+  {
+    "fn": "redactText",
+    "note": "local 9-digit form, no leading zero, starts with 1",
+    "input": "no zero: 100000066 is the number",
+    "expected": "no zero: [PHONE] is the number"
+  },
+  {
+    "fn": "redactText",
+    "note": "two phone numbers in one message",
+    "input": "+254700000011 or 0700000022, either works",
+    "expected": "[PHONE] or [PHONE], either works"
+  },
+  {
+    "fn": "redactText",
+    "note": "email address, lowercase",
+    "input": "email me at grace@example.com please",
+    "expected": "email me at [EMAIL] please"
+  },
+  {
+    "fn": "redactText",
+    "note": "email address, mixed case with subdomain",
+    "input": "Grace.M@mail.EXAMPLE.co.ke is my address",
+    "expected": "[EMAIL] is my address"
+  },
+  {
+    "fn": "redactText",
+    "note": "email and phone combined",
+    "input": "email grace@example.com or call 0700000033",
+    "expected": "email [EMAIL] or call [PHONE]"
+  },
+  {
+    "fn": "redactText",
+    "note": "long digit run without a plus sign (country code, no +)",
+    "input": "my number is 254700000077, no plus",
+    "expected": "my number is [NUMBER], no plus"
+  },
+  {
+    "fn": "redactText",
+    "note": "very long digit run (14 digits)",
+    "input": "reference number 25470000001199",
+    "expected": "reference number [NUMBER]"
+  },
+  {
+    "fn": "redactText",
+    "note": "URL with username and password userinfo",
+    "input": "reset it here: http://admin:supersecret@example.com/reset",
+    "expected": "reset it here: [URL]"
+  },
+  {
+    "fn": "redactText",
+    "note": "URL with username-only userinfo, no password",
+    "input": "visit https://grace@portal.example.com/profile now",
+    "expected": "visit [URL] now"
+  },
+  {
+    "fn": "redactText",
+    "note": "URL with numeric password userinfo does not leak a partial [PHONE]",
+    "input": "http://alice:0700000088@example.com/reset",
+    "expected": "[URL]"
+  },
+  {
+    "fn": "redactText",
+    "note": "mixed English sentence with a phone number in the middle",
+    "input": "Hi, this is Grace, you can reach me on 0700000044 anytime today",
+    "expected": "Hi, this is Grace, you can reach me on [PHONE] anytime today"
+  },
+  {
+    "fn": "redactText",
+    "note": "mixed Kiswahili sentence with a phone number",
+    "input": "Piga simu yangu 0700000055 kesho asubuhi",
+    "expected": "Piga simu yangu [PHONE] kesho asubuhi"
+  },
+  {
+    "fn": "redactText",
+    "note": "danger-sign sentence must survive semantically unchanged (Kiswahili)",
+    "input": "nina damu nyingi",
+    "expected": "nina damu nyingi"
+  },
+  {
+    "fn": "redactText",
+    "note": "danger-sign sentence with a time-of-day must survive unchanged",
+    "input": "severe bleeding since 2pm",
+    "expected": "severe bleeding since 2pm"
+  },
+  {
+    "fn": "redactText",
+    "note": "pregnancy week and age must not be masked",
+    "input": "I am 34 weeks pregnant and 28 years old",
+    "expected": "I am 34 weeks pregnant and 28 years old"
+  },
+  {
+    "fn": "redactText",
+    "note": "ISO date (LMP) must not be masked",
+    "input": "my LMP was 2024-03-22",
+    "expected": "my LMP was 2024-03-22"
+  },
+  {
+    "fn": "redactText",
+    "note": "slash-separated date must not be masked",
+    "input": "next appointment is 12/05/2024",
+    "expected": "next appointment is 12/05/2024"
+  },
+  {
+    "fn": "redactText",
+    "note": "journal-style numbers (mood/sleep/water) must not be masked",
+    "input": "mood is a 4, slept 6 hours, drank 4 glasses of water",
+    "expected": "mood is a 4, slept 6 hours, drank 4 glasses of water"
+  },
+  {
+    "fn": "redactText",
+    "note": "standalone 7-digit number is NOT treated as a national ID (documented decision)",
+    "input": "my ID number is 1234567, please note it",
+    "expected": "my ID number is 1234567, please note it"
+  },
+  {
+    "fn": "redactText",
+    "note": "standalone 8-digit number is NOT treated as a national ID (documented decision)",
+    "input": "national ID 12345678 on file",
+    "expected": "national ID 12345678 on file"
+  },
+  {
+    "fn": "redactKnownName",
+    "note": "single-word name, exact case",
+    "input": "Grace said she feels fine today",
+    "name": "Grace",
+    "expected": "[NAME] said she feels fine today"
+  },
+  {
+    "fn": "redactKnownName",
+    "note": "single-word name, different case in text",
+    "input": "GRACE called this morning",
+    "name": "Grace",
+    "expected": "[NAME] called this morning"
+  },
+  {
+    "fn": "redactKnownName",
+    "note": "multi-word name, both tokens masked independently",
+    "input": "Grace Wanjiru is 20 weeks along",
+    "name": "Grace Wanjiru",
+    "expected": "[NAME] [NAME] is 20 weeks along"
+  },
+  {
+    "fn": "redactKnownName",
+    "note": "name token shorter than 3 chars is skipped entirely",
+    "input": "Jo Li called about her appointment",
+    "name": "Jo Li",
+    "expected": "Jo Li called about her appointment"
+  },
+  {
+    "fn": "redactKnownName",
+    "note": "mixed-length tokens: only the >=3 char token is masked",
+    "input": "Jo Wanjiru is here for her visit",
+    "name": "Jo Wanjiru",
+    "expected": "Jo [NAME] is here for her visit"
+  },
+  {
+    "fn": "redactKnownName",
+    "note": "no name provided leaves text untouched",
+    "input": "Grace is here",
+    "name": null,
+    "expected": "Grace is here"
+  },
+  {
+    "fn": "redactForLLM",
+    "note": "composed: full name and phone number both masked",
+    "input": "This is Grace Wanjiru, call me on 0700000011",
+    "name": "Grace Wanjiru",
+    "expected": "This is [NAME] [NAME], call me on [PHONE]"
+  },
+  {
+    "fn": "redactForLLM",
+    "note": "composed: without a user, only phone/email are masked",
+    "input": "This is Grace, my email is grace@example.com",
+    "name": null,
+    "expected": "This is Grace, my email is [EMAIL]"
+  },
+  {
+    "fn": "redactForLLM",
+    "note": "composed: danger-sign sentence with name survives semantically apart from the name",
+    "input": "Grace says nina damu nyingi since 2pm",
+    "name": "Grace",
+    "expected": "[NAME] says nina damu nyingi since 2pm"
+  }
+]

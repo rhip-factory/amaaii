@@ -24,9 +24,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# OpenAI client is still constructed eagerly in services/amaaii.js (its lazy
-# refactor is out of scope for 7.2). Pass a dummy key inline so the require
-# chain succeeds at boot — no network calls happen in this smoke.
+# P1-D: the OpenAI client (packages/adapters/src/llm.ts) is now
+# lazy-initialised too, so this dummy key is no longer required just for
+# the require chain to succeed at boot — kept anyway for parity with the
+# other smoke scripts and in case a future path calls the LLM eagerly.
+# No network calls happen in this smoke either way.
 export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-smoke-dummy}"
 
 # Port — defaults to 3000 to match the spec; override with PORT=NNNN for

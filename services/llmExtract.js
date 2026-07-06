@@ -6,15 +6,14 @@
 // and returns null on any failure so callers can fall back to "ask the
 // user to rephrase".
 
-const OpenAI = require('openai');
+// P1-D: the OpenAI SDK is no longer imported here — every completion
+// request goes through the single chokepoint in
+// packages/adapters/src/llm.ts (see CLAUDE.md's "LLM redaction layer"
+// work package), which redacts message content before it reaches
+// OpenAI and owns the lazy client init itself.
+require('tsx/cjs');
+const { chat } = require('../packages/adapters/src/index.ts');
 const { log } = require('../utils/logger');
-
-let cached = null;
-function client() {
-  if (cached) return cached;
-  cached = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return cached;
-}
 
 const TIMEOUT_MS = 3000;
 
@@ -39,16 +38,18 @@ async function extract(instructions, userText) {
   if (!process.env.OPENAI_API_KEY) return null;
   try {
     const completion = await withTimeout(
-      client().chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
+      chat(
+        [
           { role: 'system', content: instructions },
           { role: 'user', content: userText },
         ],
-        max_tokens: 80,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-      }),
+        {
+          model: 'gpt-3.5-turbo',
+          max_tokens: 80,
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        }
+      ),
       TIMEOUT_MS
     );
     const raw = completion.choices?.[0]?.message?.content;
@@ -205,16 +206,18 @@ Output: {"gravida":3,"parity":2,"previous_deliveries":[{"mode":"cesarean","compl
 
   try {
     const completion = await withTimeout(
-      client().chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [
+      chat(
+        [
           { role: 'system', content: instructions },
           { role: 'user', content: text },
         ],
-        max_tokens: 500,
-        temperature: 0,
-        response_format: { type: 'json_object' },
-      }),
+        {
+          model: 'gpt-3.5-turbo',
+          max_tokens: 500,
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        }
+      ),
       8000  // longer budget for the bigger payload
     );
     const raw = completion.choices?.[0]?.message?.content;
