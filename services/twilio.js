@@ -1,48 +1,20 @@
-const twilio = require('twilio');
-const { log } = require('../utils/logger');
+// Thin CJS shim. The real implementation now lives in
+// packages/adapters/src/twilio.ts (P1-C: repository pattern + adapters —
+// see CLAUDE.md). Kept as a same-named/same-shaped module so every
+// existing consumer (utils/messageHandler.js, tests) keeps working
+// unchanged. The lazy Twilio client init (commit 19af4a2 — the server
+// must boot without Twilio creds) is preserved inside the .ts source;
+// this shim does not re-implement or cache anything of its own.
+//
+// `tsx/cjs` registers Node module hooks that let a plain CommonJS
+// `require()` load TypeScript sources under vitest, tsx, and plain
+// `node` alike. Safe/idempotent to call from multiple files.
+require('tsx/cjs');
+const adapters = require('../packages/adapters/src/index.ts');
 
-let cachedClient = null;
-
-function getClient() {
-  if (cachedClient) return cachedClient;
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  cachedClient = twilio(accountSid, authToken);
-  return cachedClient;
-}
-
-async function defaultSend(to, message) {
-  try {
-    const response = await getClient().messages.create({
-      body: message,
-      from: process.env.TWILIO_WHATSAPP_NUMBER,
-      to: to,
-    });
-
-    log.info(`Message sent successfully. SID: ${response.sid}`);
-    return response;
-  } catch (error) {
-    log.error('Error sending WhatsApp message', error);
-    throw error;
-  }
-}
-
-// Test seam: callers (e.g. utils/messageHandler.js) destructure
-// `sendWhatsAppMessage` at require time, so we wrap a swappable impl
-// behind a stable function reference. Tests call __setSendImpl to inject
-// a no-op recorder; reset to defaultSend afterwards.
-let _impl = defaultSend;
-
-async function sendWhatsAppMessage(to, message) {
-  return _impl(to, message);
-}
-
-function __setSendImpl(fn) {
-  _impl = fn || defaultSend;
-}
-
-function __resetSendImpl() {
-  _impl = defaultSend;
-}
-
-module.exports = { sendWhatsAppMessage, getClient, __setSendImpl, __resetSendImpl };
+module.exports = {
+  sendWhatsAppMessage: adapters.sendWhatsAppMessage,
+  getClient: adapters.getClient,
+  __setSendImpl: adapters.__setSendImpl,
+  __resetSendImpl: adapters.__resetSendImpl,
+};
