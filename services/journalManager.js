@@ -1,60 +1,30 @@
+// P1-B: pure parsing (sleep/appetite/symptoms/mood), the stage-machine
+// transition table, and summary/insight text formatting now live in
+// packages/core/src/journal.ts. This file keeps DB access, session
+// persistence, and LLM-fallback orchestration — it's a consumer of
+// core logic, not the source of truth for it anymore.
+require('tsx/cjs');
 const db = require('./database');
-const { detectDangerSigns, assessMood, extractSymptoms } = require('./dangerSigns');
-const { t, pickLang } = require('./i18n');
+const { detectDangerSigns } = require('./dangerSigns');
+const { t, pickLang, dangerCopy } = require('./i18n');
 const llm = require('./llmExtract');
 const { getRecentTrend } = require('./trend');
-
-function dangerCopy(level, lang) {
-  if (level === 'critical') return t(lang, 'danger_critical');
-  if (level === 'high') return t(lang, 'danger_high');
-  if (level === 'moderate') return t(lang, 'danger_moderate');
-  return '';
-}
+const core = require('../packages/core/src/index.ts');
 
 // Free-text journal stages (questions, notes) re-run symptom + danger
 // detection so anything disclosed there isn't silently logged. Mutates
 // `journalUpdate` (merges new symptoms, sets red_flags_detected) and
 // returns a heads-up string to prepend to the bot's reply, or '' if
-// nothing was found.
+// nothing was found. The actual scanning is pure (core.scanFreeText);
+// this wrapper just applies the resulting patch to journalUpdate.
 function scanFreeText(message, journalData, journalUpdate, lang = 'en') {
-  const sx = extractSymptoms(message);
-  const danger = detectDangerSigns(message);
-
-  if (sx.length > 0) {
-    const existing = (journalUpdate.physical_symptoms != null)
-      ? journalUpdate.physical_symptoms
-      : (journalData && journalData.physical_symptoms);
-    let arr = [];
-    if (typeof existing === 'string' && existing.trim().startsWith('[')) {
-      try { const parsed = JSON.parse(existing); if (Array.isArray(parsed)) arr = parsed; } catch (_) {}
-    }
-    journalUpdate.physical_symptoms = JSON.stringify(Array.from(new Set([...arr, ...sx])));
-  }
-
-  if (danger.urgencyLevel === 'critical' || danger.urgencyLevel === 'high') {
-    journalUpdate.red_flags_detected = JSON.stringify(danger.detectedSigns);
-    return `${dangerCopy(danger.urgencyLevel, lang)}\n\n`;
-  }
-  if (sx.length > 0) {
-    const niceList = sx.map((s) => s.replace(/_/g, ' ')).join(', ');
-    return t(lang, 'heads_up_symptoms', { list: niceList });
-  }
-  return '';
-}
-
-function formatSymptoms(raw, lang = 'en') {
-  if (!raw || raw === 'none') return t(lang, 'journal_no_symptoms');
-  if (typeof raw !== 'string') return String(raw);
-  const trimmed = raw.trim();
-  if (trimmed.startsWith('[')) {
-    try {
-      const arr = JSON.parse(trimmed);
-      if (Array.isArray(arr) && arr.length > 0) {
-        return arr.map((s) => String(s).replace(/_/g, ' ')).join(', ');
-      }
-    } catch (_) { /* fall through */ }
-  }
-  return trimmed;
+  const existing = (journalUpdate.physical_symptoms != null)
+    ? journalUpdate.physical_symptoms
+    : (journalData && journalData.physical_symptoms);
+  const result = core.scanFreeText(message, existing, lang);
+  if (result.physicalSymptomsPatch !== undefined) journalUpdate.physical_symptoms = result.physicalSymptomsPatch;
+  if (result.redFlagsPatch !== undefined) journalUpdate.red_flags_detected = result.redFlagsPatch;
+  return result.headsUp;
 }
 
 class JournalManager {
@@ -126,7 +96,7 @@ class JournalManager {
     switch (stage) {
       case 'greeting':
       case 'continue': {
-        nextStage = 'mood';
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
         const baseGreeting = stage === 'continue'
           ? t(lang, 'journal_continue')
           : t(lang, 'journal_greeting');
@@ -153,70 +123,47 @@ class JournalManager {
       }
 
       case 'mood': {
-        let moodScore = this.extractNumber(message);
+        let moodScore = core.extractNumber(message);
         if (!(moodScore && moodScore >= 1 && moodScore <= 10)) {
           // Regex missed → ask the LLM to interpret.
           const out = await llm.extractMood(message);
           if (out && out.mood) moodScore = out.mood;
         }
-        if (moodScore && moodScore >= 1 && moodScore <= 10) {
+        const moodValid = !!(moodScore && moodScore >= 1 && moodScore <= 10);
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek, moodValid });
+        if (moodValid) {
           journalUpdate.emotional_state = moodScore;
           journalUpdate.mood_description = message;
-          nextStage = 'symptoms';
           const ack =
             moodScore >= 7 ? t(lang, 'journal_mood_good') :
             moodScore >= 5 ? t(lang, 'journal_mood_ok') :
             t(lang, 'journal_mood_low');
           response = t(lang, 'journal_mood_followup', { ack });
         } else {
-          nextStage = 'mood';
           response = t(lang, 'journal_mood_invalid');
         }
         break;
       }
 
       case 'symptoms': {
-        const symptoms = extractSymptoms(message);
+        const { value } = core.parseSymptomsAnswer(message);
+        journalUpdate.physical_symptoms = value;
         const dangerAnalysis = detectDangerSigns(message);
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek, dangerUrgency: dangerAnalysis.urgencyLevel });
 
-        // No-symptoms sentinels: "none" (EN), "hapana"/"la"/"sina"/
-        // "najisikia vyema" (SW common ways to say "no" / "I'm fine").
-        const lower = message.toLowerCase();
-        const isNone =
-          /\bnone\b/.test(lower) ||
-          /\bhapana\b/.test(lower) ||
-          /^la[\s,.]/.test(lower) || /^la$/.test(lower) ||
-          /\bsina\b/.test(lower) ||
-          /najisikia\s+(?:vyema|vizuri|sawa)/.test(lower);
-        journalUpdate.physical_symptoms =
-          symptoms.length > 0 ? JSON.stringify(symptoms) :
-          isNone ? 'none' : message;
-
-        if (dangerAnalysis.urgencyLevel === 'critical' || dangerAnalysis.urgencyLevel === 'high') {
+        if (nextStage === 'completed') {
           journalUpdate.red_flags_detected = JSON.stringify(dangerAnalysis.detectedSigns);
           response = `${dangerCopy(dangerAnalysis.urgencyLevel, lang)}\n\n${t(lang, 'journal_pause')}`;
-          nextStage = 'completed';
         } else {
-          nextStage = 'sleep';
           response = t(lang, 'journal_symptoms_noted');
         }
         break;
       }
 
       case 'sleep': {
-        const qualityMatch =
-          message.match(/(\d+)\s*(?:\/|out of)\s*10/i) ||
-          message.match(/\b(\d+)\s+for\s+sleep\b/i) ||
-          message.match(/\bsleep(?:\s+(?:was|is))?(?:\s+(?:a|an))?\s+(\d+)\b/i);
-        const hoursMatch = message.match(/(\d+(?:\.\d+)?)\s*(?:h(?:ours?|rs?)?\b)/i);
-
-        if (qualityMatch) {
-          const q = parseInt(qualityMatch[1], 10);
-          if (q >= 1 && q <= 10) journalUpdate.sleep_quality = q;
-        }
-        if (hoursMatch) {
-          journalUpdate.sleep_hours = parseFloat(hoursMatch[1]);
-        }
+        const parsed = core.parseSleepAnswer(message);
+        if (parsed.quality != null) journalUpdate.sleep_quality = parsed.quality;
+        if (parsed.hours != null) journalUpdate.sleep_hours = parsed.hours;
         // LLM fallback if either signal is missing — covers phrasings
         // like "really bad, only 3 hours" or Kiswahili input.
         if (journalUpdate.sleep_quality == null || journalUpdate.sleep_hours == null) {
@@ -231,15 +178,15 @@ class JournalManager {
           }
         }
 
-        nextStage = pregnancyWeek >= 20 ? 'baby_movement' : 'water';
-        response = pregnancyWeek >= 20
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
+        response = nextStage === 'baby_movement'
           ? t(lang, 'journal_baby_movement_q')
           : t(lang, 'journal_water_q');
         break;
       }
 
       case 'baby_movement': {
-        let movementCount = this.extractNumber(message);
+        let movementCount = core.extractNumber(message);
         if (movementCount === null) {
           const out = await llm.extractMovement(message);
           if (out && out.count != null) movementCount = out.count;
@@ -259,12 +206,12 @@ class JournalManager {
           journalUpdate.baby_movement_time = message;
           response = t(lang, 'journal_movement_noted', { water_q });
         }
-        nextStage = 'water';
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
         break;
       }
 
       case 'water': {
-        let waterCount = this.extractNumber(message);
+        let waterCount = core.extractNumber(message);
         if (waterCount === null) {
           const out = await llm.extractWater(message);
           if (out && out.glasses != null) waterCount = out.glasses;
@@ -279,32 +226,18 @@ class JournalManager {
         } else {
           response = t(lang, 'journal_water_invalid');
         }
-        nextStage = 'appetite';
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
         break;
       }
 
       case 'appetite': {
-        // Priority ladder. Recognise EN + SW words: "nzuri" (good),
-        // "wastani" (moderate), "mbaya"/"hapana" (poor).
-        const lower = message.toLowerCase();
-        let appetiteLevel = null;
-        let regexHit = false;
-        if (/\bpoor\b/.test(lower) || /\bno appetite\b/.test(lower) || /\bno good appetite\b/.test(lower) || /\bmbaya\b/.test(lower)) {
-          appetiteLevel = 'poor'; regexHit = true;
-        } else if (/\bgood\b/.test(lower) || /\bgreat\b/.test(lower) || /\bnzuri\b/.test(lower)) {
-          appetiteLevel = 'good'; regexHit = true;
-        } else if (/\bmoderate\b/.test(lower) || /\bok(?:ay)?\b/.test(lower) || /\bwastani\b/.test(lower)) {
-          appetiteLevel = 'moderate'; regexHit = true;
-        }
-        if (/\bnot\s+poor\b/.test(lower) || /\bsi\s+mbaya\b/.test(lower)) {
-          appetiteLevel = 'moderate'; regexHit = true;
-        }
-        if (!regexHit) {
+        let appetiteLevel = core.parseAppetiteAnswer(message);
+        if (appetiteLevel === null) {
           const out = await llm.extractAppetite(message);
           if (out && out.appetite) appetiteLevel = out.appetite;
         }
         journalUpdate.appetite = appetiteLevel || 'moderate';
-        nextStage = 'questions';
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
         response = t(lang, 'journal_questions_q');
         break;
       }
@@ -317,7 +250,7 @@ class JournalManager {
           journalUpdate.questions_for_doctor = message;
           questionsHeadsUp = scanFreeText(message, journalData, journalUpdate, lang);
         }
-        nextStage = 'notes';
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
         response = `${questionsHeadsUp}${t(lang, 'journal_notes_q')}`;
         break;
       }
@@ -336,7 +269,7 @@ class JournalManager {
         // Stamp the moment the user finished — pairs with started_at
         // (set in startJournalSession) for full duration analytics.
         journalUpdate.completed_at = new Date().toISOString();
-        nextStage = 'completed';
+        nextStage = core.nextJournalStage(stage, { pregnancyWeek });
         const summary = await this.generateJournalSummary(journalData, journalUpdate, lang, pregnancyWeek);
         response = noteHeadsUp + summary;
         break;
@@ -371,79 +304,11 @@ class JournalManager {
   }
 
   async generateJournalSummary(existingData, newData, lang = 'en', pregnancyWeek = 0) {
-    const data = { ...existingData, ...newData };
-    let summary = t(lang, 'journal_summary_title');
-
-    if (data.emotional_state) {
-      const moodEmoji = data.emotional_state >= 7 ? '😊' :
-                       data.emotional_state >= 5 ? '😐' : '😔';
-      summary += `${t(lang, 'journal_summary_mood')} ${data.emotional_state}/10 ${moodEmoji}\n`;
-    }
-
-    if (data.physical_symptoms) {
-      summary += `${t(lang, 'journal_summary_symptoms')} ${formatSymptoms(data.physical_symptoms, lang)}\n`;
-    }
-
-    if (data.sleep_quality || data.sleep_hours) {
-      const parts = [];
-      if (data.sleep_quality) parts.push(`${data.sleep_quality}${t(lang, 'journal_summary_quality')}`);
-      if (data.sleep_hours) parts.push(`${data.sleep_hours} ${t(lang, 'journal_summary_hours')}`);
-      summary += `${t(lang, 'journal_summary_sleep')} ${parts.join(', ')}\n`;
-    }
-
-    if (data.baby_movement_count !== undefined && data.baby_movement_count !== null) {
-      // Only flag low movement counts as concerning when clinically
-      // relevant (after 28 weeks). Below 28w, regular movement isn't
-      // expected at high counts and a ⚠️ here is a false alarm.
-      const concerning = pregnancyWeek > 28 && data.baby_movement_count < 10;
-      const movementStatus = data.baby_movement_count >= 10 ? '✅' : (concerning ? '⚠️' : '👶');
-      summary += `${t(lang, 'journal_summary_movement')} ${data.baby_movement_count} ${t(lang, 'journal_summary_movement_unit')} ${movementStatus}\n`;
-    }
-
-    if (data.water_intake) {
-      const waterStatus = data.water_intake >= 8 ? '✅' : '💧';
-      summary += `${t(lang, 'journal_summary_water')} ${data.water_intake} ${t(lang, 'journal_summary_water_unit')} ${waterStatus}\n`;
-    }
-
-    if (data.appetite) {
-      const appetiteLabel = t(lang, `appetite_${data.appetite}`);
-      summary += `${t(lang, 'journal_summary_appetite')} ${appetiteLabel}\n`;
-    }
-
-    summary += '\n';
-
-    if (data.red_flags_detected) {
-      summary += t(lang, 'journal_summary_red_flag');
-    }
-
-    const recommendations = this.generateRecommendations(data, lang);
-    if (recommendations.length > 0) {
-      summary += t(lang, 'journal_summary_recs');
-      recommendations.forEach((rec) => (summary += `• ${rec}\n`));
-    }
-
-    summary += t(lang, 'journal_summary_done');
-    return summary;
+    return core.generateJournalSummary(existingData, newData, lang, pregnancyWeek);
   }
 
   generateRecommendations(data, lang = 'en') {
-    const recommendations = [];
-    if (data.emotional_state < 5) {
-      recommendations.push(t(lang, 'rec_mood_low'));
-    }
-    if (data.sleep_hours && data.sleep_hours < 6) {
-      recommendations.push(t(lang, 'rec_sleep'));
-    }
-    if (data.water_intake && data.water_intake < 8) {
-      recommendations.push(t(lang, 'rec_water'));
-    }
-    if (data.appetite === 'poor') {
-      recommendations.push(t(lang, 'rec_appetite_poor'));
-    }
-    if (data.baby_movement_count !== undefined && data.baby_movement_count < 10) {
-      recommendations.push(t(lang, 'rec_movement'));
-    }
-    return recommendations;
+    return core.generateRecommendations(data, lang);
   }
 
   async getWeeklySummary(userPhone) {
@@ -479,45 +344,11 @@ class JournalManager {
   }
 
   extractWeeklySymptoms(history) {
-    const symptomCount = {};
-    history.forEach((entry) => {
-      if (!entry.physical_symptoms || entry.physical_symptoms === 'none') return;
-      // Only attempt JSON.parse when the value is actually a JSON array
-      // payload. Free-text user input is ignored rather than silently
-      // swallowed by a try/catch. (D10.)
-      const value = entry.physical_symptoms.trim();
-      if (!value.startsWith('[')) return;
-      const symptoms = JSON.parse(value);
-      if (!Array.isArray(symptoms)) return;
-      symptoms.forEach((symptom) => {
-        symptomCount[symptom] = (symptomCount[symptom] || 0) + 1;
-      });
-    });
-
-    return Object.entries(symptomCount)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([symptom]) => symptom);
+    return core.extractWeeklySymptoms(history);
   }
 
   generateWeeklyInsights(analytics, history) {
-    let insights = '\n💡 **Insights:**\n';
-    if (analytics.avg_mood >= 7) {
-      insights += "• You've had a positive week emotionally! 🌟\n";
-    } else if (analytics.avg_mood < 5) {
-      insights += '• Your mood has been low. Consider reaching out for support. 💚\n';
-    }
-    if (analytics.avg_water >= 8) {
-      insights += '• Great hydration this week! Keep it up! 💧\n';
-    } else {
-      insights += '• Try to increase your water intake. 💧\n';
-    }
-    if (analytics.journal_count >= 6) {
-      insights += '• Excellent journaling consistency! 📝\n';
-    } else if (analytics.journal_count < 3) {
-      insights += '• Try to journal more regularly to track your journey. 📝\n';
-    }
-    return insights;
+    return core.generateWeeklyInsights(analytics, history);
   }
 
   async generateDoctorReport(userPhone, days = 30) {
@@ -556,8 +387,7 @@ class JournalManager {
   }
 
   extractNumber(message) {
-    const match = message.match(/\d+/);
-    return match ? parseInt(match[0]) : null;
+    return core.extractNumber(message);
   }
 
   isJournalCommand(message) {

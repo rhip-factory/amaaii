@@ -1,4 +1,11 @@
-// Placeholder barrel for @amaaii/core.
-// Populated during the gradual JS -> TS migration (see phase-1 plan).
-// Intentionally empty: exporting nothing meaningful yet.
-export {};
+// Barrel for @amaaii/core — pure domain logic extracted from the
+// original JS services (see the phase-1 migration plan). No I/O: no
+// database, no HTTP, no filesystem. Everything here is deterministic
+// given its inputs.
+
+export * from './types';
+export * from './dangerSigns';
+export * from './i18n';
+export * from './trend';
+export * from './onboarding';
+export * from './journal';

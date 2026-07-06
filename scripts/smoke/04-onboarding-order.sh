@@ -26,7 +26,9 @@ trap cleanup EXIT
 # Start fresh; we don't want a stale row for $PHONE.
 rm -f "$DB_FILE"
 
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false node server.js > /tmp/amaaii-04.log 2>&1 &
+# P1-B: server.js now pulls in TypeScript from packages/core via
+# services/*.js shims, so it must run under tsx, not plain node.
+PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx server.js > /tmp/amaaii-04.log 2>&1 &
 SID=$!
 sleep 2
 

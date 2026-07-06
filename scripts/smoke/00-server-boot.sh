@@ -13,11 +13,13 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-smoke-dummy}"
 # environments where 3000 is taken.
 PORT="${PORT:-3000}"
 
-# Run node directly (skipping the pnpm wrapper). pnpm start spawns
-# pnpm -> sh -> node; killing pnpm leaves node orphaned on port 3000.
+# Run tsx directly (skipping the pnpm wrapper). pnpm start spawns
+# pnpm -> sh -> tsx; killing pnpm leaves tsx orphaned on port 3000.
 # Going direct means $SERVER_PID IS the server process, so trap-based
 # cleanup is reliable. Equivalent to `pnpm start` per package.json.
-PORT="$PORT" node server.js &
+# P1-B: server.js now pulls in TypeScript from packages/core via
+# services/*.js shims, so it must run under tsx, not plain node.
+PORT="$PORT" ./node_modules/.bin/tsx server.js &
 SERVER_PID=$!
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true

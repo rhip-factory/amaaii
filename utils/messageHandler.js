@@ -1,3 +1,9 @@
+// P1-B: deterministic onboarding parsers (cleanName, parseWeekOrLMP,
+// weeksFromLMP, inferLMPYear, calculateEDDFromWeeks) now live in
+// packages/core/src/onboarding.ts. The 3-strikes LLM fallback stays
+// here, since it's orchestration (reads conversation history from the
+// DB, calls services/llmExtract.js).
+require('tsx/cjs');
 const { sendWhatsAppMessage } = require('../services/twilio');
 const { getAmaaiiResponse } = require('../services/amaaii');
 const { detectDangerSigns, assessMood, extractSymptoms } = require('../services/dangerSigns');
@@ -5,16 +11,10 @@ const userManager = require('./userManager');
 const db = require('../services/database');
 const journalManager = require('../services/journalManager');
 const { log } = require('./logger');
-const { t, pickLang } = require('../services/i18n');
+const { t, pickLang, dangerCopy } = require('../services/i18n');
 const { getRecentTrend, trendForPrompt } = require('../services/trend');
 const llm = require('../services/llmExtract');
-
-function dangerCopy(level, lang) {
-  if (level === 'critical') return t(lang, 'danger_critical');
-  if (level === 'high') return t(lang, 'danger_high');
-  if (level === 'moderate') return t(lang, 'danger_moderate');
-  return '';
-}
+const core = require('../packages/core/src/index.ts');
 
 // We compare against BOTH the EN and SW reminder markers when checking
 // "did we already nudge the user this session?" — language can change
@@ -231,132 +231,11 @@ const WEEK_REPROMPT_MARKERS = [
   "Sikuelewa",           // SW re-prompt
 ];
 
-// Liberal parser for the pregnancy-week answer. Returns
-// { weeks: int, lmp?: 'YYYY-MM-DD' } or null. Accepts any of:
-//   - "20 weeks" / "20 wks" / "i'm at 20" / "20"
-//   - "wiki 20" / "20 wiki" (SW)
-//   - "22/3/2026" / "2026-03-22" (numeric LMP)
-//   - "22 march" / "march 22" / "22nd of march 2026" (month name LMP)
-//   - "22 machi" (SW month name)
-function parseWeekOrLMP(raw) {
-  if (typeof raw !== 'string') return null;
-  const lower = raw.trim().toLowerCase();
-
-  // Numeric date forms first (most specific).
-  let m = lower.match(/(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})/);
-  if (m) {
-    const lmp = `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
-    return { weeks: weeksFromLMP(lmp), lmp };
-  }
-  m = lower.match(/(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{2,4})/);
-  if (m) {
-    let yr = parseInt(m[3], 10);
-    if (yr < 100) yr += 2000;
-    const lmp = `${yr}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
-    return { weeks: weeksFromLMP(lmp), lmp };
-  }
-
-  // Month-name forms: "22 march", "march 22", "22nd of march", with
-  // optional year. SW months included.
-  const MONTHS = {
-    jan: 1, january: 1, januari: 1,
-    feb: 2, february: 2, februari: 2,
-    mar: 3, march: 3, machi: 3,
-    apr: 4, april: 4, aprili: 4,
-    may: 5, mei: 5,
-    jun: 6, june: 6, juni: 6,
-    jul: 7, july: 7, julai: 7,
-    aug: 8, august: 8, agosti: 8,
-    sep: 9, sept: 9, september: 9, septemba: 9,
-    oct: 10, october: 10, oktoba: 10,
-    nov: 11, november: 11, novemba: 11,
-    dec: 12, december: 12, desemba: 12,
-  };
-  const monthAlt = Object.keys(MONTHS).join('|');
-  // "22 march" / "22nd of march" / "22 march 2026"
-  m = lower.match(new RegExp(`(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthAlt})(?:\\s+(\\d{4}))?`, 'i'));
-  if (!m) {
-    // "march 22" / "march 22 2026"
-    m = lower.match(new RegExp(`(${monthAlt})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?`, 'i'));
-    if (m) m = [m[0], m[2], m[1], m[3]]; // normalise to [_, day, month, year]
-  }
-  if (m) {
-    const day = parseInt(m[1], 10);
-    const mo = MONTHS[m[2].toLowerCase()];
-    if (day >= 1 && day <= 31 && mo) {
-      const yr = m[3] ? parseInt(m[3], 10) : inferLMPYear(mo);
-      const lmp = `${yr}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      return { weeks: weeksFromLMP(lmp), lmp };
-    }
-  }
-
-  // Week patterns (most → least specific).
-  m =
-    lower.match(/(\d+)\s*(?:weeks?|wks?|w\b)/i) ||
-    lower.match(/(\d+)\s*wiki/i) ||
-    lower.match(/wiki\s*(\d+)/i) ||
-    lower.match(/(?:i'?m|im|i\s*am|niko|niko\s*kwa|nina)\s+(?:at\s+|kwa\s+)?(\d+)\b/i);
-  if (m) {
-    const w = parseInt(m[1], 10);
-    if (w >= 1 && w <= 42) return { weeks: w };
-  }
-
-  // Last resort: bare integer in a plausible week range, with no other
-  // numbers in the message. "22" → 22 weeks. "22 march" was already
-  // caught above, so this only fires for genuinely bare numbers.
-  m = lower.match(/^\s*(\d+)\s*$/);
-  if (m) {
-    const n = parseInt(m[1], 10);
-    if (n >= 1 && n <= 42) return { weeks: n };
-  }
-
-  return null;
-}
-
-// LMP year inference: if the month suggests an LMP within ~10 months
-// of today, use this year; otherwise last year. Most pregnancies span
-// less than a year so this heuristic works in 95%+ of demo cases.
-function inferLMPYear(month) {
-  const now = new Date();
-  const thisYear = now.getUTCFullYear();
-  const thisMonth = now.getUTCMonth() + 1;
-  // If the named month is in the future relative to today, assume last year.
-  return month > thisMonth ? thisYear - 1 : thisYear;
-}
-
-function weeksFromLMP(lmp) {
-  const lmpDate = new Date(lmp);
-  if (Number.isNaN(lmpDate.getTime())) return 0;
-  const diffMs = Date.now() - lmpDate.getTime();
-  return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24 * 7)));
-}
-
-// Strip common framing so "Hey, my name is Mboga" / "I'm Mboga" /
-// "Hi I am Mboga" / "Habari, jina langu ni Mboga" all yield "Mboga".
-function cleanName(raw) {
-  let s = (raw || '').trim();
-  // Drop a leading greeting if present.
-  s = s.replace(/^(?:hey|hi|hello|habari|niaje|sasa|poa|hujambo)\s*[,!.\-]*\s*/i, '');
-  // Strip introductions: "my name is X", "I'm X", "I am X", "call me X",
-  // SW: "jina langu ni X", "ninaitwa X", "mimi ni X".
-  const intros = [
-    /^(?:my\s+name\s+is)\s+/i,
-    /^(?:i\s*am|i'?m)\s+/i,
-    /^(?:call\s+me)\s+/i,
-    /^(?:it'?s|this\s+is)\s+/i,
-    /^(?:jina\s+langu\s+ni)\s+/i,
-    /^(?:ninaitwa)\s+/i,
-    /^(?:mimi\s+ni)\s+/i,
-  ];
-  for (const re of intros) s = s.replace(re, '');
-  // If anything is left wrapped in quotes, unwrap.
-  s = s.replace(/^["']\s*/, '').replace(/\s*["']$/, '');
-  // Final trim + collapse internal whitespace.
-  s = s.trim().replace(/\s+/g, ' ');
-  // Cap at first sentence-ending punctuation — names don't have periods.
-  s = s.split(/[.!?,]/)[0].trim();
-  return s;
-}
+// Liberal parser for the pregnancy-week answer, name cleaning, and the
+// EDD-from-weeks calculation are all deterministic and now live in
+// packages/core/src/onboarding.ts: core.parseWeekOrLMP, core.cleanName,
+// core.calculateEDDFromWeeks (core.weeksFromLMP / core.inferLMPYear are
+// internal helpers used by parseWeekOrLMP itself).
 
 async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   if (!user.name) {
@@ -365,7 +244,7 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
       lastBot && lastBot.response &&
       NAME_PROMPT_MARKERS.some((m) => lastBot.response.includes(m));
     if (previousWasNamePrompt) {
-      const cleaned = cleanName(message);
+      const cleaned = core.cleanName(message);
       // Sanity bounds — a reasonable name is 1-40 chars and has at least one letter.
       if (cleaned.length > 0 && cleaned.length <= 40 && /[a-zA-Z]/.test(cleaned)) {
         await userManager.updateUserProfile(phoneNumber, { name: cleaned });
@@ -386,7 +265,7 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   }
 
   if (!user.pregnancy_week) {
-    let parsed = parseWeekOrLMP(message);
+    let parsed = core.parseWeekOrLMP(message);
 
     // 3-strikes LLM fallback: if regex missed AND the bot has already
     // sent the re-prompt twice in the recent history, this is the
@@ -415,7 +294,7 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
     if (parsed && parsed.weeks && parsed.weeks >= 1 && parsed.weeks <= 42) {
       const edd = parsed.lmp
         ? userManager.calculateEDD(parsed.lmp)
-        : calculateEDDFromWeeks(parsed.weeks);
+        : core.calculateEDDFromWeeks(parsed.weeks);
       const update = { pregnancy_week: parsed.weeks, edd };
       if (parsed.lmp) update.lmp = parsed.lmp;
       await userManager.updateUserProfile(user.phone_number, update);
@@ -433,15 +312,6 @@ async function handleOnboarding(user, message, phoneNumber, lang = 'en') {
   }
 
   return t(lang, 'welcome_back', { name: user.name });
-}
-
-function calculateEDDFromWeeks(currentWeeks) {
-  const today = new Date();
-  const daysPregnant = currentWeeks * 7;
-  const daysRemaining = 280 - daysPregnant;
-  const edd = new Date(today);
-  edd.setDate(edd.getDate() + daysRemaining);
-  return edd.toISOString().split('T')[0];
 }
 
 function checkIfMentalHealth(message) {
