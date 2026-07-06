@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@amaaii/core": ["packages/core/src/index.ts"],
+      "@amaaii/core/*": ["packages/core/src/*"],
+      "@amaaii/adapters": ["packages/adapters/src/index.ts"],
+      "@amaaii/adapters/*": ["packages/adapters/src/*"]
+    }
+  },
+  "include": ["packages/**/src", "apps/server/src"]
+}
