@@ -187,6 +187,46 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
         }
       });
 
+      // Idempotent migration: journals.client_entry_id (P2-C). Nullable —
+      // only the PWA structured check-in form (POST /journal/entries)
+      // sets it, as an idempotency key so a double-tap/retry from the
+      // same client can't double-write a journal row. WhatsApp-originated
+      // rows never set this column.
+      //
+      // The CREATE UNIQUE INDEX is chained inside the ALTER's own
+      // callback (rather than issued as a sibling top-level statement)
+      // so it's only ever queued once the column is known to exist —
+      // node-sqlite3's serialized queue guarantees relative order for
+      // statements queued this way, even though the ALTER itself runs
+      // inside an async PRAGMA callback (same pattern already used above
+      // for started_at/completed_at and below for journal_sessions.journal_id).
+      db.all<{ name: string }>(`PRAGMA table_info(journals)`, (err, rows) => {
+        if (err) return;
+        const have = new Set((rows || []).map((r) => r.name));
+        const ensureClientEntryIndex = () => {
+          // Partial unique index — only enforced when client_entry_id is
+          // non-NULL, so WhatsApp rows (which never set it) never collide.
+          // Partial indexes have been supported since SQLite 3.8.0 (2013),
+          // well within range of the bundled sqlite3 driver.
+          db.run(
+            `CREATE UNIQUE INDEX IF NOT EXISTS idx_journals_client_entry_id
+             ON journals(user_phone, client_entry_id)
+             WHERE client_entry_id IS NOT NULL`,
+            (e) => {
+              if (e) log.error('Error creating journals client_entry_id index', e);
+            }
+          );
+        };
+        if (!have.has('client_entry_id')) {
+          db.run(`ALTER TABLE journals ADD COLUMN client_entry_id TEXT`, (e) => {
+            if (e) log.error('Error adding journals.client_entry_id', e);
+            else ensureClientEntryIndex();
+          });
+        } else {
+          ensureClientEntryIndex();
+        }
+      });
+
       db.run(
         `
         CREATE TABLE IF NOT EXISTS journal_sessions (

@@ -30,6 +30,8 @@ const JOURNAL_COLUMNS = new Set([
   'completed',
   'started_at',
   'completed_at',
+  // P2-C: idempotency key set only by the PWA structured check-in form.
+  'client_entry_id',
 ]);
 
 export class SqliteJournalRepository implements JournalRepository {
@@ -128,6 +130,20 @@ export class SqliteJournalRepository implements JournalRepository {
         (err, rows) => {
           if (err) reject(err);
           else resolve(rows);
+        }
+      );
+    });
+  }
+
+  // P2-C idempotency lookup — see JournalRepository#findByClientEntryId.
+  findByClientEntryId(userPhone: string, clientEntryId: string): Promise<JournalRow | undefined> {
+    return new Promise((resolve, reject) => {
+      this.db.get<JournalRow>(
+        `SELECT * FROM journals WHERE user_phone = ? AND client_entry_id = ? LIMIT 1`,
+        [userPhone, clientEntryId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
         }
       );
     });

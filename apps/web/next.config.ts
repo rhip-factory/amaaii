@@ -11,6 +11,16 @@ const API_ORIGIN = process.env.AMAAII_API_ORIGIN || "http://localhost:3000";
 
 const nextConfig: NextConfig = {
   output: "export",
+  // Overridable in case a build needs to write to a named alternate
+  // directory. NOTE (verified empirically on Next 15.5.20): with
+  // `output: "export"`, `next build`'s internal export renderer still
+  // writes a full production build (BUILD_ID, server/, static/, etc.)
+  // into the literal `.next/` directory regardless of this setting — it
+  // is NOT sufficient to protect a `.next` a live `next dev` is using.
+  // Never run `next build` in a checkout where `next dev` is also
+  // running against the same `apps/web/.next` — build in an isolated
+  // git worktree (or a full copy of the repo) instead.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   images: {
     unoptimized: true,
   },
@@ -38,6 +48,10 @@ const nextConfig: NextConfig = {
         { source: "/me", destination: `${API_ORIGIN}/me` },
         { source: "/me/:path*", destination: `${API_ORIGIN}/me/:path*` },
         { source: "/history", destination: `${API_ORIGIN}/history` },
+        // /journal (no sub-path) is the Journal tab's page route — these
+        // sub-paths don't collide with it, same reasoning as /history above.
+        { source: "/journal/entries", destination: `${API_ORIGIN}/journal/entries` },
+        { source: "/journal/today", destination: `${API_ORIGIN}/journal/today` },
       ],
       fallback: [],
     };

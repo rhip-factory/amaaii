@@ -100,3 +100,58 @@ export interface ChatMessage {
   urgency?: Urgency;
   timestamp: string;
 }
+
+// --- Structured journal check-in form (P2-C) --------------------------------
+// Shapes mirrored from apps/server/src/app.ts's POST /journal/entries,
+// GET /journal/today, GET /journal/entries — read directly, not invented.
+
+export type Appetite = "good" | "moderate" | "poor";
+
+export interface JournalEntryInput {
+  mood: number;
+  symptoms: string[];
+  symptomsText?: string;
+  sleepHours: number;
+  appetite: Appetite;
+  babyMovement?: number;
+  note?: string;
+  clientEntryId: string;
+}
+
+export interface JournalEntry {
+  id: number;
+  date: string;
+  clientEntryId: string | null;
+  mood: number | null;
+  symptoms: string[];
+  symptomsText: string | null;
+  sleepHours: number | null;
+  appetite: string | null;
+  babyMovement: number | null;
+  note: string | null;
+  hasRedFlags: boolean;
+  completed: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface JournalEntrySubmitResponse {
+  entry: JournalEntry;
+  deduped: boolean;
+  urgencyLevel: Urgency;
+  escalation?: string;
+}
+
+export interface JournalTodayResponse {
+  entries: JournalEntry[];
+  count: number;
+}
+
+export interface JournalHistoryDay {
+  date: string;
+  entries: JournalEntry[];
+}
+
+export interface JournalHistoryResponse {
+  days: JournalHistoryDay[];
+}

@@ -150,6 +150,15 @@ export interface JournalRepository {
   getTodaysJournals(userPhone: string): Promise<JournalRow[]>;
   getJournalHistory(userPhone: string, days?: number): Promise<JournalRow[]>;
   getJournalAnalytics(userPhone: string, days?: number): Promise<JournalAnalytics>;
+  /**
+   * Idempotency lookup for the PWA structured check-in form (P2-C):
+   * finds the journal row previously written for this (userPhone,
+   * clientEntryId) pair, if any — backed by the partial UNIQUE index on
+   * journals(user_phone, client_entry_id). Returns undefined when no
+   * such row exists (including for WhatsApp-originated rows, which never
+   * set client_entry_id).
+   */
+  findByClientEntryId(userPhone: string, clientEntryId: string): Promise<JournalRow | undefined>;
 }
 
 // --- Journal sessions -------------------------------------------------------

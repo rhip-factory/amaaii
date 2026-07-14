@@ -15,6 +15,8 @@ import {
   getTodaysJournal,
   getTodaysJournals,
   getJournalHistory,
+  createOrUpdateJournal,
+  findJournalByClientEntryId,
   getConversationHistory,
   getMedicalHistory,
   saveMedicalHistory,
@@ -39,8 +41,13 @@ import {
   formatWrongCodeMessage,
   OTP_MAX_ATTEMPTS,
   OTP_EXPIRY_MS,
+  detectDangerSigns,
+  dangerCopy,
+  pickLang,
+  extractSymptoms,
+  SYMPTOM_VALUES,
 } from '@amaaii/core';
-import type { JournalRow } from '@amaaii/core';
+import type { JournalPatch, JournalRow, Symptom } from '@amaaii/core';
 import userManager, { type UserWithFlag } from './userManager';
 
 // The original JS attached `req.userPhone` ad hoc inside requireAuth();
@@ -169,6 +176,137 @@ function formatTime(iso?: string | null): string {
   try {
     return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } catch (_) { return ''; }
+}
+
+// --- POST /journal/entries (P2-C) --------------------------------------------
+// Structured check-in form for the PWA. Writes the SAME journal_data shape
+// (journals table columns) the WhatsApp state machine produces — see
+// apps/server/src/journalManager.ts's 'symptoms'/'sleep'/'appetite'/
+// 'baby_movement'/'notes' stages, which this mirrors field-for-field so
+// weekly summaries, doctor reports, and trend computation keep working
+// across both entry points.
+
+const APPETITE_LEVELS = new Set(['good', 'moderate', 'poor']);
+
+interface JournalEntryInput {
+  clientEntryId: string;
+  mood: number;
+  symptoms: string[];
+  symptomsText: string;
+  sleepHours: number;
+  appetite: string;
+  babyMovement?: number;
+  note: string;
+}
+
+type ValidationResult =
+  | { ok: true; value: JournalEntryInput }
+  | { ok: false; error: string; message: string };
+
+// Honest, field-named 400s — every failure names exactly which field was
+// wrong so the form can point the user at it directly.
+function validateJournalEntryInput(body: unknown): ValidationResult {
+  const b = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>;
+
+  if (typeof b.clientEntryId !== 'string' || b.clientEntryId.trim().length === 0) {
+    return { ok: false, error: 'invalid_clientEntryId', message: 'clientEntryId is required.' };
+  }
+  const clientEntryId = b.clientEntryId.trim();
+
+  const mood = b.mood;
+  if (typeof mood !== 'number' || !Number.isInteger(mood) || mood < 1 || mood > 10) {
+    return { ok: false, error: 'invalid_mood', message: 'mood must be a whole number from 1 to 10.' };
+  }
+
+  let symptoms: string[] = [];
+  if (b.symptoms !== undefined) {
+    if (!Array.isArray(b.symptoms) || b.symptoms.some((s) => typeof s !== 'string')) {
+      return { ok: false, error: 'invalid_symptoms', message: 'symptoms must be an array of strings.' };
+    }
+    const unknown = (b.symptoms as string[]).filter((s) => !SYMPTOM_VALUES.includes(s as Symptom));
+    if (unknown.length > 0) {
+      return { ok: false, error: 'invalid_symptoms', message: `Unknown symptom(s): ${unknown.join(', ')}` };
+    }
+    symptoms = b.symptoms as string[];
+  }
+
+  const symptomsText = typeof b.symptomsText === 'string' ? b.symptomsText.trim() : '';
+
+  const sleepHours = b.sleepHours;
+  if (typeof sleepHours !== 'number' || Number.isNaN(sleepHours) || sleepHours < 0 || sleepHours > 24) {
+    return { ok: false, error: 'invalid_sleepHours', message: 'sleepHours must be a number between 0 and 24.' };
+  }
+
+  const appetite = b.appetite;
+  if (typeof appetite !== 'string' || !APPETITE_LEVELS.has(appetite)) {
+    return { ok: false, error: 'invalid_appetite', message: "appetite must be one of 'good', 'moderate', 'poor'." };
+  }
+
+  let babyMovement: number | undefined;
+  if (b.babyMovement !== undefined && b.babyMovement !== null) {
+    if (typeof b.babyMovement !== 'number' || !Number.isInteger(b.babyMovement) || b.babyMovement < 0) {
+      return { ok: false, error: 'invalid_babyMovement', message: 'babyMovement must be a non-negative whole number.' };
+    }
+    babyMovement = b.babyMovement;
+  }
+
+  const note = typeof b.note === 'string' ? b.note.trim() : '';
+
+  return {
+    ok: true,
+    value: { clientEntryId, mood, symptoms, symptomsText, sleepHours, appetite, babyMovement, note },
+  };
+}
+
+// Mirrors core's parseSymptomsAnswer() value shape exactly (JSON array
+// string | 'none' | raw text) so formatSymptoms()/extractWeeklySymptoms()/
+// computeTrend() in packages/core treat form-written rows identically to
+// WhatsApp-written ones. `symptoms` is the curated chip selection;
+// `symptomsText` is optional freeform text re-scanned for any additional
+// recognised symptoms (mirrors scanFreeText's merge behavior).
+function buildPhysicalSymptoms(symptoms: string[], symptomsText: string): string {
+  const fromText = symptomsText ? extractSymptoms(symptomsText) : [];
+  const merged = Array.from(new Set<string>([...symptoms, ...fromText]));
+  if (merged.length > 0) return JSON.stringify(merged);
+  if (symptomsText) return symptomsText;
+  return 'none';
+}
+
+function toJournalEntryView(row: JournalRow) {
+  const raw = row.physical_symptoms;
+  let symptoms: string[] = [];
+  let symptomsText: string | null = null;
+  if (raw && raw !== 'none') {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const arr = JSON.parse(trimmed);
+        if (Array.isArray(arr)) symptoms = arr.map(String);
+      } catch (_) { symptomsText = trimmed; }
+    } else {
+      symptomsText = trimmed;
+    }
+  }
+  return {
+    id: row.id,
+    date: row.date,
+    clientEntryId: row.client_entry_id ?? null,
+    mood: row.emotional_state ?? null,
+    symptoms,
+    symptomsText,
+    sleepHours: row.sleep_hours ?? null,
+    appetite: row.appetite ?? null,
+    babyMovement: row.baby_movement_count ?? null,
+    note: row.special_notes ?? null,
+    hasRedFlags: !!row.red_flags_detected,
+    completed: !!row.completed,
+    startedAt: row.started_at ?? null,
+    completedAt: row.completed_at ?? null,
+  };
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
 }
 
 export function createApp(): Express {
@@ -562,6 +700,154 @@ export function createApp(): Express {
       res.json({ days });
     } catch (err) {
       log.error('GET /history failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  // --- Structured journal check-in form (P2-C) --------------------------------
+  // The PWA form's alternative to the WhatsApp free-text journal flow. Writes
+  // the same journals-table columns journalManager.ts writes, so weekly
+  // summaries / doctor reports / trend computation work unchanged on rows
+  // from either source. SAFETY: danger-sign detection ALWAYS runs here too —
+  // the form is never a way to bypass triage (see detectDangerSigns call
+  // below, mirroring the 'symptoms'/'notes' stages of the WhatsApp flow).
+  app.post('/journal/entries', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const validation = validateJournalEntryInput(req.body);
+      if (!validation.ok) {
+        res.status(400).json({ error: validation.error, message: validation.message });
+        return;
+      }
+      const { clientEntryId, mood, symptoms, symptomsText, sleepHours, appetite, babyMovement, note } = validation.value;
+
+      const user = await userManager.getOrCreateUser(userPhone);
+      const lang = pickLang(user.language);
+
+      // Re-run the SAME regex-based danger-sign detector the WhatsApp
+      // free-text stages use, over symptoms + symptomsText + note joined —
+      // exactly the fields a mother could disclose something concerning in.
+      const dangerScanText = [
+        symptoms.map((s) => s.replace(/_/g, ' ')).join(', '),
+        symptomsText,
+        note,
+      ].filter(Boolean).join('. ');
+      const danger = detectDangerSigns(dangerScanText);
+      const escalation = danger.urgencyLevel === 'critical' || danger.urgencyLevel === 'high'
+        ? dangerCopy(danger.urgencyLevel, lang)
+        : undefined;
+
+      // Idempotency: a replay of the same (phone, clientEntryId) returns
+      // the already-saved entry rather than writing a second row. The
+      // escalation/urgency in the response is still recomputed from this
+      // request's payload so a retried submission doesn't silently drop
+      // the safety banner.
+      const existing = await findJournalByClientEntryId(userPhone, clientEntryId);
+      if (existing) {
+        res.status(200).json({
+          entry: toJournalEntryView(existing),
+          deduped: true,
+          urgencyLevel: danger.urgencyLevel,
+          ...(escalation ? { escalation } : {}),
+        });
+        return;
+      }
+
+      const physicalSymptoms = buildPhysicalSymptoms(symptoms, symptomsText);
+      const patch: JournalPatch = {
+        emotional_state: mood,
+        physical_symptoms: physicalSymptoms,
+        sleep_hours: sleepHours,
+        appetite,
+        completed: 1,
+        completed_at: new Date().toISOString(),
+        client_entry_id: clientEntryId,
+      };
+      if (babyMovement !== undefined) patch.baby_movement_count = babyMovement;
+      if (note) patch.special_notes = note;
+      if (danger.urgencyLevel === 'critical' || danger.urgencyLevel === 'high') {
+        patch.red_flags_detected = JSON.stringify(danger.detectedSigns);
+      }
+
+      let journalId: number;
+      try {
+        journalId = await createOrUpdateJournal(userPhone, patch, null);
+      } catch (err) {
+        // A genuine race (two concurrent requests for the same brand-new
+        // clientEntryId) loses at the DB's UNIQUE index rather than the
+        // application-level check above — fall back to the same dedupe
+        // response instead of a 500.
+        if (isUniqueConstraintError(err)) {
+          const raced = await findJournalByClientEntryId(userPhone, clientEntryId);
+          if (raced) {
+            res.status(200).json({
+              entry: toJournalEntryView(raced),
+              deduped: true,
+              urgencyLevel: danger.urgencyLevel,
+              ...(escalation ? { escalation } : {}),
+            });
+            return;
+          }
+        }
+        throw err;
+      }
+
+      const todays = await getTodaysJournals(userPhone);
+      const saved = todays.find((j) => j.id === journalId) ?? todays[todays.length - 1];
+      res.status(201).json({
+        entry: toJournalEntryView(saved),
+        deduped: false,
+        urgencyLevel: danger.urgencyLevel,
+        ...(escalation ? { escalation } : {}),
+      });
+    } catch (err) {
+      log.error('POST /journal/entries failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/journal/today', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const todays = await getTodaysJournals(userPhone);
+      // getTodaysJournals returns oldest-first; the form wants newest-first.
+      const entries = todays.slice().reverse().map(toJournalEntryView);
+      res.json({ entries, count: entries.length });
+    } catch (err) {
+      log.error('GET /journal/today failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/journal/entries', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      let days = 14;
+      const rawDays = req.query.days;
+      if (typeof rawDays === 'string' && rawDays.trim() !== '') {
+        const parsed = parseInt(rawDays, 10);
+        if (!Number.isNaN(parsed) && parsed > 0) days = Math.min(parsed, 90);
+      }
+      const history = await getJournalHistory(userPhone, days);
+      // getJournalHistory is already ordered by date DESC — group while
+      // preserving that order (most recent day first).
+      const order: string[] = [];
+      const byDate = new Map<string, JournalRow[]>();
+      for (const row of history) {
+        const key = row.date;
+        if (!byDate.has(key)) {
+          byDate.set(key, []);
+          order.push(key);
+        }
+        byDate.get(key)!.push(row);
+      }
+      const daysOut = order.map((date) => ({
+        date,
+        entries: byDate.get(date)!.map(toJournalEntryView),
+      }));
+      res.json({ days: daysOut });
+    } catch (err) {
+      log.error('GET /journal/entries failed', err);
       res.status(500).json({ error: 'internal_error' });
     }
   });

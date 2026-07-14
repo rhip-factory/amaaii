@@ -1,20 +1,14 @@
-import EmptyState from "@/components/EmptyState";
 import PageContainer from "@/components/PageContainer";
-import { JournalIcon } from "@/components/icons";
+import JournalCheckIn from "@/components/JournalCheckIn";
 
-// Designed empty state only — the real multi-step journal form lives in a
-// later package. For now this tab's whole job is getting a mother into
-// the existing WhatsApp/chat journaling flow, which already works today.
+// The structured daily check-in form (P2-C) — writes the same journal
+// data the WhatsApp free-text flow does, so weekly summaries, doctor
+// reports, and trend computation work unchanged on entries from either
+// source. See apps/server/src/app.ts's POST /journal/entries.
 export default function JournalPage() {
   return (
-    <PageContainer title="Journal" subhead="A two-minute daily check-in — mood, sleep, water, and how baby's doing.">
-      <EmptyState
-        Icon={JournalIcon}
-        title="No entries yet"
-        body="Today's check-in happens in Chat for now — a full journal form is coming soon."
-        ctaLabel="Start today's check-in"
-        ctaHref="/chat?prefill=journal"
-      />
+    <PageContainer title="Journal" subhead="A two-minute daily check-in — mood, sleep, appetite, and how baby's doing.">
+      <JournalCheckIn />
     </PageContainer>
   );
 }

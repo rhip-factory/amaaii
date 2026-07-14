@@ -1,0 +1,438 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- Shared card/field chrome (mirrors profile.module.css's formCard/
+   field so both forms read as the same design system). ---- */
+
+.formCard {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 18px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  box-shadow: var(--shadow-1);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.field > label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.textarea {
+  border: 1.5px solid var(--lavender);
+  background: var(--shell-bg);
+  border-radius: 12px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--ink);
+  outline: none;
+  resize: vertical;
+  min-height: 44px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.textarea:focus {
+  border-color: var(--mid);
+  background: #fff;
+}
+
+/* ---- Mood: 1-10 segmented grid, 5 per row so every tap target clears
+   44px even on a 360px-wide phone. ---- */
+
+.moodGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.moodBtn {
+  min-height: 44px;
+  border: 1.5px solid var(--lavender);
+  background: var(--shell-bg);
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.08s ease;
+}
+.moodBtn:hover:not(.moodBtnActive) {
+  border-color: var(--mid);
+  background: var(--lavender-soft);
+}
+.moodBtn:active {
+  transform: scale(0.96);
+}
+.moodBtnActive {
+  background: var(--deep);
+  border-color: var(--deep);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(124, 71, 175, 0.3);
+}
+.moodScale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---- Symptom chips ---- */
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  min-height: 40px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1.5px solid var(--lavender);
+  background: var(--shell-bg);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.chip:hover:not(.chipActive) {
+  border-color: var(--mid);
+  background: var(--lavender-soft);
+}
+.chipActive {
+  background: var(--deep);
+  border-color: var(--deep);
+  color: #fff;
+}
+
+/* ---- Numeric stepper (sleep hours / baby movement). A stepper reads
+   more precisely on a small screen than a segmented range picker would
+   (sleep_hours is a REAL column — no reason to lossily bucket it into
+   ranges), and +/- buttons give an unambiguous ≥44px tap target without
+   needing a native <input type="number"> spinner, which iOS/Android
+   render inconsistently and too small to tap reliably. ---- */
+
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.stepperBtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1.5px solid var(--lavender);
+  background: var(--shell-bg);
+  color: var(--deep);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.stepperBtn:hover {
+  border-color: var(--mid);
+  background: var(--lavender-soft);
+}
+.stepperBtn:active {
+  transform: scale(0.94);
+}
+.stepperValue {
+  min-width: 64px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.stepperUnit {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+/* ---- Appetite segmented control (same visual language as
+   profile.module.css's .seg/.segOpt). ---- */
+
+.seg {
+  display: inline-flex;
+  border: 1.5px solid var(--lavender);
+  border-radius: 999px;
+  background: var(--shell-bg);
+  padding: 4px;
+  gap: 2px;
+  width: fit-content;
+}
+.segOpt {
+  border: 0;
+  background: transparent;
+  padding: 10px 20px;
+  min-height: 40px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.segOpt[aria-checked="true"] {
+  background: var(--deep);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(124, 71, 175, 0.25);
+}
+.segOpt:hover:not([aria-checked="true"]) {
+  color: var(--deep);
+  background: var(--lavender-soft);
+}
+
+.errorNote {
+  margin: 0;
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+}
+
+.submitBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 13px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(124, 71, 175, 0.22);
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+.submitBtn:hover:not(:disabled) {
+  background: var(--deep-press);
+}
+.submitBtn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.submitBtn:disabled {
+  background: var(--mid);
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ---- Confirmation state ---- */
+
+.confirmStack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Danger escalation — coral is reserved for exactly this: emergency
+   treatment, same tokens as HelpSheet.module.css's .emergencyBox so the
+   form's danger card and the "Get help now" sheet read as one language. */
+.escalationCard {
+  background: #fff6f5;
+  border: 1.5px solid rgba(232, 93, 85, 0.35);
+  border-radius: 16px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.escalationHeading {
+  margin: 0;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--critical);
+}
+.escalationBody {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-line;
+}
+.escalationBtn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--coral);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(232, 93, 85, 0.3);
+}
+.escalationBtn:hover {
+  background: #d04841;
+}
+
+.successCard {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 18px;
+  padding: 26px 22px;
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+.successIcon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--lavender-soft);
+  color: var(--deep);
+  display: grid;
+  place-items: center;
+  margin-bottom: 4px;
+}
+.successTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+  color: var(--ink);
+}
+.successBody {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 11px 20px;
+  border-radius: 999px;
+  border: 1.5px solid var(--lavender);
+  background: #fff;
+  color: var(--deep);
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.secondaryBtn:hover {
+  border-color: var(--mid);
+  background: var(--lavender-soft);
+}
+
+.todayList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.todayItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--lavender-soft);
+  font-size: 13.5px;
+}
+.todayItem:last-child {
+  border-bottom: 0;
+}
+.todayTime {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+}
+.todayGlance {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---- Collapsed "Last 14 days" history ---- */
+
+.history {
+  border: 1px solid var(--lavender);
+  border-radius: 16px;
+  background: var(--lavender-soft);
+  overflow: hidden;
+}
+.historySummary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--ink);
+  min-height: 44px;
+}
+.historySummary::-webkit-details-marker {
+  display: none;
+}
+.historyCount {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--muted);
+}
+.historyBody {
+  padding: 0 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.historyEmpty {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.historyDay {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--lavender);
+  font-size: 13.5px;
+}
+.historyDay:last-child {
+  border-bottom: 0;
+}
+.historyDate {
+  font-weight: 700;
+  color: var(--ink);
+  flex-shrink: 0;
+}
+.historyGlance {
+  color: var(--muted);
+  text-align: right;
+}

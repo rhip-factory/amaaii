@@ -99,6 +99,39 @@ export function LogoutIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function CheckIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base strokeWidth={2.5} {...props}>
+      <polyline points="20 6 9 17 4 12" />
+    </Base>
+  );
+}
+
+export function PlusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base strokeWidth={2.4} {...props}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </Base>
+  );
+}
+
+export function MinusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base strokeWidth={2.4} {...props}>
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </Base>
+  );
+}
+
+export function ChevronDownIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base strokeWidth={2.2} {...props}>
+      <polyline points="6 9 12 15 18 9" />
+    </Base>
+  );
+}
+
 export function SendIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Base strokeWidth={2.4} {...props}>

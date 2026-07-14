@@ -139,6 +139,11 @@ export async function getJournalAnalytics(userPhone: string, days = 7): Promise<
   return adapter.journals.getJournalAnalytics(userPhone, days);
 }
 
+// P2-C idempotency lookup for POST /journal/entries.
+export async function findJournalByClientEntryId(userPhone: string, clientEntryId: string): Promise<JournalRow | undefined> {
+  return adapter.journals.findByClientEntryId(userPhone, clientEntryId);
+}
+
 // --- OTP (P2-B) ---------------------------------------------------------
 
 export async function createOrReplaceOtp(

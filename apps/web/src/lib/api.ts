@@ -13,6 +13,10 @@ import type {
   ApiErrorBody,
   ChatResponse,
   HistoryResponse,
+  JournalEntryInput,
+  JournalEntrySubmitResponse,
+  JournalHistoryResponse,
+  JournalTodayResponse,
   MeResponse,
   MeUser,
   ProfileUpdate,
@@ -82,6 +86,23 @@ export async function updateMe(updates: ProfileUpdate): Promise<{ user: MeUser }
 export async function fetchHistory(): Promise<HistoryResponse> {
   const res = await authedFetch("/history");
   return parseJsonOrThrow<HistoryResponse>(res);
+}
+
+// --- Structured journal check-in form (P2-C) --------------------------------
+
+export async function submitJournalEntry(input: JournalEntryInput): Promise<JournalEntrySubmitResponse> {
+  const res = await authedFetch("/journal/entries", { method: "POST", body: JSON.stringify(input) });
+  return parseJsonOrThrow<JournalEntrySubmitResponse>(res);
+}
+
+export async function fetchTodayJournal(): Promise<JournalTodayResponse> {
+  const res = await authedFetch("/journal/today");
+  return parseJsonOrThrow<JournalTodayResponse>(res);
+}
+
+export async function fetchJournalHistory(days = 14): Promise<JournalHistoryResponse> {
+  const res = await authedFetch(`/journal/entries?days=${days}`);
+  return parseJsonOrThrow<JournalHistoryResponse>(res);
 }
 
 // /chat's error body (see apps/server/src/app.ts) carries a user-facing

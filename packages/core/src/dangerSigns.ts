@@ -195,6 +195,26 @@ export function assessMood(message: string): Mood {
   return 'neutral';
 }
 
+// Canonical symptom vocabulary extractSymptoms() below can return.
+// Exported so a caller building a curated UI (e.g. the PWA's structured
+// journal-form symptom chips, P2-C) can validate against exactly the
+// same list instead of duplicating it out of sync. Keep in sync by hand
+// with the `symptom:` values in the patterns array below.
+export const SYMPTOM_VALUES: Symptom[] = [
+  'nausea',
+  'vomiting',
+  'headache',
+  'back_pain',
+  'cramping',
+  'bleeding',
+  'swelling',
+  'fatigue',
+  'dizziness',
+  'constipation',
+  'heartburn',
+  'insomnia',
+];
+
 export function extractSymptoms(message: string): Symptom[] {
   const symptoms: Symptom[] = [];
   const symptomPatterns: { pattern: RegExp; symptom: Symptom }[] = [

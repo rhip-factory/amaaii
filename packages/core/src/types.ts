@@ -96,6 +96,9 @@ export interface JournalRow {
   started_at?: string | null;
   completed_at?: string | null;
   timestamp?: string;
+  /** Idempotency key set only by the PWA structured check-in form
+   *  (POST /journal/entries, P2-C) — null for WhatsApp-originated rows. */
+  client_entry_id?: string | null;
 }
 
 /** Aggregate row shape returned by db.getJournalAnalytics(). */
