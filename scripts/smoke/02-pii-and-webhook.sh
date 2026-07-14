@@ -15,12 +15,16 @@ set -euo pipefail
 # P1-E: server.js is gone — the entry point is now
 # apps/server/src/index.ts, assembled from TypeScript throughout, so both runs below use tsx, not plain node.
 
+# Scratch DB via DB_PATH — never touch the repo's ./amaaii.db, which may
+# back a live demo server.
+DB_FILE=$(mktemp -u /tmp/amaaii-smoke-02-XXXXXX.db)
+
 cleanup() {
   if [ -n "${SID:-}" ]; then
     kill "$SID" 2>/dev/null || true
     wait "$SID" 2>/dev/null || true
   fi
-  rm -f "${LOG:-}" "${LOG2:-}"
+  rm -f "${LOG:-}" "${LOG2:-}" "$DB_FILE"
 }
 trap cleanup EXIT
 
@@ -38,7 +42,7 @@ URL="http://localhost:${PORT}/webhook"
 
 # --- Run 1: enforce=true, missing signature → 403 ----------------------------
 LOG=$(mktemp)
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=true NODE_ENV=production ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG" 2>&1 &
+PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=true NODE_ENV=production ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG" 2>&1 &
 SID=$!
 sleep 2
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
@@ -51,7 +55,7 @@ SID=""
 
 # --- Run 2: enforce=false, missing signature → 200, redaction in logs --------
 LOG2=$(mktemp)
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG2" 2>&1 &
+PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG2" 2>&1 &
 SID=$!
 sleep 2
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \

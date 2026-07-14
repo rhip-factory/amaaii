@@ -13,13 +13,16 @@ PORT="${PORT:-3000}"
 SMOKE_BASE_URL="http://localhost:${PORT}"
 
 PHONE="whatsapp:+254700009904"
-DB_FILE="$(pwd)/amaaii.db"
+# Scratch DB via DB_PATH — never touch the repo's ./amaaii.db, which may
+# back a live demo server.
+DB_FILE=$(mktemp -u /tmp/amaaii-smoke-04-XXXXXX.db)
 
 cleanup() {
   if [ -n "${SID:-}" ]; then
     kill "$SID" 2>/dev/null || true
     wait "$SID" 2>/dev/null || true
   fi
+  rm -f "$DB_FILE"
 }
 trap cleanup EXIT
 
@@ -28,7 +31,7 @@ rm -f "$DB_FILE"
 
 # P1-E: server.js is gone — the entry point is now
 # apps/server/src/index.ts, assembled from TypeScript throughout, so it must run under tsx, not plain node.
-PORT="$PORT" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-04.log 2>&1 &
+PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-04.log 2>&1 &
 SID=$!
 sleep 2
 

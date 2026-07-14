@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rm -f amaaii.db
+# Scratch DB via DB_PATH — never touch the repo's ./amaaii.db, which may
+# back a live demo server (deleting a live SQLite file leaves the running
+# process writing to an unlinked inode).
+DB_FILE=$(mktemp -u /tmp/amaaii-smoke-00-XXXXXX.db)
+rm -f "$DB_FILE"
 
 # services/twilio.js's successor (packages/adapters/src/twilio.ts)
 # constructs its client lazily, so the server boots fine without
@@ -24,12 +28,12 @@ LOG=$(mktemp)
 # apps/server/src/index.ts, assembled from TypeScript throughout
 # (apps/server/src + packages/core + packages/adapters), so it still
 # must run under tsx, not plain node.
-PORT="$PORT" ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG" 2>&1 &
+PORT="$PORT" DB_PATH="$DB_FILE" ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG" 2>&1 &
 SERVER_PID=$!
 cleanup() {
   kill "$SERVER_PID" 2>/dev/null || true
   wait 2>/dev/null || true
-  rm -f "$LOG"
+  rm -f "$LOG" "$DB_FILE"
 }
 trap cleanup EXIT
 
@@ -61,5 +65,5 @@ token=$(curl -sS -X POST -H 'Content-Type: application/json' \
   ")
 [ -n "$token" ] || { echo "FAIL: POST /auth/login did not return a token"; exit 1; }
 
-test -f amaaii.db   # DB was auto-recreated
+test -f "$DB_FILE"   # DB was auto-recreated
 echo "PASS: server boot + db auto-create"
