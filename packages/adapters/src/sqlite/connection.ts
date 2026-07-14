@@ -240,6 +240,37 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
          ON journal_sessions(updated_at)`,
         (err) => {
           if (err) log.error('Error creating journal_sessions index', err);
+        }
+      );
+
+      // OTP codes (P2-B). One row per phone — a fresh /auth/otp/request
+      // wholesale-replaces the row (see SqliteOtpRepository#createOrReplace).
+      // sent_timestamps is a JSON array of ISO strings: the rolling send
+      // history that packages/core/src/otp.ts#checkOtpRateLimit prunes
+      // against to enforce "max 3 sends per phone per rolling hour".
+      // code_hash is HMAC-SHA256(phone:code) — the plaintext code is
+      // never persisted (see apps/server/src/otp.ts).
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS otp_codes (
+          phone TEXT PRIMARY KEY,
+          code_hash TEXT NOT NULL,
+          expires_at DATETIME NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          sent_timestamps TEXT NOT NULL DEFAULT '[]',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating otp_codes table', err);
+        }
+      );
+
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON otp_codes(expires_at)`,
+        (err) => {
+          if (err) log.error('Error creating otp_codes index', err);
           else resolve();
         }
       );

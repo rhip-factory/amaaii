@@ -118,6 +118,91 @@
   line-height: 1.5;
 }
 
+/* --- Code step (P2-B) --------------------------------------------------- */
+
+.backLink {
+  display: inline-block;
+  margin-bottom: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.backLink:hover {
+  color: var(--deep);
+}
+
+.codeRow {
+  border: 1.5px solid var(--lavender);
+  border-radius: 12px;
+  background: var(--shell-bg);
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.codeRow:focus-within {
+  border-color: var(--mid);
+  background: #fff;
+}
+.codeRow input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  text-align: center;
+  padding: 14px 10px 14px 16px;
+  color: var(--ink);
+}
+
+.devHint {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--mid);
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+}
+.devHint strong {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.resendRow {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.resendLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--deep);
+  cursor: pointer;
+}
+.resendLink:hover {
+  color: var(--deep-press);
+  text-decoration: underline;
+}
+.resendLink:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
+}
+
 .foot {
   margin-top: 24px;
   font-size: 11px;

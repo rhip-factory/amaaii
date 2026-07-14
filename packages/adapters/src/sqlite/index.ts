@@ -13,6 +13,7 @@ import { SqliteJournalSessionRepository } from './journalSessionRepository';
 import { SqliteSymptomRepository } from './symptomRepository';
 import { SqliteMedicalHistoryRepository } from './medicalHistoryRepository';
 import { SqliteAncVisitRepository } from './ancVisitRepository';
+import { SqliteOtpRepository } from './otpRepository';
 
 export * from './connection';
 export * from './userRepository';
@@ -22,6 +23,7 @@ export * from './journalSessionRepository';
 export * from './symptomRepository';
 export * from './medicalHistoryRepository';
 export * from './ancVisitRepository';
+export * from './otpRepository';
 
 /**
  * Builds a fully-wired DatabaseAdapter backed by a single sqlite3
@@ -40,6 +42,7 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
     symptoms: new SqliteSymptomRepository(db),
     medicalHistory: new SqliteMedicalHistoryRepository(db),
     ancVisits: new SqliteAncVisitRepository(db),
+    otp: new SqliteOtpRepository(db),
     initialize: () => initializeSchema(db),
     close: () =>
       new Promise<void>((resolve, reject) => {

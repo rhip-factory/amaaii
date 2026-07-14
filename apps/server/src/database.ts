@@ -20,6 +20,7 @@ import type {
   LastBotMessageRow,
   MedicalHistoryInput,
   MedicalHistoryRecord,
+  OtpRecord,
   UpdateUserInput,
   UserRow,
 } from '@amaaii/core';
@@ -136,4 +137,27 @@ export async function getJournalHistory(userPhone: string, days = 7): Promise<Jo
 
 export async function getJournalAnalytics(userPhone: string, days = 7): Promise<JournalAnalytics> {
   return adapter.journals.getJournalAnalytics(userPhone, days);
+}
+
+// --- OTP (P2-B) ---------------------------------------------------------
+
+export async function createOrReplaceOtp(
+  phone: string,
+  codeHash: string,
+  expiresAt: string,
+  sentTimestamps: string[]
+): Promise<void> {
+  return adapter.otp.createOrReplace(phone, codeHash, expiresAt, sentTimestamps);
+}
+
+export async function getOtp(phone: string): Promise<OtpRecord | null> {
+  return adapter.otp.get(phone);
+}
+
+export async function recordOtpAttempt(phone: string): Promise<number> {
+  return adapter.otp.recordAttempt(phone);
+}
+
+export async function deleteOtp(phone: string): Promise<void> {
+  return adapter.otp.delete(phone);
 }

@@ -11,3 +11,4 @@ export * from './onboarding';
 export * from './journal';
 export * from './repositories';
 export * from './redaction';
+export * from './otp';

@@ -229,6 +229,45 @@ export interface AncVisitRepository {
   markANCVisitAttended(visitId: number): Promise<number>;
 }
 
+// --- OTP codes (P2-B) --------------------------------------------------------
+
+/** Row shape of the `otp_codes` table (one row per phone; a fresh
+ *  /auth/otp/request always replaces the previous row wholesale — see
+ *  OtpRepository#createOrReplace). `sentTimestamps` is the rolling send
+ *  history used for rate limiting (packages/core/src/otp.ts), decoded
+ *  from the adapter's JSON-array column back into `string[]` here. */
+export interface OtpRecord {
+  phone: string;
+  codeHash: string;
+  expiresAt: string;
+  attempts: number;
+  sentTimestamps: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OtpRepository {
+  /**
+   * Wholesale-replaces any existing OTP row for `phone`: new `codeHash`
+   * / `expiresAt`, `attempts` reset to 0, `sentTimestamps` set to
+   * exactly the array passed in. This method is pure persistence — the
+   * caller is expected to have already computed the post-prune,
+   * post-append array via packages/core/src/otp.ts#pruneSentTimestamps
+   * (mirrors the rest of this file: repositories store data, they don't
+   * decide rate-limit windows).
+   */
+  createOrReplace(
+    phone: string,
+    codeHash: string,
+    expiresAt: string,
+    sentTimestamps: string[]
+  ): Promise<void>;
+  get(phone: string): Promise<OtpRecord | null>;
+  /** Increments `attempts` by 1 and returns the new (post-increment) count. */
+  recordAttempt(phone: string): Promise<number>;
+  delete(phone: string): Promise<void>;
+}
+
 // --- Aggregate --------------------------------------------------------------
 
 /**
@@ -245,6 +284,7 @@ export interface DatabaseAdapter {
   symptoms: SymptomRepository;
   medicalHistory: MedicalHistoryRepository;
   ancVisits: AncVisitRepository;
+  otp: OtpRepository;
   /** Creates tables/indexes and runs idempotent migrations. Mirrors
    *  services/database.js#initializeDatabase(). */
   initialize(): Promise<void>;

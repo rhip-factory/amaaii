@@ -18,15 +18,30 @@ import {
   getConversationHistory,
   getMedicalHistory,
   saveMedicalHistory,
+  getOtp,
+  createOrReplaceOtp,
+  recordOtpAttempt,
+  deleteOtp,
 } from './database';
 import { getRecentTrend } from './trend';
 import * as llmExtract from './llmExtract';
 import { log } from './logger';
 import twilioSignature from './middleware/twilioSignature';
 import * as auth from './auth';
+import { generateOtpCode, hashOtpCode, hashesMatch } from './otp';
 import { PUBLIC_DIR } from './paths';
+import { sendWhatsAppMessage } from '@amaaii/adapters';
+import {
+  checkOtpRateLimit,
+  pruneSentTimestamps,
+  formatRateLimitMessage,
+  isOtpExpired,
+  formatWrongCodeMessage,
+  OTP_MAX_ATTEMPTS,
+  OTP_EXPIRY_MS,
+} from '@amaaii/core';
 import type { JournalRow } from '@amaaii/core';
-import type { UserWithFlag } from './userManager';
+import userManager, { type UserWithFlag } from './userManager';
 
 // The original JS attached `req.userPhone` ad hoc inside requireAuth();
 // this augmentation gives that the same (optional — set by middleware,
@@ -194,6 +209,163 @@ export function createApp(): Express {
     res.json({ token, user: { phone: normalized } });
   });
 
+  // --- OTP auth (P2-B) --------------------------------------------------------
+  // Real sign-in flow: request a 6-digit code, then verify it for a bearer
+  // token in the same shape POST /auth/login returns. POST /auth/login above
+  // stays wired for back-compat (existing tests + a phone-only fallback).
+  //
+  // Delivery: if Twilio creds + a WhatsApp sender number are configured, the
+  // code is sent as a WhatsApp message. Otherwise this is DEV MODE — the code
+  // is logged (through the redacting logger; the phone is masked
+  // automatically by its phone-pattern regex, the code itself is short-lived
+  // enough to log in the clear) and returned inline as `devCode` so the whole
+  // flow is testable/usable without Twilio, but only when NODE_ENV isn't
+  // 'production'.
+  app.post('/auth/otp/request', async (req: Request, res: Response) => {
+    try {
+      const { phone } = req.body || {};
+      const normalized = auth.normalizePhone(phone);
+      if (!normalized) {
+        res.status(400).json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' });
+        return;
+      }
+
+      const now = new Date();
+      const existing = await getOtp(normalized);
+      const priorSends = existing?.sentTimestamps ?? [];
+      const rateCheck = checkOtpRateLimit(priorSends, now);
+      if (rateCheck.limited) {
+        res.status(429).json({
+          error: 'rate_limited',
+          message: formatRateLimitMessage(rateCheck.retryAfterMs),
+          retryAfterSeconds: Math.ceil(rateCheck.retryAfterMs / 1000),
+        });
+        return;
+      }
+
+      const code = generateOtpCode();
+      const twilioConfigured = !!(
+        process.env.TWILIO_ACCOUNT_SID &&
+        process.env.TWILIO_AUTH_TOKEN &&
+        process.env.TWILIO_WHATSAPP_NUMBER
+      );
+
+      let devCode: string | undefined;
+      if (twilioConfigured) {
+        try {
+          await sendWhatsAppMessage(
+            normalized,
+            `Your Amaaii sign-in code is ${code}. It expires in 10 minutes.`
+          );
+        } catch (err) {
+          log.error('Failed to send OTP via WhatsApp', err, { phone: normalized });
+          res.status(502).json({
+            error: 'delivery_failed',
+            message: 'Could not send the code. Please try again in a moment.',
+          });
+          return;
+        }
+      } else {
+        log.info('OTP dev-mode code generated (no Twilio creds configured)', {
+          phone: normalized,
+          code,
+        });
+        if (process.env.NODE_ENV !== 'production') {
+          devCode = code;
+        }
+      }
+
+      // Only persist (and count against the rate limit) once delivery
+      // actually happened — a failed Twilio send above returns before this,
+      // so it doesn't burn a rate-limit slot or invalidate a still-good code.
+      const sentTimestamps = [...pruneSentTimestamps(priorSends, now), now.toISOString()];
+      await createOrReplaceOtp(
+        normalized,
+        hashOtpCode(normalized, code),
+        new Date(now.getTime() + OTP_EXPIRY_MS).toISOString(),
+        sentTimestamps
+      );
+
+      res.json({ sent: true, ...(devCode ? { devCode } : {}) });
+    } catch (err) {
+      log.error('POST /auth/otp/request failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.post('/auth/otp/verify', async (req: Request, res: Response) => {
+    try {
+      const { phone, code } = req.body || {};
+      const normalized = auth.normalizePhone(phone);
+      if (!normalized) {
+        res.status(400).json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' });
+        return;
+      }
+      if (typeof code !== 'string' || !/^\d{6}$/.test(code.trim())) {
+        res.status(400).json({ error: 'invalid_code', message: 'Enter the 6-digit code.' });
+        return;
+      }
+      const trimmedCode = code.trim();
+
+      const record = await getOtp(normalized);
+      if (!record) {
+        res.status(400).json({
+          error: 'no_code',
+          message: 'No active code for this number — request a new one.',
+        });
+        return;
+      }
+
+      const now = new Date();
+      if (isOtpExpired(record.expiresAt, now)) {
+        await deleteOtp(normalized);
+        res.status(410).json({ error: 'expired', message: 'Code expired — send a new one.' });
+        return;
+      }
+
+      if (record.attempts >= OTP_MAX_ATTEMPTS) {
+        await deleteOtp(normalized);
+        res.status(429).json({
+          error: 'too_many_attempts',
+          message: 'Too many incorrect tries — send a new code.',
+        });
+        return;
+      }
+
+      const candidateHash = hashOtpCode(normalized, trimmedCode);
+      if (!hashesMatch(candidateHash, record.codeHash)) {
+        const attempts = await recordOtpAttempt(normalized);
+        const remaining = Math.max(0, OTP_MAX_ATTEMPTS - attempts);
+        if (remaining === 0) {
+          await deleteOtp(normalized);
+          res.status(429).json({
+            error: 'too_many_attempts',
+            message: 'Too many incorrect tries — send a new code.',
+          });
+          return;
+        }
+        res.status(401).json({
+          error: 'wrong_code',
+          message: formatWrongCodeMessage(remaining),
+          attemptsRemaining: remaining,
+        });
+        return;
+      }
+
+      await deleteOtp(normalized);
+      // Same fix as GET/PUT /me below: ensure the user row exists so a
+      // phone that has only ever signed in via OTP (never messaged
+      // WhatsApp) isn't a ghost until its first /chat turn.
+      await userManager.getOrCreateUser(normalized);
+      const token = auth.issueToken(normalized);
+      log.info('PWA OTP login', { phone: normalized });
+      res.json({ token, user: { phone: normalized } });
+    } catch (err) {
+      log.error('POST /auth/otp/verify failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   // Bearer-token middleware. Attaches req.userPhone if a valid token is
   // present; rejects with 401 otherwise.
   function requireAuth(req: Request, res: Response, next: NextFunction): void {
@@ -242,16 +414,13 @@ export function createApp(): Express {
   app.get('/me', requireAuth, async (req: Request, res: Response) => {
     try {
       const userPhone = req.userPhone as string;
-      const user = await getUser(userPhone);
-      if (!user) {
-        res.json({
-          user: { phone: userPhone },
-          todayJournal: null,
-          weekDescription: null,
-          tip: tipFor(null, null),
-        });
-        return;
-      }
+      // P2-B fix: getOrCreate (not getUser) — a phone that only ever
+      // signed in via OTP/demo login (never sent a WhatsApp/chat message,
+      // which used to be the only path that created the row via
+      // processMessage) previously hit the `!user` placeholder branch
+      // forever. See the PUT /me fix below for the write-side half of the
+      // same bug.
+      const user = await userManager.getOrCreateUser(userPhone);
       const todaysJournals = await getTodaysJournals(userPhone);
       const completedToday = todaysJournals.filter((j) => j.completed);
       const lastJournal = todaysJournals[todaysJournals.length - 1] || null;
@@ -291,6 +460,11 @@ export function createApp(): Express {
   app.put('/me', requireAuth, async (req: Request, res: Response) => {
     try {
       const userPhone = req.userPhone as string;
+      // P2-B fix (flagged in P2-A): the user row used to be created only
+      // inside processMessage (the WhatsApp/chat path), so a PUT /me
+      // before any chat turn ran an UPDATE against zero rows and
+      // silently no-op'd. getOrCreate first so the row always exists.
+      await userManager.getOrCreateUser(userPhone);
       const updates: Record<string, unknown> = {};
       for (const key of PROFILE_FIELDS) {
         const v = (req.body || {})[key];

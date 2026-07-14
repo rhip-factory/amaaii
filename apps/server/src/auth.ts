@@ -1,9 +1,11 @@
 // P1-E: ported 1:1 from services/auth.js (final step of the TS migration
-// — see CLAUDE.md). Lightweight auth for the PWA demo. Phase 0/demo
-// only — no real OTP challenge (Phase 3 will add proper SMS/email
-// verification). The token is an HMAC-signed payload {phone, iat, exp}
-// so we don't trust the client to keep it honest. Real production
-// deployments swap this for OAuth / Twilio Verify.
+// — see CLAUDE.md). Token signing/verification + phone normalization
+// shared by BOTH sign-in paths: the original phone-only demo login
+// (POST /auth/login, kept for back-compat) and the real OTP challenge
+// added in P2-B (POST /auth/otp/request + /verify, apps/server/src/app.ts
+// + apps/server/src/otp.ts). The token is an HMAC-signed payload
+// {phone, iat, exp} so we don't trust the client to keep it honest. Real
+// production deployments may still swap this for OAuth / Twilio Verify.
 
 import crypto from 'node:crypto';
 
