@@ -1,0 +1,34 @@
+@import "../styles/tokens.css";
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+}
+
+/* Stagger-in animation for home cards — the one orchestrated motion
+   moment (design brief: nothing else animates on load). Applied via a
+   data attribute + inline --stagger-index custom property per card. */
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+[data-stagger] {
+  animation: stagger-in 250ms ease-out both;
+  animation-delay: calc(var(--stagger-index, 0) * 40ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-stagger] {
+    animation: none;
+  }
+}

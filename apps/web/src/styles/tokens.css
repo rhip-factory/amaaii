@@ -1,0 +1,108 @@
+/* ============================================================
+ * Amaaii brand tokens — copied verbatim from public/styles.css
+ * (the identity sampled from the Logo PDF). Keep the two files
+ * in sync if the brand palette ever changes.
+ * ============================================================ */
+:root {
+  --lavender: #e2d8f3;
+  --lavender-soft: #f2ecfa;
+  --mid: #9f5dc1;
+  --deep: #7c47af;
+  --deep-press: #6a3996;
+  --coral: #e85d55;
+  --coral-soft: #f4a89e;
+  --ink: #2a1a3d;
+  --muted: #6b5a7e;
+  --shell-bg: #fbfafd;
+  --bot-bg: #f2ecfa;
+  --user-bg: #7c47af;
+  --critical: #c53030;
+  --high: #dd6b20;
+
+  --bubble-radius: 18px;
+
+  --shadow-1: 0 1px 2px rgba(42, 26, 61, 0.06), 0 4px 12px rgba(42, 26, 61, 0.04);
+  --shadow-2: 0 8px 30px rgba(124, 71, 175, 0.18);
+  --shadow-3: 0 24px 60px rgba(124, 71, 175, 0.1);
+
+  --sidebar-w: 240px;
+  --topbar-h: 56px;
+  --bottom-nav-h: 64px;
+  --help-strip-h: 52px;
+
+  --font-body: var(--font-jakarta), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+}
+
+/* Dark-theme aware surface aliases. The brand is a light, airy purple —
+   we don't ship a bespoke dark palette for this scaffold, but every
+   surface below is expressed as a token so a real dark mode is a
+   token swap, not a rewrite. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shell-bg: #1c1420;
+    --ink: #f4effb;
+    --muted: #b7a9c9;
+    --bot-bg: #2a2032;
+    --lavender-soft: #2a2032;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--shell-bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--deep);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--deep-press);
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Visible keyboard focus everywhere — quality-floor requirement. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2.5px solid var(--mid);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

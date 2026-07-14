@@ -1,0 +1,38 @@
+.pad {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 20px 32px;
+}
+
+@media (min-width: 900px) {
+  .pad {
+    padding: 40px 36px 48px;
+  }
+}
+
+.head {
+  margin-bottom: 22px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 26px;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0 0 6px;
+}
+
+@media (min-width: 900px) {
+  .title {
+    font-size: 30px;
+  }
+}
+
+.subhead {
+  color: var(--muted);
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+}

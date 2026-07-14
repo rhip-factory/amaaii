@@ -12,3 +12,9 @@ build/
 *.db-journal
 coverage/
 .vitest-cache/
+
+# Next.js (apps/web)
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo

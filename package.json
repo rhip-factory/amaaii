@@ -12,7 +12,9 @@
   "scripts": {
     "start": "tsx apps/server/src/index.ts",
     "dev": "tsx watch apps/server/src/index.ts",
+    "dev:web": "pnpm --filter web dev",
     "build": "tsc -p tsconfig.build.json",
+    "build:web": "pnpm --filter web build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

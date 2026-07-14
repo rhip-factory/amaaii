@@ -1,0 +1,58 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.greeting {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+
+@media (min-width: 900px) {
+  .greeting {
+    font-size: 32px;
+  }
+}
+
+.subgreeting {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+
+.errorNote {
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+.skeleton {
+  height: 18px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--lavender-soft) 0%, #fff 50%, var(--lavender-soft) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  max-width: 220px;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

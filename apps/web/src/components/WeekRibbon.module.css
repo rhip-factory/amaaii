@@ -1,0 +1,102 @@
+.card {
+  background: linear-gradient(140deg, #f8f1ff 0%, #ffffff 80%);
+  border: 1px solid var(--lavender);
+  border-radius: 20px;
+  padding: 24px 22px 22px;
+  box-shadow: var(--shadow-1);
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mid);
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+
+.weekRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.weekNumber {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 44px;
+  line-height: 1;
+  color: var(--deep);
+  letter-spacing: -0.01em;
+}
+
+.weekOf {
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.produce {
+  margin: 6px 0 18px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* ---- Track ---- */
+.track {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--lavender);
+  overflow: visible;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--mid) 0%, var(--deep) 100%);
+  transition: width 0.4s ease;
+}
+
+.dot {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--coral);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(232, 93, 85, 0.5);
+  transform: translate(-50%, -50%);
+  transition: left 0.4s ease;
+}
+
+.scaleLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* ---- Empty state (no week set yet) ---- */
+.emptyBody {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+  margin: 4px 0 16px;
+}
+
+.emptyCta {
+  display: inline-flex;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--deep);
+}
+.emptyCta:hover {
+  color: var(--deep-press);
+  text-decoration: underline;
+}
