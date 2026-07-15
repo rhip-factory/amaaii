@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import styles from "./AppShell.module.css";
 import HelpSheet from "./HelpSheet";
+import OfflineBanner from "./OfflineBanner";
 import { AlertIcon, ChatIcon, HomeIcon, InsightsIcon, JournalIcon, LogoutIcon, ProfileIcon } from "./icons";
 import { useLogout, useSession } from "@/lib/useSession";
 import { useMe } from "@/lib/MeContext";
@@ -68,6 +69,8 @@ export default function AppShell({ children }: AppShellProps) {
             <LogoutIcon width={18} height={18} />
           </button>
         </header>
+
+        <OfflineBanner language={language} />
 
         <main className={styles.content}>{children}</main>
 

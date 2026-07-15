@@ -9,7 +9,7 @@ import { resolveGestationalWeek } from "@/lib/pregnancy";
 import styles from "./home.module.css";
 
 export default function HomePage() {
-  const { me, loading, error } = useMe();
+  const { me, loading, error, stale } = useMe();
 
   const name = me?.user.name?.trim().split(/\s+/)[0] || "there";
   const isSw = me?.user.language === "sw";
@@ -27,6 +27,12 @@ export default function HomePage() {
             </h1>
             <p className={styles.subgreeting}>
               {week ? `Week ${week} of your journey.` : "Tell me about your pregnancy to personalize this page."}
+              {stale && (
+                <span className={styles.staleNote}>
+                  {" "}
+                  {isSw ? "· taarifa za mwisho zilizohifadhiwa" : "· showing your last saved info"}
+                </span>
+              )}
             </p>
           </div>
         )}

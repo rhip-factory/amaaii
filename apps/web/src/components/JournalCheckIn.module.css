@@ -206,6 +206,55 @@
   font-size: 13.5px;
 }
 
+/* ---- Offline outbox (P2-D): a queued entry the server later rejected
+   (4xx) on flush. Same soft-red language as .errorNote — this is a real
+   problem needing attention, just not a clinical one — with a dismiss
+   button since it isn't a form validation error. ---- */
+.droppedNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+}
+.dismissBtn {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+/* "Waiting to sync" badge on a queued-but-unconfirmed today entry.
+   Deliberately the same muted/lavender language as the rest of the
+   neutral chrome — NOT coral, which stays reserved for danger/escalation
+   (see .escalationCard above and OfflineBanner.module.css). */
+.syncBadge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--deep);
+  background: var(--lavender-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.staleNote {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--muted);
+}
+
 .submitBtn {
   display: inline-flex;
   align-items: center;
@@ -372,6 +421,7 @@
   min-width: 52px;
 }
 .todayGlance {
+  flex: 1;
   color: var(--ink);
   font-weight: 600;
 }

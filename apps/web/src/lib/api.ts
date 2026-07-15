@@ -9,6 +9,7 @@
 //    (rewrites don't exist once there's no server — see next.config.ts).
 
 import { clearSession, getToken } from "./storage";
+import { cachedGet, type CachedResult } from "./offlineCache";
 import type {
   ApiErrorBody,
   ChatResponse,
@@ -27,6 +28,13 @@ const API_BASE =
     ? process.env.NEXT_PUBLIC_API_ORIGIN
     : "";
 
+// Short enough that a hung request on a bad connection resolves to a
+// network-failure classification quickly (see outbox.ts's
+// isClientRejection / JournalCheckIn's submit catch, and offlineCache.ts's
+// stale-while-revalidate fallback) rather than spinning indefinitely —
+// part of the P2-D "never a spinner-forever" goal.
+const REQUEST_TIMEOUT_MS = 8000;
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -43,7 +51,7 @@ export class UnauthorizedError extends ApiError {
   }
 }
 
-async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+async function authedFetch(path: string, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
   const token = getToken();
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
@@ -53,7 +61,14 @@ async function authedFetch(path: string, init: RequestInit = {}): Promise<Respon
   headers.set("X-Amaaii-Api", "1");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...init, headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (res.status === 401) {
     clearSession();
@@ -73,9 +88,18 @@ async function parseJsonOrThrow<T>(res: Response): Promise<T> {
   return data;
 }
 
-export async function fetchMe(): Promise<MeResponse> {
-  const res = await authedFetch("/me");
-  return parseJsonOrThrow<MeResponse>(res);
+// --- Offline-first reads (P2-D) ---------------------------------------------
+// fetchMe / fetchTodayJournal / fetchJournalHistory are stale-while-
+// revalidate: offline (or on any fetch failure), they resolve with the
+// last-known response from IndexedDB instead of throwing, marked
+// `stale: true`, so Home/Journal always have something honest to render
+// — see offlineCache.ts for the full read-path rationale.
+
+export async function fetchMe(): Promise<CachedResult<MeResponse>> {
+  return cachedGet("me", async () => {
+    const res = await authedFetch("/me");
+    return parseJsonOrThrow<MeResponse>(res);
+  });
 }
 
 export async function updateMe(updates: ProfileUpdate): Promise<{ user: MeUser }> {
@@ -95,14 +119,18 @@ export async function submitJournalEntry(input: JournalEntryInput): Promise<Jour
   return parseJsonOrThrow<JournalEntrySubmitResponse>(res);
 }
 
-export async function fetchTodayJournal(): Promise<JournalTodayResponse> {
-  const res = await authedFetch("/journal/today");
-  return parseJsonOrThrow<JournalTodayResponse>(res);
+export async function fetchTodayJournal(): Promise<CachedResult<JournalTodayResponse>> {
+  return cachedGet("journal:today", async () => {
+    const res = await authedFetch("/journal/today");
+    return parseJsonOrThrow<JournalTodayResponse>(res);
+  });
 }
 
-export async function fetchJournalHistory(days = 14): Promise<JournalHistoryResponse> {
-  const res = await authedFetch(`/journal/entries?days=${days}`);
-  return parseJsonOrThrow<JournalHistoryResponse>(res);
+export async function fetchJournalHistory(days = 14): Promise<CachedResult<JournalHistoryResponse>> {
+  return cachedGet(`journal:history:${days}`, async () => {
+    const res = await authedFetch(`/journal/entries?days=${days}`);
+    return parseJsonOrThrow<JournalHistoryResponse>(res);
+  });
 }
 
 // /chat's error body (see apps/server/src/app.ts) carries a user-facing

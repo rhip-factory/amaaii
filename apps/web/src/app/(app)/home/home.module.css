@@ -25,6 +25,13 @@
   font-size: 14.5px;
 }
 
+/* Stale-while-revalidate marker (P2-D) — this page is rendering the last
+   cached /me response, not a fresh one. Same muted tone as .subgreeting;
+   this is informational, not a warning. */
+.staleNote {
+  font-style: italic;
+}
+
 .errorNote {
   background: #fee6e6;
   color: #6e1f1f;

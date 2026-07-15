@@ -1,0 +1,15 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--lavender);
+  flex-shrink: 0;
+}
+.banner svg {
+  flex-shrink: 0;
+}
