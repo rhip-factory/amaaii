@@ -23,7 +23,7 @@ import type {
   ProfileUpdate,
 } from "./types";
 
-const API_BASE =
+export const API_BASE =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_ORIGIN
     ? process.env.NEXT_PUBLIC_API_ORIGIN
     : "";

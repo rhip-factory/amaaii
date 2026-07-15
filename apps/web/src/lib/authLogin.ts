@@ -3,6 +3,7 @@
 // this file for a real OTP challenge; nothing else in the app should call
 // /auth/login directly, so that swap stays a one-file change.
 
+import { API_BASE } from "./api";
 import type { ApiErrorBody, LoginResponse } from "./types";
 
 export class LoginError extends Error {
@@ -14,7 +15,7 @@ export class LoginError extends Error {
 
 /** POST /auth/login — accepts the raw string the user typed (07XX… or +254…); the server normalizes it. */
 export async function login(phone: string): Promise<LoginResponse> {
-  const res = await fetch("/auth/login", {
+  const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone }),
