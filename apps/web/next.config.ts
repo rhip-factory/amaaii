@@ -40,6 +40,14 @@ const nextConfig: NextConfig = {
           has: [{ type: "header", key: "x-amaaii-api" }],
           destination: `${API_ORIGIN}/chat`,
         },
+        // Same collision as /chat: "/insights" is BOTH the Insights tab's
+        // page route and the API's GET /insights endpoint (P2-E) — gate on
+        // the api-call header so ordinary navigations still reach the page.
+        {
+          source: "/insights",
+          has: [{ type: "header", key: "x-amaaii-api" }],
+          destination: `${API_ORIGIN}/insights`,
+        },
       ],
       // These don't collide with any page route, so plain (afterFiles)
       // rewrites are enough.

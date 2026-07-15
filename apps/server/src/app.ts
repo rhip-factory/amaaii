@@ -46,6 +46,10 @@ import {
   pickLang,
   extractSymptoms,
   SYMPTOM_VALUES,
+  computeTrend,
+  computeDailySeries,
+  computeSymptomCounts,
+  computeRedFlagDates,
 } from '@amaaii/core';
 import type { JournalPatch, JournalRow, Symptom } from '@amaaii/core';
 import userManager, { type UserWithFlag } from './userManager';
@@ -848,6 +852,54 @@ export function createApp(): Express {
       res.json({ days: daysOut });
     } catch (err) {
       log.error('GET /journal/entries failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  // --- Insights (P2-E) ---------------------------------------------------------
+  // Chart-ready aggregates for the PWA Insights tab, computed from the SAME
+  // journals table both the WhatsApp flow and the PWA form write to — so
+  // check-ins from either source appear in the same series.
+  //
+  // Window: 14 (default) or 30 days ONLY — these are the two options the
+  // UI's segmented control offers; anything else is an honest 400 rather
+  // than a silent clamp (this is a chart API with a fixed vocabulary, not
+  // a general history export like GET /journal/entries?days=N).
+  //
+  // Per-day aggregation: multiple check-ins on one day are AVERAGED per
+  // metric, and symptoms are union-counted per entry — see
+  // computeDailySeries / computeSymptomCounts in packages/core/src/trend.ts
+  // for the full rationale. Series include every recorded observation
+  // (even from a check-in that was interrupted before completion — e.g. a
+  // danger-sign escalation ends the WhatsApp flow early without setting
+  // completed=1, but the mood already given that morning is real data),
+  // while `trend` keeps computeTrend's long-standing completed-only
+  // averages and `checkinsCount` counts completed check-ins (mirroring
+  // GET /me's todayCheckinCount semantics).
+  app.get('/insights', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      let days = 14;
+      const rawDays = req.query.days;
+      if (rawDays !== undefined) {
+        if (rawDays !== '14' && rawDays !== '30') {
+          res.status(400).json({ error: 'invalid_days', message: 'days must be 14 or 30.' });
+          return;
+        }
+        days = parseInt(rawDays, 10);
+      }
+      const journals = await getJournalHistory(userPhone, days);
+      res.json({
+        window: days,
+        checkinsCount: (journals || []).filter((j) => !!j.completed).length,
+        trend: computeTrend(journals, days),
+        moodSeries: computeDailySeries(journals, (j) => j.emotional_state),
+        sleepSeries: computeDailySeries(journals, (j) => j.sleep_hours),
+        symptomCounts: computeSymptomCounts(journals, 6),
+        redFlagDates: computeRedFlagDates(journals),
+      });
+    } catch (err) {
+      log.error('GET /insights failed', err);
       res.status(500).json({ error: 'internal_error' });
     }
   });

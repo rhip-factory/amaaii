@@ -14,6 +14,8 @@ import type {
   ApiErrorBody,
   ChatResponse,
   HistoryResponse,
+  InsightsResponse,
+  InsightsWindow,
   JournalEntryInput,
   JournalEntrySubmitResponse,
   JournalHistoryResponse,
@@ -130,6 +132,19 @@ export async function fetchJournalHistory(days = 14): Promise<CachedResult<Journ
   return cachedGet(`journal:history:${days}`, async () => {
     const res = await authedFetch(`/journal/entries?days=${days}`);
     return parseJsonOrThrow<JournalHistoryResponse>(res);
+  });
+}
+
+// --- Insights (P2-E) ---------------------------------------------------------
+// Same stale-while-revalidate path as the other offline-first GETs, keyed
+// per window so a cached 14-day view is never silently presented as the
+// 30-day one. The Home trends card shares the `insights:14` key with the
+// Insights tab's default view, so either screen warms the cache for both.
+
+export async function fetchInsights(days: InsightsWindow = 14): Promise<CachedResult<InsightsResponse>> {
+  return cachedGet(`insights:${days}`, async () => {
+    const res = await authedFetch(`/insights?days=${days}`);
+    return parseJsonOrThrow<InsightsResponse>(res);
   });
 }
 

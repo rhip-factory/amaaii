@@ -1,0 +1,100 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* One filter row, above everything it scopes (dataviz interaction rule) —
+   same segmented-control visual language as profile/journal. */
+.segRow {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1.5px solid var(--lavender);
+  border-radius: 999px;
+  background: var(--shell-bg);
+  padding: 4px;
+  gap: 2px;
+  width: fit-content;
+}
+.segOpt {
+  border: 0;
+  background: transparent;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.segOpt[aria-checked="true"] {
+  background: var(--deep);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(124, 71, 175, 0.25);
+}
+.segOpt:hover:not([aria-checked="true"]) {
+  color: var(--deep);
+  background: var(--lavender-soft);
+}
+
+/* Refetch keeps the frame: previous render held at reduced opacity, no
+   skeleton flash, no layout jump. */
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: opacity 0.15s ease;
+}
+.contentFetching {
+  opacity: 0.55;
+}
+
+.staleNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+.errorNote {
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+.chartNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.skeleton {
+  height: 180px;
+  border-radius: 18px;
+  background: linear-gradient(90deg, var(--lavender-soft) 0%, #fff 50%, var(--lavender-soft) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

@@ -155,3 +155,38 @@ export interface JournalHistoryDay {
 export interface JournalHistoryResponse {
   days: JournalHistoryDay[];
 }
+
+// --- Insights (P2-E) ---------------------------------------------------------
+// Shapes mirrored from apps/server/src/app.ts's GET /insights (which passes
+// through packages/core/src/trend.ts's computeTrend / computeDailySeries /
+// computeSymptomCounts / computeRedFlagDates output).
+
+export type InsightsWindow = 14 | 30;
+
+/** One per-day averaged observation (multiple same-day check-ins are
+ *  averaged server-side — see computeDailySeries in core). */
+export interface SeriesPoint {
+  /** YYYY-MM-DD (UTC), matches journals.date. */
+  date: string;
+  value: number;
+}
+
+export interface SymptomCount {
+  /** Humanized (underscores already replaced), e.g. "back pain". */
+  symptom: string;
+  count: number;
+}
+
+export interface InsightsResponse {
+  window: InsightsWindow;
+  /** Completed check-ins in the window (mirrors GET /me's todayCheckinCount semantics). */
+  checkinsCount: number;
+  /** Core computeTrend output (completed-only averages); null when no history. */
+  trend: TrendSummary | null;
+  moodSeries: SeriesPoint[];
+  sleepSeries: SeriesPoint[];
+  /** Top 6 by count. */
+  symptomCounts: SymptomCount[];
+  /** Distinct YYYY-MM-DD dates with any red-flagged check-in, ascending. */
+  redFlagDates: string[];
+}

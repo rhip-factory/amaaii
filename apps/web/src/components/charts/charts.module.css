@@ -1,0 +1,283 @@
+/* Shared chart chrome (P2-E) — follows the dataviz method: 2px series
+   lines, >=8px markers with a 2px surface ring, recessive lavender
+   hairline grid, no axis spines, text always in text tokens (never the
+   series color), coral reserved for danger markers only. */
+
+.wrap {
+  position: relative;
+  width: 100%;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Keyboard-focusable (crosshair via arrow keys) — the global
+     :focus-visible outline applies. */
+  border-radius: 8px;
+  touch-action: pan-y; /* vertical page scroll still works over the chart */
+}
+
+/* Tap/click focuses the chart for its tooltip, but only KEYBOARD focus
+   should draw the ring (the global :focus-visible rule still applies). */
+.svg:focus:not(:focus-visible),
+.barHit:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* --- Marks ------------------------------------------------------------- */
+
+.gridLine {
+  stroke: var(--lavender);
+  stroke-width: 1;
+}
+
+.seriesLine {
+  fill: none;
+  stroke: var(--deep);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.marker {
+  fill: var(--deep);
+  stroke: #fff; /* 2px surface ring — cards are white */
+  stroke-width: 2;
+}
+
+.dangerMarker {
+  fill: var(--coral);
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.crosshair {
+  stroke: var(--mid);
+  stroke-width: 1;
+  opacity: 0.4;
+}
+
+.bar {
+  fill: var(--deep);
+}
+
+.barActive {
+  fill: var(--mid); /* hovered mark lifts: slight lighten */
+}
+
+.barHit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+/* --- Chart text (text tokens only, tabular in aligned contexts) -------- */
+
+.tickLabel {
+  fill: var(--muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.axisLabel {
+  fill: var(--muted);
+  font-size: 10.5px;
+}
+
+.pointLabel {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.barLabel {
+  fill: var(--ink);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.barValue {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Tooltip ------------------------------------------------------------ */
+
+.tooltip {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 10px;
+  box-shadow: var(--shadow-1);
+  padding: 7px 10px;
+  min-width: 84px;
+  max-width: 190px;
+}
+
+.tooltipValue {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.tooltipKey {
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-top: 2.5px solid var(--deep);
+  border-radius: 2px;
+  flex: none;
+}
+
+.tooltipDate {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+
+.tooltipDanger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  margin-top: 5px;
+}
+
+/* --- Legend (mood chart's danger-marker entry only — single-series
+   charts otherwise carry no legend box) --------------------------------- */
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.legendDiamond {
+  width: 9px;
+  height: 9px;
+  background: var(--coral);
+  transform: rotate(45deg);
+  border-radius: 2px;
+  flex: none;
+}
+
+/* --- "View as list" table (the accessibility twin of every chart) ------ */
+
+.tableDetails {
+  margin-top: 10px;
+  border-top: 1px solid var(--lavender);
+  padding-top: 8px;
+}
+
+.tableSummary {
+  cursor: pointer;
+  color: var(--deep);
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.tableSummary::-webkit-details-marker {
+  display: none;
+}
+.tableSummary::after {
+  content: "▾";
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.tableDetails[open] .tableSummary::after {
+  transform: rotate(180deg);
+}
+
+.table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 8px 6px 0;
+  border-bottom: 1px solid var(--lavender);
+}
+.table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid var(--lavender-soft);
+  color: var(--ink);
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+.note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* --- Stat tiles ---------------------------------------------------------- */
+
+.tileRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.tile {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 14px;
+  box-shadow: var(--shadow-1);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tileLabel {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tileValue {
+  /* Brand choice: Fraunces on stat-tile numbers (design-system rule for
+     this app; deliberate, documented deviation from the dataviz skill's
+     same-sans default). Proportional figures — never tabular-nums on a
+     large standalone number. */
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 24px;
+  color: var(--ink);
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tileHint {
+  color: var(--muted);
+  font-size: 11.5px;
+}

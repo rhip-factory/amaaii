@@ -117,6 +117,20 @@ export interface RecurringSymptom {
   days: number;
 }
 
+/** One point of a per-day averaged series (Insights mood/sleep charts). */
+export interface DailySeriesPoint {
+  /** YYYY-MM-DD, matches journals.date. */
+  date: string;
+  value: number;
+}
+
+/** One bar of the Insights "common symptoms" chart. */
+export interface SymptomFrequency {
+  /** Human-readable (underscores replaced with spaces), e.g. "back pain". */
+  symptom: string;
+  count: number;
+}
+
 /** Rolled-up recent-history summary produced by computeTrend(). */
 export interface TrendSummary {
   windowDays: number;
