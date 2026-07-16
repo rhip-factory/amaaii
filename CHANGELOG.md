@@ -4,7 +4,7 @@ All notable changes to Amaaii are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-07-16
 
 The Phase 1 + Phase 2 build: the Phase 0 JavaScript codebase rewritten as a
 TypeScript monorepo, plus a new Next.js PWA with real OTP sign-in, a
