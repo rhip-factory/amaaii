@@ -248,8 +248,8 @@ echo "PASS: server boot + db auto-create"
 **Tests (RED first):**
 
 `tests/logger.test.js`:
-- Redacts `whatsapp:+254797437715` → `[PHONE]` in message strings.
-- Redacts `+254797437715` bare → `[PHONE]`.
+- Redacts `whatsapp:+254700000715` → `[PHONE]` in message strings.
+- Redacts `+254700000715` bare → `[PHONE]`.
 - Redacts `{ name: "Grace" }` → `{ name: "[REDACTED]" }` in ctx.
 - Redacts `{ Body: "hello" }` → `{ Body: "[REDACTED]" }`.
 - Does not redact `{ urgencyLevel: "high", stage: "mood" }`.
@@ -270,7 +270,7 @@ TWILIO_SIGNATURE_ENFORCE=true NODE_ENV=production pnpm start > "$LOG" 2>&1 &
 SID=$!
 sleep 2
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-  -d "From=whatsapp:+254797437715" -d "Body=hello" -d "ProfileName=Test" \
+  -d "From=whatsapp:+254700000715" -d "Body=hello" -d "ProfileName=Test" \
   http://localhost:3000/webhook)
 kill $SID || true
 [ "$code" = "403" ] || { echo "FAIL: expected 403 without signature, got $code"; exit 1; }
@@ -280,12 +280,12 @@ TWILIO_SIGNATURE_ENFORCE=false pnpm start > "$LOG2" 2>&1 &
 SID=$!
 sleep 2
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-  -d "From=whatsapp:+254797437715" -d "Body=hello" -d "ProfileName=Test" \
+  -d "From=whatsapp:+254700000715" -d "Body=hello" -d "ProfileName=Test" \
   http://localhost:3000/webhook)
 kill $SID || true
 [ "$code" = "200" ] || { echo "FAIL: expected 200 with enforce=false, got $code"; exit 1; }
 
-if grep -q "+254797437715" "$LOG2" || grep -q "ProfileName=Test" "$LOG2"; then
+if grep -q "+254700000715" "$LOG2" || grep -q "ProfileName=Test" "$LOG2"; then
   echo "FAIL: PII leaked to logs"; exit 1
 fi
 grep -q "\[PHONE\]\|\[REDACTED\]" "$LOG2" || { echo "FAIL: no redaction tokens in logs"; exit 1; }

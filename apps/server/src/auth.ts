@@ -31,8 +31,8 @@ function fromB64url(s: string): Buffer {
 }
 
 // Normalize a raw phone string to a stable user key:
-//   "0706249104"          → "whatsapp:+254706249104"  (assumes Kenya country code)
-//   "+254 706 249 104"    → "whatsapp:+254706249104"
+//   "0700000104"          → "whatsapp:+254700000104"  (assumes Kenya country code)
+//   "+254 700 000 104"    → "whatsapp:+254700000104"
 //   "whatsapp:+1..."      → "whatsapp:+1..." (passthrough)
 //
 // Returns null if the input doesn't look like a phone we can use.

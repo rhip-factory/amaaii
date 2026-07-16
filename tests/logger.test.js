@@ -21,17 +21,17 @@ describe('logger redaction', () => {
   }
 
   it('redacts whatsapp:+phone pattern in message strings', () => {
-    log.info('inbound from whatsapp:+254797437715');
+    log.info('inbound from whatsapp:+254700000715');
     const out = lastOut();
     expect(out).toContain('[PHONE]');
-    expect(out).not.toContain('254797437715');
+    expect(out).not.toContain('254700000715');
   });
 
   it('redacts bare +phone pattern in message strings', () => {
-    log.info('called +254797437715 directly');
+    log.info('called +254700000715 directly');
     const out = lastOut();
     expect(out).toContain('[PHONE]');
-    expect(out).not.toContain('254797437715');
+    expect(out).not.toContain('254700000715');
   });
 
   it('redacts name key in ctx', () => {

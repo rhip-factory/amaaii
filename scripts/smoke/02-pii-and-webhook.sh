@@ -46,7 +46,7 @@ PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=true NODE_ENV=productio
 SID=$!
 sleep 2
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-  -d "From=whatsapp:+254797437715" -d "Body=hello" -d "ProfileName=Test" \
+  -d "From=whatsapp:+254700000715" -d "Body=hello" -d "ProfileName=Test" \
   "$URL")
 kill "$SID" 2>/dev/null || true
 wait "$SID" 2>/dev/null || true
@@ -59,7 +59,7 @@ PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.b
 SID=$!
 sleep 2
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-  -d "From=whatsapp:+254797437715" -d "Body=hello" -d "ProfileName=Test" \
+  -d "From=whatsapp:+254700000715" -d "Body=hello" -d "ProfileName=Test" \
   "$URL")
 # Allow async log flush before we kill.
 sleep 1
@@ -68,7 +68,7 @@ wait "$SID" 2>/dev/null || true
 SID=""
 [ "$code" = "200" ] || { echo "FAIL: expected 200 with enforce=false, got $code"; exit 1; }
 
-if grep -q "+254797437715" "$LOG2" || grep -q "ProfileName=Test" "$LOG2" || grep -q '"Test"' "$LOG2"; then
+if grep -q "+254700000715" "$LOG2" || grep -q "ProfileName=Test" "$LOG2" || grep -q '"Test"' "$LOG2"; then
   echo "FAIL: PII leaked to logs"
   grep -nE '\+254|ProfileName=Test|"Test"' "$LOG2" || true
   exit 1

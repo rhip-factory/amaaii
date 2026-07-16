@@ -72,7 +72,7 @@ self.addEventListener("activate", (event) => {
 // fetch to e.g. /me and hand back the cached /offline PAGE as a fake 200
 // response, which api.ts would then try (and fail) to parse as JSON —
 // wrong for a data endpoint, right only for a navigation.
-const API_GET_PATHS = [/^\/me(\/|$)/, /^\/history$/, /^\/journal\/entries/, /^\/journal\/today$/];
+const API_GET_PATHS = [/^\/me(\/|$)/, /^\/history$/, /^\/journal\/entries/, /^\/journal\/today$/, /^\/insights$/];
 
 self.addEventListener("fetch", (event) => {
   const req = event.request;
