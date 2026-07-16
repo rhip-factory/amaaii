@@ -4,6 +4,43 @@ All notable changes to Amaaii are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [Unreleased]
+
+### Changed
+
+- **Express now serves the Next.js PWA** (`apps/web/out`) at `/` — single
+  process, single origin for both the app and the API. When `out/` isn't
+  built (dev/CI/smoke boots that never ran `pnpm build:web`), `GET /` still
+  returns 200 with a plaintext notice instead of pretending the app is
+  there. Hashed `_next/static/*` assets get a long, immutable cache;
+  `sw.js` gets `Cache-Control: no-cache` so browsers reliably pick up
+  service-worker updates. A GET fallback maps extensionless routes
+  (`/login`, `/home`, ...) to the export's flat `<route>.html` files,
+  handling both `/route` and `/route/`; unmatched paths get the export's
+  `404.html` with a real 404 status.
+- **`GET /insights` now discriminates page vs. API** the same way
+  `next dev`'s rewrites already did: it serves the JSON API when the
+  request carries `X-Amaaii-Api: 1` or an `Authorization` header, and
+  falls through to the exported `insights.html` page otherwise. Previously
+  every `GET /insights` required a bearer token regardless of headers,
+  which meant a plain browser navigation from Express (as opposed to
+  `next dev`) got a 401 instead of the page.
+- The older vanilla-JS PWA under `public/` is **retired** and removed from
+  the working tree (still recoverable from git history).
+
+### Fixed
+
+- **Path traversal in the new static-export fallback**, caught in review
+  before merge: the extensionless-route → HTML mapping built an absolute
+  filesystem path by joining `apps/web/out` with a segment taken from
+  `req.path` and handed it to `sendFile` with no boundary check — a raw
+  HTTP client (not a browser, which resolves `..` before sending) could
+  send a literal `..` and read `.html` files outside `out/`. Fixed by
+  passing a relative filename + `{ root: webOutDir }` to `res.sendFile`,
+  which delegates the boundary enforcement to Express's `send` dependency;
+  regression-tested with real sockets (supertest normalizes `..`
+  client-side, so it can't reach the vulnerable path itself).
+
 ## [0.2.0] - 2026-07-16
 
 The Phase 1 + Phase 2 build: the Phase 0 JavaScript codebase rewritten as a

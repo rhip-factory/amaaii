@@ -46,9 +46,12 @@ grep -q "Amaaii server started on port ${PORT}" "$LOG" || {
   echo "FAIL: boot log line missing"; cat "$LOG"; exit 1;
 }
 
-# 2. GET / returns HTTP 200 (PWA index.html; the plaintext banner this
-#    script used to grep for hasn't been served here since the PWA
-#    landed — GET / now serves public/index.html).
+# 2. GET / returns HTTP 200. This script never runs `pnpm build:web`, so
+#    apps/web/out doesn't exist here — GET / serves the plaintext "web
+#    build not found" notice (see apps/server/src/app.ts), not the PWA
+#    itself. Still 200 either way; a built `out/` would serve index.html
+#    instead (the old public/index.html fallback this comment used to
+#    describe is gone — public/ was retired in express-serves-pwa).
 code=$(curl -sS -o /dev/null -w "%{http_code}" "http://localhost:${PORT}/")
 [ "$code" = "200" ] || { echo "FAIL: GET / returned $code, expected 200"; exit 1; }
 

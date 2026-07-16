@@ -29,4 +29,14 @@ export function findRepoRoot(startDir: string): string {
 }
 
 export const REPO_ROOT = findRepoRoot(__dirname);
-export const PUBLIC_DIR = path.join(REPO_ROOT, 'public');
+
+// `apps/web/out` is the Next.js static export (see apps/web/next.config.ts
+// and root package.json's `build:web`). It lives inside the source tree
+// (not under `dist/`), so it's reachable identically whether app.ts is
+// running as TypeScript via tsx (`<root>/apps/server/src`) or as compiled
+// JS via `node dist/...` (`<root>/dist/apps/server/src`) — REPO_ROOT
+// already normalizes that depth difference, so no extra dist-specific
+// resolution is needed here. `pnpm build` does not copy or symlink this
+// directory; it's expected to already exist at REPO_ROOT/apps/web/out
+// (built separately via `pnpm build:web`) before a dist boot serves it.
+export const WEB_OUT_DIR = path.join(REPO_ROOT, 'apps', 'web', 'out');

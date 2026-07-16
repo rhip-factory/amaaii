@@ -13,14 +13,20 @@ The server boots with **no credentials at all** — Twilio and OpenAI clients ar
 
 ### PWA (Next.js)
 
+For iterating on the PWA itself, run `next dev` against a running API in a second terminal:
+
 ```bash
-# In a second terminal — proxies API calls to the Express server:
 AMAAII_API_ORIGIN=http://localhost:3000 pnpm dev:web
 ```
 
 Open the printed URL and sign in with any Kenyan-format phone number. **OTP dev mode:** with no Twilio credentials configured, the 6-digit code is returned by the API and shown right on the login screen (non-production only), so the whole flow works offline from Twilio.
 
-There is also an older vanilla-JS PWA served by the Express server itself at `http://localhost:3000/`.
+For a single-process, single-origin deployment — the production shape — build the static export first, then let Express serve it alongside the API:
+
+```bash
+pnpm build:web        # static export -> apps/web/out (build in an isolated worktree if `next dev` is also running — see CLAUDE.md)
+pnpm start            # Express now serves the PWA at http://localhost:3000/ too
+```
 
 ### WhatsApp webhook (optional)
 
@@ -33,7 +39,7 @@ Point the Twilio WhatsApp sandbox webhook at `https://<your-ngrok>/webhook` (POS
 ### Tests
 
 ```bash
-pnpm test                              # vitest — 228 tests
+pnpm test                              # vitest — 240 tests
 pnpm typecheck                         # tsc --noEmit
 pnpm build                             # compile to dist/ (node dist/apps/server/src/index.js)
 PORT=4690 bash scripts/smoke/run-all.sh  # shell smoke suite (boots its own servers on $PORT, scratch DBs)

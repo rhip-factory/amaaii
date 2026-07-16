@@ -84,9 +84,15 @@ function utcDateDaysAgo(daysAgo: number): string {
 const today = () => utcDateDaysAgo(0);
 
 describe('GET /insights (P2-E)', () => {
-  it('requires a bearer token (401)', async () => {
+  it('requires a bearer token (401) for an API call', async () => {
+    // `/insights` is both the exported page AND this API (see app.ts's
+    // discrimination comment) — a request with neither X-Amaaii-Api nor
+    // Authorization is treated as a page navigation and falls through to
+    // static serving instead of hitting this handler at all, so an API
+    // caller must identify itself the same way apps/web/src/lib/api.ts's
+    // authedFetch always does, even before it has a token.
     const app = createApp();
-    const res = await request(app).get('/insights');
+    const res = await request(app).get('/insights').set('X-Amaaii-Api', '1');
     expect(res.status).toBe(401);
   });
 
