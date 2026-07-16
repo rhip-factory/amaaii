@@ -19,6 +19,9 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: "#7C47AF",
+  // Committed-light design: opts out of browser auto-darkening (see the
+  // matching `color-scheme: only light` in styles/tokens.css).
+  colorScheme: "only light",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

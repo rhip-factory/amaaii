@@ -32,20 +32,15 @@
 
   --font-body: var(--font-jakarta), system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: var(--font-fraunces), Georgia, serif;
-}
 
-/* Dark-theme aware surface aliases. The brand is a light, airy purple —
-   we don't ship a bespoke dark palette for this scaffold, but every
-   surface below is expressed as a token so a real dark mode is a
-   token swap, not a rewrite. */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --shell-bg: #1c1420;
-    --ink: #f4effb;
-    --muted: #b7a9c9;
-    --bot-bg: #2a2032;
-    --lavender-soft: #2a2032;
-  }
+  /* The design is committed to light: chart/series contrast is validated
+     against the light surface only, and a partial dark remap (the old
+     prefers-color-scheme block here) produced an illegible hybrid on
+     dark-mode phones. `only light` also opts out of Chrome's Auto Dark
+     force-darkening (paired with the color-scheme viewport meta in
+     app/layout.tsx). A real dark mode = new validated palette, not a
+     token swap here.  */
+  color-scheme: only light;
 }
 
 * {
