@@ -1,0 +1,137 @@
+.formCard {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 16px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-1);
+  margin-bottom: 16px;
+}
+
+.subtleCard {
+  composes: formCard;
+  background: var(--lavender-soft);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.field input {
+  border: 1.5px solid var(--lavender);
+  background: var(--shell-bg);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.field input:focus {
+  border-color: var(--mid);
+  background: #fff;
+}
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1.5px solid var(--lavender);
+  border-radius: 999px;
+  background: var(--shell-bg);
+  padding: 4px;
+  gap: 2px;
+  width: fit-content;
+}
+.segOpt {
+  border: 0;
+  background: transparent;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.segOpt[aria-checked="true"] {
+  background: var(--deep);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(124, 71, 175, 0.25);
+}
+.segOpt:hover:not([aria-checked="true"]) {
+  color: var(--deep);
+  background: var(--lavender-soft);
+}
+
+.fineprint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.saveBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(124, 71, 175, 0.22);
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+.saveBtn:hover {
+  background: var(--deep-press);
+}
+.saveBtn:active {
+  transform: translateY(1px);
+}
+.saveBtn:disabled {
+  background: var(--mid);
+  cursor: progress;
+  box-shadow: none;
+}
+
+.status {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mid);
+}
+.status.errorText {
+  color: var(--critical);
+}
+
+.phoneValue {
+  color: var(--ink);
+  font-size: 14.5px;
+  font-weight: 600;
+}

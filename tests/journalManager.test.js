@@ -2,12 +2,16 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+// Registers Node module hooks so this native `require()` can load
+// TypeScript sources (apps/server/src/*.ts) directly, same as `tsx` does
+// for `pnpm start`/`pnpm dev`.
+require('tsx/cjs');
 
 process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
 
-const db = require('../services/database');
-const journalManager = require('../services/journalManager');
+const db = require('../apps/server/src/database');
+const journalManager = require('../apps/server/src/journalManager');
 
 const seededUsers = new Set();
 

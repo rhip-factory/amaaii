@@ -53,7 +53,7 @@ ngrok http 3030
 
 ### Minute 2 — The same person in the PWA (the wow)
 
-5. Switch to PWA tab. Login with your phone number (`+254706249104` or
+5. Switch to PWA tab. Login with your phone number (`+254700000104` or
    whatever you used).
 6. Land on **Home dashboard** — *"Hello, K_nurf 👋 · Week 3 · poppy seed"*,
    today's journal status, the **Insights card** (avg mood, recurring symptoms),

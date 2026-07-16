@@ -7,16 +7,20 @@ import { createRequire } from 'node:module';
 // so the test, services/database, services/twilio, and utils/messageHandler
 // share the same singleton state.
 const require = createRequire(import.meta.url);
+// Registers Node module hooks so this native `require()` can load
+// TypeScript sources (apps/server/src/*.ts, packages/*/src/*.ts)
+// directly, same as `tsx` does for `pnpm start`/`pnpm dev`.
+require('tsx/cjs');
 
-// Set env BEFORE the application modules load — services/database reads
-// DB_PATH at module top-level, and services/amaaii constructs an OpenAI
-// client at import time.
+// Set env BEFORE the application modules load — apps/server/src/database
+// reads DB_PATH at module top-level, and apps/server/src/amaaii
+// constructs an OpenAI client at import time (via the LLM chokepoint).
 process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
 
-const db = require('../services/database');
-const tw = require('../services/twilio');
-const { handleIncomingMessage } = require('../utils/messageHandler');
+const db = require('../apps/server/src/database');
+const tw = require('../packages/adapters/src/twilio');
+const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
 
 const sent = [];
 

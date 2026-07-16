@@ -1,0 +1,212 @@
+.page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px 16px;
+  background: linear-gradient(160deg, #f2ecfa 0%, #fbfafd 60%, #ffffff 100%);
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 20px;
+  padding: 36px 32px 28px;
+  box-shadow: var(--shadow-2);
+  text-align: center;
+  border: 1px solid var(--lavender);
+}
+
+.lockup {
+  height: 36px;
+  width: auto;
+  margin-bottom: 16px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--deep);
+  letter-spacing: -0.01em;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.label {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.phoneRow {
+  border: 1.5px solid var(--lavender);
+  border-radius: 12px;
+  background: var(--shell-bg);
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.phoneRow:focus-within {
+  border-color: var(--mid);
+  background: #fff;
+}
+.phoneRow input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  padding: 14px 14px;
+  color: var(--ink);
+}
+
+.error {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fee6e6;
+  color: #6e1f1f;
+  font-size: 13px;
+  text-align: left;
+}
+
+.submitBtn {
+  width: 100%;
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+  box-shadow: 0 6px 18px rgba(124, 71, 175, 0.22);
+}
+.submitBtn:hover {
+  background: var(--deep-press);
+}
+.submitBtn:active {
+  transform: translateY(1px);
+}
+.submitBtn:disabled {
+  background: var(--mid);
+  cursor: progress;
+  box-shadow: none;
+}
+
+.fineprint {
+  margin: 18px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* --- Code step (P2-B) --------------------------------------------------- */
+
+.backLink {
+  display: inline-block;
+  margin-bottom: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+.backLink:hover {
+  color: var(--deep);
+}
+
+.codeRow {
+  border: 1.5px solid var(--lavender);
+  border-radius: 12px;
+  background: var(--shell-bg);
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.codeRow:focus-within {
+  border-color: var(--mid);
+  background: #fff;
+}
+.codeRow input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  text-align: center;
+  padding: 14px 10px 14px 16px;
+  color: var(--ink);
+}
+
+.devHint {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--mid);
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+}
+.devHint strong {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.resendRow {
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.resendLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--deep);
+  cursor: pointer;
+}
+.resendLink:hover {
+  color: var(--deep-press);
+  text-decoration: underline;
+}
+.resendLink:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+.foot {
+  margin-top: 24px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}

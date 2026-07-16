@@ -1,0 +1,199 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(42, 26, 61, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+  animation: fade 0.15s ease-out;
+}
+
+@media (min-width: 560px) {
+  .backdrop {
+    align-items: center;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.sheet {
+  width: 100%;
+  max-width: 480px;
+  max-height: min(80dvh, 640px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 22px 22px 0 0;
+  padding: 20px 22px calc(24px + env(safe-area-inset-bottom));
+  box-shadow: var(--shadow-3);
+  animation: slide-up 0.2s ease-out;
+}
+
+@media (min-width: 560px) {
+  .sheet {
+    border-radius: 22px;
+    padding: 26px 28px 28px;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .sheet {
+    animation: none;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 22px;
+  color: var(--ink);
+  margin: 0;
+}
+
+.closeBtn {
+  border: 0;
+  background: var(--lavender-soft);
+  color: var(--muted);
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.closeBtn:hover {
+  background: var(--lavender);
+  color: var(--ink);
+}
+
+.lead {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+  margin: 8px 0 16px;
+}
+
+/* Independently scrollable — the emergency call box below must stay
+   visible without the mother needing to scroll the whole sheet to find
+   it. This is the single most important tap target on the page. */
+.listScroll {
+  max-height: 34vh;
+  overflow-y: auto;
+  margin: 0 0 16px;
+  border-bottom: 1px solid var(--lavender-soft);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.listItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px;
+  font-size: 14.5px;
+  color: var(--ink);
+  border-bottom: 1px dashed var(--lavender);
+}
+.listItem:last-child {
+  border-bottom: 0;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--coral);
+  flex-shrink: 0;
+}
+
+.emergencyBox {
+  background: #fff6f5;
+  border: 1px solid rgba(232, 93, 85, 0.3);
+  border-radius: 16px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.emergencyHeading {
+  font-weight: 700;
+  color: var(--critical);
+  font-size: 14.5px;
+  margin: 0;
+}
+
+.emergencyBody {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.callRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.callBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--coral);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(232, 93, 85, 0.3);
+}
+.callBtn:hover {
+  background: #d04841;
+}
+.callBtn.secondary {
+  background: #fff;
+  color: var(--deep);
+  border: 1.5px solid var(--lavender);
+  box-shadow: none;
+}
+.callBtn.secondary:hover {
+  border-color: var(--mid);
+}
