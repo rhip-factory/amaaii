@@ -5,6 +5,7 @@
 // (createApp) rather than a singleton app instance so tests can spin up
 // independent instances (supertest-style) without sharing state.
 
+import fs from 'node:fs';
 import path from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import bodyParser from 'body-parser';
@@ -31,7 +32,7 @@ import { log } from './logger';
 import twilioSignature from './middleware/twilioSignature';
 import * as auth from './auth';
 import { generateOtpCode, hashOtpCode, hashesMatch } from './otp';
-import { PUBLIC_DIR } from './paths';
+import { WEB_OUT_DIR } from './paths';
 import { sendWhatsAppMessage } from '@amaaii/adapters';
 import {
   checkOtpRateLimit,
@@ -313,7 +314,18 @@ function isUniqueConstraintError(err: unknown): boolean {
   return err instanceof Error && /UNIQUE constraint failed/i.test(err.message);
 }
 
-export function createApp(): Express {
+export interface CreateAppOptions {
+  // Test seam only (mirrors @amaaii/adapters' twilio.ts __setSendImpl
+  // pattern): lets tests point the static-export serving at a small
+  // fixture directory, or at a path that deliberately doesn't exist,
+  // without depending on whether the real apps/web/out happens to be
+  // built on whatever machine the suite runs on. Production callers
+  // (apps/server/src/index.ts) never pass this — they get the real
+  // WEB_OUT_DIR from paths.ts.
+  webOutDirOverride?: string;
+}
+
+export function createApp(opts: CreateAppOptions = {}): Express {
   const app = express();
 
   app.use(bodyParser.urlencoded({ extended: false }));
@@ -876,44 +888,151 @@ export function createApp(): Express {
   // while `trend` keeps computeTrend's long-standing completed-only
   // averages and `checkinsCount` counts completed check-ins (mirroring
   // GET /me's todayCheckinCount semantics).
-  app.get('/insights', requireAuth, async (req: Request, res: Response) => {
-    try {
-      const userPhone = req.userPhone as string;
-      let days = 14;
-      const rawDays = req.query.days;
-      if (rawDays !== undefined) {
-        if (rawDays !== '14' && rawDays !== '30') {
-          res.status(400).json({ error: 'invalid_days', message: 'days must be 14 or 30.' });
-          return;
-        }
-        days = parseInt(rawDays, 10);
+  // `/insights` is BOTH the Insights tab's exported page (out/insights.html)
+  // AND this JSON API — the one page-vs-API GET collision in this app (see
+  // apps/web/next.config.ts's beforeFiles rewrite, which solves the same
+  // collision for `next dev` the same way: gate on a header). A plain
+  // browser navigation carries neither header, so it falls through
+  // (`next('route')`) past requireAuth/the handler below to the static
+  // export serving further down, which resolves it to insights.html. An
+  // API call always sets X-Amaaii-Api (apps/web/src/lib/api.ts's
+  // authedFetch), and/or already carries the bearer token — either is
+  // enough to route it to the JSON handler instead.
+  app.get(
+    '/insights',
+    (req: Request, res: Response, next: NextFunction) => {
+      const isApiCall = req.get('X-Amaaii-Api') === '1' || !!req.get('authorization');
+      if (isApiCall) {
+        next();
+        return;
       }
-      const journals = await getJournalHistory(userPhone, days);
-      res.json({
-        window: days,
-        checkinsCount: (journals || []).filter((j) => !!j.completed).length,
-        trend: computeTrend(journals, days),
-        moodSeries: computeDailySeries(journals, (j) => j.emotional_state),
-        sleepSeries: computeDailySeries(journals, (j) => j.sleep_hours),
-        symptomCounts: computeSymptomCounts(journals, 6),
-        redFlagDates: computeRedFlagDates(journals),
-      });
-    } catch (err) {
-      log.error('GET /insights failed', err);
-      res.status(500).json({ error: 'internal_error' });
+      next('route');
+    },
+    requireAuth,
+    async (req: Request, res: Response) => {
+      try {
+        const userPhone = req.userPhone as string;
+        let days = 14;
+        const rawDays = req.query.days;
+        if (rawDays !== undefined) {
+          if (rawDays !== '14' && rawDays !== '30') {
+            res.status(400).json({ error: 'invalid_days', message: 'days must be 14 or 30.' });
+            return;
+          }
+          days = parseInt(rawDays, 10);
+        }
+        const journals = await getJournalHistory(userPhone, days);
+        res.json({
+          window: days,
+          checkinsCount: (journals || []).filter((j) => !!j.completed).length,
+          trend: computeTrend(journals, days),
+          moodSeries: computeDailySeries(journals, (j) => j.emotional_state),
+          sleepSeries: computeDailySeries(journals, (j) => j.sleep_hours),
+          symptomCounts: computeSymptomCounts(journals, 6),
+          redFlagDates: computeRedFlagDates(journals),
+        });
+      } catch (err) {
+        log.error('GET /insights failed', err);
+        res.status(500).json({ error: 'internal_error' });
+      }
     }
-  });
+  );
 
-  // Static PWA assets (index.html, manifest, sw.js, img/, etc.)
-  app.use(express.static(PUBLIC_DIR));
+  // --- Static: the Next.js PWA (apps/web/out) ---------------------------------
+  // `public/` (the older vanilla-JS PWA) is retired — this serves the
+  // static export in its place. `out/` is a build artifact (gitignored,
+  // produced by `pnpm build:web`) and may not exist in dev/CI/smoke
+  // contexts that never ran it; when it's missing we still answer GET /
+  // with 200 so the root smoke test (scripts/smoke/00-server-boot.sh)
+  // stays meaningful, but with an honest plaintext notice instead of
+  // pretending the app is there.
+  const webOutDir = opts.webOutDirOverride ?? WEB_OUT_DIR;
+  const hasWebBuild = fs.existsSync(path.join(webOutDir, 'index.html'));
 
-  // Friendly root: serve the PWA when public/index.html exists, otherwise
-  // fall back to the legacy WhatsApp-only health string.
-  app.get('/', (req: Request, res: Response) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'), (err) => {
-      if (err) res.send('WhatsApp Pregnancy Bot Server is running!');
+  if (hasWebBuild) {
+    // next.config.ts has no `trailingSlash: true`, so `next build`'s
+    // static export writes flat `<route>.html` files (not
+    // `<route>/index.html>`) — confirmed empirically against apps/web/out
+    // (chat.html, home.html, insights.html, ... plus index.html at the
+    // root). This maps an extensionless request path to that file,
+    // treating a trailing slash as equivalent to none (`/insights` and
+    // `/insights/` both resolve to `insights.html`; `/` resolves to
+    // `index.html`).
+    //
+    // SECURITY: this only ever computes a RELATIVE filename from
+    // `req.path` — never an absolute filesystem path joined against
+    // `webOutDir` ourselves. `req.path` is not normalized against `..`
+    // by Express (that's a browser-navigation behavior, not an HTTP-layer
+    // guarantee — a raw client can send `GET /../../../etc/passwd`
+    // literally), so building `path.join(webOutDir, someUserPath)` and
+    // handing it straight to `sendFile` would let a crafted path escape
+    // `webOutDir` and read arbitrary `.html` files off the host, plus
+    // leak their existence via the `fs.existsSync` check. Passing the
+    // relative name + `{ root: webOutDir }` to `res.sendFile` instead
+    // delegates the boundary check to Express's `send` dependency, which
+    // resolves the candidate against `root` and rejects (403, surfaced
+    // as an error to the callback below) anything that would land
+    // outside it — traversal attempts and genuinely-missing files both
+    // end up in the same `send404` branch.
+    const relativeExportHtmlPath = (urlPath: string): string => {
+      const trimmed = urlPath.replace(/\/+$/, '');
+      return trimmed === '' ? 'index.html' : `${trimmed.slice(1)}.html`;
+    };
+
+    const send404 = (res: Response): void => {
+      res.status(404).sendFile('404.html', { root: webOutDir }, (err) => {
+        if (err) res.status(404).end();
+      });
+    };
+
+    // Serves every asset that exists at its exact request path: hashed
+    // `_next/static/*` bundles (long, immutable cache — safe because the
+    // filename changes on every build), `sw.js` (explicitly `no-cache` so
+    // browsers always revalidate and pick up a new service-worker byte
+    // stream promptly — see the SW-takeover note in sw.js/CLAUDE.md),
+    // images, manifest.webmanifest, the RSC `.txt` payloads, and
+    // `index.html` at `/` via the `index` option. Extensionless page
+    // routes (`/login`, `/home`, ...) are NOT files at that exact path
+    // (they're `<route>.html`), so they fall through this middleware to
+    // the mapping fallback below. `express.static` (the `serve-static` /
+    // `send` packages) already enforces the same root-boundary discipline
+    // internally, so this mount needs no extra traversal handling itself.
+    app.use(
+      express.static(webOutDir, {
+        index: 'index.html',
+        setHeaders: (res, filePath) => {
+          if (path.basename(filePath) === 'sw.js') {
+            res.setHeader('Cache-Control', 'no-cache');
+          } else if (filePath.includes(`${path.sep}_next${path.sep}static${path.sep}`)) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+          }
+        },
+      })
+    );
+
+    // GET fallback: extensionless route -> exported HTML file, else the
+    // export's 404.html with a real 404 status (not a 200 with error
+    // copy — smoke/monitoring should be able to tell the difference).
+    app.get(/.*/, (req: Request, res: Response) => {
+      const urlPath = req.path;
+      if (path.extname(urlPath) === '') {
+        res.sendFile(relativeExportHtmlPath(urlPath), { root: webOutDir }, (err) => {
+          if (err) send404(res);
+        });
+        return;
+      }
+      send404(res);
     });
-  });
+  } else {
+    app.get('/', (req: Request, res: Response) => {
+      res
+        .type('text/plain')
+        .status(200)
+        .send(
+          'Amaaii web build not found. Run `pnpm build:web` (production) or `pnpm dev:web` (development) to build/serve the PWA.'
+        );
+    });
+  }
 
   return app;
 }
