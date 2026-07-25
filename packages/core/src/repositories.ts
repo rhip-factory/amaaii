@@ -13,6 +13,7 @@
 // and the services/database.js shim that delegates to it.
 
 import type { JournalRow, JournalAnalytics } from './types';
+import type { ConsentPurpose } from './consent';
 
 // --- Users ------------------------------------------------------------
 
@@ -277,6 +278,138 @@ export interface OtpRepository {
   delete(phone: string): Promise<void>;
 }
 
+// --- Consent (P3-A / Kenya DPA) ----------------------------------------------
+
+/**
+ * One row of the append-only consent ledger — never UPDATEd. A grant is
+ * a fresh row with granted=1 and revoked_at=NULL. An outright decline
+ * of an OPTIONAL purpose is also a fresh row, granted=0, revoked_at
+ * still NULL (it was never active, so there's nothing to mark as
+ * "revoked"). Withdrawing a *previously active* consent is ALSO a fresh
+ * row — granted=0, but this one has revoked_at stamped on itself at
+ * insert time (see ConsentRepository#revokeConsent) — which is how the
+ * ledger tells "declined from the start" apart from "granted, then
+ * later withdrawn" for audit purposes, without ever mutating a prior
+ * row. Current state for a purpose is always just its most recent row;
+ * see packages/core/src/consent.ts#deriveConsentState for the
+ * (oldest-first-in, latest-wins) reconstruction.
+ */
+export interface ConsentRecord {
+  id: number;
+  user_phone: string;
+  purpose: ConsentPurpose;
+  /** SQLite stores this as 0/1; deriveConsentState() coerces either
+   *  representation to a real boolean. */
+  granted: number | boolean;
+  version: number;
+  granted_at: string;
+  revoked_at: string | null;
+}
+
+export interface ConsentRepository {
+  /** Every ledger row for this user, oldest first — feed straight into
+   *  packages/core/src/consent.ts#deriveConsentState to get the current
+   *  ConsentState. Empty array for a user who has never been asked. */
+  getConsents(phone: string): Promise<ConsentRecord[]>;
+  /**
+   * Appends one new event to the ledger — never an UPDATE, so the full
+   * history stays auditable (who consented to what, when, at which
+   * notice version). Used for both an initial grant (granted=true) and
+   * an outright decline of an OPTIONAL purpose (granted=false); either
+   * way this call leaves revoked_at NULL on the new row — that's what
+   * distinguishes it from revokeConsent() below.
+   */
+  recordConsent(
+    phone: string,
+    purpose: ConsentPurpose,
+    granted: boolean,
+    version: number
+  ): Promise<ConsentRecord>;
+  /**
+   * Appends a withdrawal event for a purpose the user had previously
+   * granted: a new row with granted=false AND revoked_at stamped on
+   * that same new row (not a mutation of the earlier grant row) — keeps
+   * the ledger append-only while still recording "this was actively
+   * revoked", not just "never granted".
+   */
+  revokeConsent(phone: string, purpose: ConsentPurpose): Promise<void>;
+}
+
+// --- Audit log (P3-A / Kenya DPA) --------------------------------------------
+
+/** What kind of thing happened. 'consent_grant'/'consent_revoke' log the
+ *  consent ledger's own events into the audit trail too (belt-and-braces
+ *  — the consent table is itself append-only and auditable, but a
+ *  data-subject's unified "what happened to my data" view should not
+ *  have to know to cross-reference two tables). */
+export type AuditAction =
+  | 'read'
+  | 'write'
+  | 'delete'
+  | 'export'
+  | 'ai_call'
+  | 'consent_grant'
+  | 'consent_revoke'
+  | 'danger_escalation'
+  | 'login';
+
+/** What kind of data the action touched. */
+export type AuditResource =
+  | 'profile'
+  | 'journal'
+  | 'conversation'
+  | 'medical_history'
+  | 'insights'
+  | 'consent'
+  | 'account';
+
+/**
+ * Row shape of the `audit_log` table — append-only, one row per
+ * data-touching event. `resource_owner` is the phone number the DATA
+ * belongs to (the data subject); `actor` is who/what performed the
+ * action (may be the same phone for a self-service action, or a
+ * system-level identifier like "system" for an automated danger
+ * escalation) — that distinction is what makes listForUser() a genuine
+ * "who accessed MY data" view rather than merely "what did I do".
+ */
+export interface AuditEvent {
+  id: number;
+  actor: string;
+  action: AuditAction;
+  resource: AuditResource;
+  resource_owner: string;
+  /** JSON-stringified free-form context, or null. */
+  metadata: string | null;
+  created_at: string;
+}
+
+/** Input to AuditRepository#record — everything except the id/created_at
+ *  the store assigns (unless `timestamp` is passed explicitly, e.g. by
+ *  a test that wants a deterministic row). */
+export interface AuditEventInput {
+  actor: string;
+  action: AuditAction;
+  resource: AuditResource;
+  resourceOwner: string;
+  /** Arbitrary JSON-serializable context (e.g. which fields were read).
+   *  Repository implementations own the JSON.stringify/parse round-trip
+   *  — callers pass/receive a plain object, never a pre-serialized
+   *  string. */
+  metadata?: Record<string, unknown> | null;
+  /** ISO timestamp. Storage layer defaults to "now" when omitted. */
+  timestamp?: string;
+}
+
+export interface AuditRepository {
+  /** Appends one audit row. Append-only — there is no update/delete
+   *  method on this interface by design. */
+  record(event: AuditEventInput): Promise<void>;
+  /** Events for this user's data, newest first — the data-subject-facing
+   *  "who accessed my data" view. Defaults to a reasonable page size
+   *  when `limit` is omitted (see the adapter for the exact default). */
+  listForUser(phone: string, limit?: number): Promise<AuditEvent[]>;
+}
+
 // --- Aggregate --------------------------------------------------------------
 
 /**
@@ -294,6 +427,8 @@ export interface DatabaseAdapter {
   medicalHistory: MedicalHistoryRepository;
   ancVisits: AncVisitRepository;
   otp: OtpRepository;
+  consents: ConsentRepository;
+  audit: AuditRepository;
   /** Creates tables/indexes and runs idempotent migrations. Mirrors
    *  services/database.js#initializeDatabase(). */
   initialize(): Promise<void>;

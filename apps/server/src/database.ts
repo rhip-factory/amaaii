@@ -9,6 +9,10 @@
 import { createSqliteDatabaseAdapter } from '@amaaii/adapters';
 import type {
   AncVisitRow,
+  AuditEvent,
+  AuditEventInput,
+  ConsentPurpose,
+  ConsentRecord,
   ConversationAnalysis,
   ConversationRow,
   CreateUserInput,
@@ -165,4 +169,39 @@ export async function recordOtpAttempt(phone: string): Promise<number> {
 
 export async function deleteOtp(phone: string): Promise<void> {
   return adapter.otp.delete(phone);
+}
+
+// --- Consent (P3-A) ------------------------------------------------------
+// Pure foundation only — nothing in this file enforces consent yet (no
+// route checks these). P3-B wires needsConsent()/canUseAi() (packages/
+// core/src/consent.ts) against the ConsentState these facade functions
+// let a caller reconstruct via deriveConsentState(await getConsents(...)).
+
+export async function getConsents(phone: string): Promise<ConsentRecord[]> {
+  return adapter.consents.getConsents(phone);
+}
+
+export async function recordConsent(
+  phone: string,
+  purpose: ConsentPurpose,
+  granted: boolean,
+  version: number
+): Promise<ConsentRecord> {
+  return adapter.consents.recordConsent(phone, purpose, granted, version);
+}
+
+export async function revokeConsent(phone: string, purpose: ConsentPurpose): Promise<void> {
+  return adapter.consents.revokeConsent(phone, purpose);
+}
+
+// --- Audit log (P3-A) ------------------------------------------------------
+// Same "foundation, not enforcement" note as above — nothing currently
+// calls recordAudit() from a real route handler; that's P3-B.
+
+export async function recordAudit(event: AuditEventInput): Promise<void> {
+  return adapter.audit.record(event);
+}
+
+export async function listAuditForUser(phone: string, limit?: number): Promise<AuditEvent[]> {
+  return adapter.audit.listForUser(phone, limit);
 }

@@ -311,6 +311,61 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_otp_codes_expires_at ON otp_codes(expires_at)`,
         (err) => {
           if (err) log.error('Error creating otp_codes index', err);
+        }
+      );
+
+      // Consent ledger (P3-A, Kenya DPA). Append-only — no UPDATE path
+      // ever touches this table; see packages/core/src/repositories.ts's
+      // ConsentRecord header for why granted/revoked_at live together on
+      // one immutable row instead of a row that gets mutated later.
+      // granted is stored as 0/1 (sqlite has no native boolean).
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS consents (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_phone TEXT NOT NULL,
+          purpose TEXT NOT NULL,
+          granted INTEGER NOT NULL,
+          version INTEGER NOT NULL,
+          granted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          revoked_at DATETIME,
+          FOREIGN KEY (user_phone) REFERENCES users(phone_number)
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating consents table', err);
+        }
+      );
+
+      db.run(`CREATE INDEX IF NOT EXISTS idx_consents_user_phone ON consents(user_phone)`, (err) => {
+        if (err) log.error('Error creating consents index', err);
+      });
+
+      // Audit log (P3-A, Kenya DPA). Append-only — the data-subject
+      // "who accessed my data" view (AuditRepository#listForUser) and
+      // any future compliance export both read this table; nothing ever
+      // updates or deletes a row out of it.
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          actor TEXT NOT NULL,
+          action TEXT NOT NULL,
+          resource TEXT NOT NULL,
+          resource_owner TEXT NOT NULL,
+          metadata TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating audit_log table', err);
+        }
+      );
+
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_audit_log_resource_owner ON audit_log(resource_owner)`,
+        (err) => {
+          if (err) log.error('Error creating audit_log index', err);
           else resolve();
         }
       );

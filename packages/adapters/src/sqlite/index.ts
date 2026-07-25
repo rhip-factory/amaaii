@@ -14,6 +14,8 @@ import { SqliteSymptomRepository } from './symptomRepository';
 import { SqliteMedicalHistoryRepository } from './medicalHistoryRepository';
 import { SqliteAncVisitRepository } from './ancVisitRepository';
 import { SqliteOtpRepository } from './otpRepository';
+import { SqliteConsentRepository } from './consentRepository';
+import { SqliteAuditRepository } from './auditRepository';
 
 export * from './connection';
 export * from './userRepository';
@@ -24,6 +26,8 @@ export * from './symptomRepository';
 export * from './medicalHistoryRepository';
 export * from './ancVisitRepository';
 export * from './otpRepository';
+export * from './consentRepository';
+export * from './auditRepository';
 
 /**
  * Builds a fully-wired DatabaseAdapter backed by a single sqlite3
@@ -43,6 +47,8 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
     medicalHistory: new SqliteMedicalHistoryRepository(db),
     ancVisits: new SqliteAncVisitRepository(db),
     otp: new SqliteOtpRepository(db),
+    consents: new SqliteConsentRepository(db),
+    audit: new SqliteAuditRepository(db),
     initialize: () => initializeSchema(db),
     close: () =>
       new Promise<void>((resolve, reject) => {
