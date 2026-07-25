@@ -4,6 +4,16 @@ set -euo pipefail
 # Smoke test for workstream 7.5 (journal-persistence).
 # Pre-seeds an onboarded user, drives a journal partway, kills the
 # server, restarts it, and asserts the journal_sessions row survives.
+#
+# P3-B update: data_processing consent is now REQUIRED before any
+# feature (including journaling) runs — see messageHandler.ts's
+# consent-gate block, which sits ahead of the journal-command check.
+# This script pre-seeds the user directly via SQL (never through the
+# webhook), so consent must be pre-seeded the same way — a conversational
+# "I AGREE" round-trip isn't possible before the journal flow starts.
+# Both purposes are seeded to mirror what the WhatsApp channel would
+# have recorded on agreement (see handleConsentGate's channel-decision
+# comment in messageHandler.ts).
 
 source "$(dirname "$0")/lib/send.sh"
 
@@ -36,11 +46,24 @@ sleep 2
 kill "$SID"; wait "$SID" 2>/dev/null || true; SID=""
 
 node -e "
+require('tsx/cjs');
+const { CONSENT_VERSION } = require('./packages/core/src/consent');
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('$DB_FILE');
-db.run(\"INSERT OR REPLACE INTO users (phone_number, name, age, pregnancy_week, location) VALUES ('$PHONE', 'TestUser', 28, 24, 'Nairobi')\", (err) => {
-  if (err) { console.error(err); process.exit(1); }
-  process.exit(0);
+db.serialize(() => {
+  db.run(\"INSERT OR REPLACE INTO users (phone_number, name, age, pregnancy_week, location) VALUES ('$PHONE', 'TestUser', 28, 24, 'Nairobi')\", (err) => {
+    if (err) { console.error(err); process.exit(1); }
+  });
+  // P3-B: data_processing (required) + ai_responses consent, pre-seeded
+  // directly since this script never drives the WhatsApp consent
+  // round-trip conversationally — see the file header note above.
+  db.run('INSERT INTO consents (user_phone, purpose, granted, version) VALUES (?, ?, 1, ?)', ['$PHONE', 'data_processing', CONSENT_VERSION], (err) => {
+    if (err) { console.error(err); process.exit(1); }
+  });
+  db.run('INSERT INTO consents (user_phone, purpose, granted, version) VALUES (?, ?, 1, ?)', ['$PHONE', 'ai_responses', CONSENT_VERSION], (err) => {
+    if (err) { console.error(err); process.exit(1); }
+    process.exit(0);
+  });
 });
 "
 

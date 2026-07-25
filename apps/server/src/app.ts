@@ -25,6 +25,9 @@ import {
   createOrReplaceOtp,
   recordOtpAttempt,
   deleteOtp,
+  getConsents,
+  recordConsent,
+  revokeConsent,
 } from './database';
 import { getRecentTrend } from './trend';
 import * as llmExtract from './llmExtract';
@@ -51,8 +54,17 @@ import {
   computeDailySeries,
   computeSymptomCounts,
   computeRedFlagDates,
+  CONSENT_VERSION,
+  REQUIRED_PURPOSES,
+  OPTIONAL_PURPOSES,
+  deriveConsentState,
+  hasActiveConsent,
+  needsConsent,
+  isStale,
+  canUseAi,
 } from '@amaaii/core';
-import type { JournalPatch, JournalRow, Symptom } from '@amaaii/core';
+import type { JournalPatch, JournalRow, Symptom, ConsentPurpose, ConsentState } from '@amaaii/core';
+import { recordAuditSafe, auditDangerEscalation } from './audit';
 import userManager, { type UserWithFlag } from './userManager';
 
 // The original JS attached `req.userPhone` ad hoc inside requireAuth();
@@ -513,6 +525,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       await userManager.getOrCreateUser(normalized);
       const token = auth.issueToken(normalized);
       log.info('PWA OTP login', { phone: normalized });
+      await recordAuditSafe({ actor: normalized, action: 'login', resource: 'account', resourceOwner: normalized, metadata: { method: 'otp' } });
       res.json({ token, user: { phone: normalized } });
     } catch (err) {
       log.error('POST /auth/otp/verify failed', err);
@@ -538,6 +551,132 @@ export function createApp(opts: CreateAppOptions = {}): Express {
     next();
   }
 
+  // --- Consent (P3-B) ---------------------------------------------------------
+  // Two-tier model (packages/core/src/consent.ts): data_processing is
+  // REQUIRED (the app has no lawful basis to keep operating for a user
+  // without it, modulo the vital-interests danger-escalation carve-out
+  // enforced independently in messageHandler.ts); ai_responses is
+  // OPTIONAL and only ever turns the LLM chokepoint on/off.
+  const ALL_PURPOSES: ConsentPurpose[] = [...REQUIRED_PURPOSES, ...OPTIONAL_PURPOSES];
+
+  function buildConsentView(state: ConsentState) {
+    const purposes = ALL_PURPOSES.map((purpose) => {
+      const entry = state.find((e) => e.purpose === purpose);
+      return {
+        purpose,
+        granted: entry ? entry.granted : false,
+        active: hasActiveConsent(state, purpose),
+        version: entry ? entry.version : null,
+      };
+    });
+    return {
+      version: CONSENT_VERSION,
+      needsConsent: needsConsent(state),
+      isStale: isStale(state),
+      purposes,
+      canUseAi: canUseAi(state),
+    };
+  }
+
+  app.get('/me/consent', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const state = deriveConsentState(await getConsents(userPhone));
+      res.json(buildConsentView(state));
+    } catch (err) {
+      log.error('GET /me/consent failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.post('/me/consent', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const grants = (req.body || {}).grants;
+      if (grants === null || typeof grants !== 'object' || Array.isArray(grants)) {
+        res.status(400).json({ error: 'invalid_grants', message: 'Body must be { grants: { data_processing?, ai_responses? } }.' });
+        return;
+      }
+      const entries = Object.entries(grants as Record<string, unknown>);
+      if (entries.length === 0) {
+        res.status(400).json({ error: 'invalid_grants', message: 'grants must include at least one purpose.' });
+        return;
+      }
+      for (const [purpose, granted] of entries) {
+        if (!ALL_PURPOSES.includes(purpose as ConsentPurpose)) {
+          res.status(400).json({ error: 'invalid_purpose', message: `Unknown purpose: ${purpose}` });
+          return;
+        }
+        if (typeof granted !== 'boolean') {
+          res.status(400).json({ error: 'invalid_grant_value', message: `${purpose} must be true or false.` });
+          return;
+        }
+      }
+      // data_processing is REQUIRED — declining it here would silently
+      // leave the app with no lawful basis to keep operating for this
+      // user while GET /me/consent still reported "fine". Withdrawing an
+      // ACTIVE data_processing consent is a deliberate, differently-worded
+      // action (POST /me/consent/revoke) so a user never trips it by
+      // accident via this bulk-grants endpoint.
+      if ((grants as Record<string, unknown>).data_processing === false) {
+        res.status(400).json({
+          error: 'cannot_decline_required',
+          message: 'data_processing is required to use Amaaii and cannot be set to false here. To stop processing, use POST /me/consent/revoke (or contact support to delete your account).',
+        });
+        return;
+      }
+      for (const [purpose, granted] of entries) {
+        const p = purpose as ConsentPurpose;
+        const g = granted as boolean;
+        await recordConsent(userPhone, p, g, CONSENT_VERSION);
+        await recordAuditSafe({
+          actor: userPhone,
+          action: 'consent_grant',
+          resource: 'consent',
+          resourceOwner: userPhone,
+          metadata: { purpose: p, granted: g, channel: 'web' },
+        });
+      }
+      const state = deriveConsentState(await getConsents(userPhone));
+      res.json(buildConsentView(state));
+    } catch (err) {
+      log.error('POST /me/consent failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.post('/me/consent/revoke', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const { purpose } = req.body || {};
+      if (!ALL_PURPOSES.includes(purpose as ConsentPurpose)) {
+        res.status(400).json({ error: 'invalid_purpose', message: `Unknown purpose: ${purpose}` });
+        return;
+      }
+      await revokeConsent(userPhone, purpose as ConsentPurpose);
+      await recordAuditSafe({
+        actor: userPhone,
+        action: 'consent_revoke',
+        resource: 'consent',
+        resourceOwner: userPhone,
+        metadata: { purpose, channel: 'web' },
+      });
+      const state = deriveConsentState(await getConsents(userPhone));
+      const view = buildConsentView(state);
+      if (purpose === 'data_processing') {
+        res.json({
+          ...view,
+          note: "Data processing consent revoked — Amaaii will stop processing your data going forward. Your existing data isn't deleted automatically; contact support, or use data export/delete (coming soon), if you'd like it removed.",
+        });
+        return;
+      }
+      res.json(view);
+    } catch (err) {
+      log.error('POST /me/consent/revoke failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   // PWA chat endpoint — same brain as the WhatsApp webhook. The user phone
   // comes from the auth token; users keyed by `whatsapp:+E.164` so a phone
   // that has messaged the WhatsApp sandbox sees its conversation history
@@ -550,11 +689,25 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         return;
       }
       log.info('PWA message received', { phone: req.userPhone, message });
-      const result = await processMessage(req.userPhone as string, message, null);
+      const userPhone = req.userPhone as string;
+      const result = await processMessage(userPhone, message, null, { channel: 'web' });
+      // No audit row when consentRequired — nothing was actually
+      // processed/stored for this turn (see processMessage's "minimum
+      // storage" note), so there is no data-access event to log yet.
+      if (!result.consentRequired) {
+        await recordAuditSafe({
+          actor: userPhone,
+          action: result.aiUsed ? 'ai_call' : 'write',
+          resource: 'conversation',
+          resourceOwner: userPhone,
+          metadata: { context: result.context, urgencyLevel: result.urgencyLevel },
+        });
+      }
       res.json({
         response: result.response,
         urgencyLevel: result.urgencyLevel,
         context: result.context,
+        ...(result.consentRequired ? { consentRequired: true } : {}),
       });
     } catch (error) {
       log.error('Error in /chat', error);
@@ -578,6 +731,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const todaysJournals = await getTodaysJournals(userPhone);
       const completedToday = todaysJournals.filter((j) => j.completed);
       const lastJournal = todaysJournals[todaysJournals.length - 1] || null;
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'profile', resourceOwner: userPhone });
       res.json({
         user: {
           phone: user.phone_number,
@@ -639,6 +793,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       // filtering rather than re-deriving it in the type system.
       await updateUser(userPhone, updates as Parameters<typeof updateUser>[1]);
       const user = await getUser(userPhone);
+      await recordAuditSafe({ actor: userPhone, action: 'write', resource: 'profile', resourceOwner: userPhone, metadata: { fields: Object.keys(updates) } });
       res.json({ user });
     } catch (err) {
       log.error('PUT /me failed', err);
@@ -649,7 +804,9 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   // --- Medical history (Phase D) ---------------------------------------------
   app.get('/me/medical-history', requireAuth, async (req: Request, res: Response) => {
     try {
-      const mh = await getMedicalHistory(req.userPhone as string);
+      const userPhone = req.userPhone as string;
+      const mh = await getMedicalHistory(userPhone);
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'medical_history', resourceOwner: userPhone });
       res.json({ medicalHistory: mh });
     } catch (err) {
       log.error('GET /me/medical-history failed', err);
@@ -695,6 +852,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       }
       await saveMedicalHistory(userPhone, { rawText: trimmed, extracted: extracted || {} });
       const mh = await getMedicalHistory(userPhone);
+      await recordAuditSafe({ actor: userPhone, action: 'write', resource: 'medical_history', resourceOwner: userPhone });
       res.json({ medicalHistory: mh, extracted: extracted || null });
     } catch (err) {
       log.error('POST /me/medical-history failed', err);
@@ -704,7 +862,8 @@ export function createApp(opts: CreateAppOptions = {}): Express {
 
   app.get('/history', requireAuth, async (req: Request, res: Response) => {
     try {
-      const journals = await getJournalHistory(req.userPhone as string, 30);
+      const userPhone = req.userPhone as string;
+      const journals = await getJournalHistory(userPhone, 30);
       const days = (journals || []).map((j) => {
         const startTime = formatTime(j.started_at);
         const status = j.completed
@@ -713,6 +872,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         const label = startTime ? `${j.date} · started ${startTime} · ${status}` : `${j.date} · ${status}`;
         return { label, rows: formatJournalRow(j) };
       }).filter((d) => d.rows.length > 0);
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'journal', resourceOwner: userPhone });
       res.json({ days });
     } catch (err) {
       log.error('GET /history failed', err);
@@ -752,6 +912,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const escalation = danger.urgencyLevel === 'critical' || danger.urgencyLevel === 'high'
         ? dangerCopy(danger.urgencyLevel, lang)
         : undefined;
+      await auditDangerEscalation(userPhone, danger.urgencyLevel);
 
       // Idempotency: a replay of the same (phone, clientEntryId) returns
       // the already-saved entry rather than writing a second row. The
@@ -810,6 +971,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
 
       const todays = await getTodaysJournals(userPhone);
       const saved = todays.find((j) => j.id === journalId) ?? todays[todays.length - 1];
+      await recordAuditSafe({ actor: userPhone, action: 'write', resource: 'journal', resourceOwner: userPhone, metadata: { clientEntryId } });
       res.status(201).json({
         entry: toJournalEntryView(saved),
         deduped: false,
@@ -828,6 +990,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const todays = await getTodaysJournals(userPhone);
       // getTodaysJournals returns oldest-first; the form wants newest-first.
       const entries = todays.slice().reverse().map(toJournalEntryView);
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'journal', resourceOwner: userPhone });
       res.json({ entries, count: entries.length });
     } catch (err) {
       log.error('GET /journal/today failed', err);
@@ -861,6 +1024,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         date,
         entries: byDate.get(date)!.map(toJournalEntryView),
       }));
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'journal', resourceOwner: userPhone });
       res.json({ days: daysOut });
     } catch (err) {
       log.error('GET /journal/entries failed', err);
@@ -922,6 +1086,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
           days = parseInt(rawDays, 10);
         }
         const journals = await getJournalHistory(userPhone, days);
+        await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'insights', resourceOwner: userPhone });
         res.json({
           window: days,
           checkinsCount: (journals || []).filter((j) => !!j.completed).length,

@@ -5,6 +5,14 @@ set -euo pipefail
 # Drives a fresh phone number through the full onboarding ladder
 # (name → age → pregnancy week → location) and asserts every column
 # is populated in the users table afterwards.
+#
+# P3-B update: data_processing consent is now REQUIRED and gates
+# profile onboarding for every un-onboarded WhatsApp user (see
+# messageHandler.ts's consent-gate block) — a brand-new phone gets a
+# consent prompt before the name prompt. "Hi" -> "I AGREE" is inserted
+# below to grant consent (both purposes, per the WhatsApp channel
+# decision) before continuing the existing name/age/week/location
+# ladder, keeping this script's original assertions' intent intact.
 
 source "$(dirname "$0")/lib/send.sh"
 
@@ -35,9 +43,14 @@ PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.b
 SID=$!
 sleep 2
 
+# Grant consent first (P3-B) — a brand-new phone's first turn is now the
+# consent prompt, not the name prompt; "I AGREE" records consent and the
+# very same reply moves straight into the name prompt.
+send "$PHONE" "Hi" "" >/dev/null
+send "$PHONE" "I AGREE" "" >/dev/null
+
 # Drive the onboarding ladder. Pass profile="" so the bot must elicit
 # the name (D5 path) rather than pre-fill it from Twilio's ProfileName.
-send "$PHONE" "Hi" "" >/dev/null
 send "$PHONE" "Grace" "" >/dev/null
 send "$PHONE" "26" "" >/dev/null
 send "$PHONE" "20 weeks" "" >/dev/null
@@ -61,7 +74,12 @@ db.get('SELECT name, age, pregnancy_week, location FROM users WHERE phone_number
 "
 
 # Regression check: a HIGH-urgency first turn from a NEW phone should
-# still ask for the name.
+# never be silently dropped — pre-P3-B this meant "still asks for the
+# name"; now onboarding itself is gated behind consent, so the same
+# intent (danger copy surfaces, AND the bot still moves the user toward
+# being usable — consent first, then name) means it should carry the
+# HIGH escalation copy AND the consent prompt, not a bare danger message
+# with nothing else.
 PHONE2="whatsapp:+254700009905"
 curl -sS -X POST \
   --data-urlencode "From=$PHONE2" \
@@ -72,8 +90,13 @@ node -e "
 const sqlite3 = require('sqlite3').verbose();
 const db = new sqlite3.Database('$DB_FILE');
 db.get('SELECT response FROM conversations WHERE user_phone = ? ORDER BY timestamp DESC LIMIT 1', ['$PHONE2'], (err, row) => {
-  if (err || !row || !row.response.includes(\"What's your name\")) {
-    console.error('FAIL: HIGH-urgency new user did not get name prompt');
+  if (err || !row || !/checked by a healthcare provider TODAY/i.test(row.response)) {
+    console.error('FAIL: HIGH-urgency new user did not get escalation copy');
+    console.error(row && row.response);
+    process.exit(1);
+  }
+  if (!/Reply \*I AGREE\*/i.test(row.response)) {
+    console.error('FAIL: HIGH-urgency new user did not get the consent prompt (P3-B)');
     console.error(row && row.response);
     process.exit(1);
   }

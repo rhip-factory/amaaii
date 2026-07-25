@@ -26,6 +26,25 @@ const STRINGS: Record<Lang, StringDict> = {
     location_done: "Perfect! I now have your basic information:\n{summary}\n\nYou can:\n• Share how you're feeling today\n• Ask me any pregnancy questions\n• Tell me about any symptoms you're experiencing\n• Type \"help\" to see what I can do\n\nHow are you feeling today? 💚",
     welcome_back: "Welcome back {name}! How can I help you today?",
 
+    // Consent (P3-B, Kenya DPA) — asked BEFORE profile onboarding for a
+    // brand-new WhatsApp user (or a returning user whose consent lapsed).
+    // Danger signs still escalate during this phase (see dangerCopy
+    // prepending in messageHandler.ts); these strings are only ever
+    // shown for non-critical turns.
+    consent_request: "Before we begin, I need your permission to store and use your messages so I can support you 💚 Amaaii keeps your chats and check-ins securely, personalises your care, and automatically watches for urgent danger signs — even before you finish signing up. Read our privacy notice: {url}\n\nReply *I AGREE* to continue, or *STOP* if you'd rather not.",
+    consent_reprompt: "I didn't quite catch that. To use Amaaii, please reply with the word *AGREE* (or *I AGREE*) to accept our privacy notice and continue — I'll always alert you to urgent danger signs either way. Read the notice here: {url}\n\nOr reply *STOP* if you don't wish to continue.",
+    consent_thanks: "✅ Thank you — you're all set on privacy. Let's get to know you a little.",
+
+    // Consent — web /chat (PWA) copy. Returned alongside consentRequired:
+    // true instead of processing the message.
+    web_consent_required: "You need to accept Amaaii's data consent before I can chat with you. Please open Settings in the app and grant consent to continue — I'll still flag any urgent symptoms you mention.",
+
+    // AI declined (ai_responses purpose not active) — deterministic
+    // stand-in for what would have been an AI reply. Danger detection and
+    // journaling are unaffected; this string only replaces the
+    // getAmaaiiResponse() call site.
+    ai_off_reply: "AI-powered replies are turned off. You can turn them on in Settings. I can still help you track your check-ins and will always flag urgent symptoms.",
+
     // Journal
     journal_greeting: "Let's do your daily check-in! 📝\n\nFirst, how are you feeling emotionally today? (Rate 1-10, where 1 is very low and 10 is excellent)",
     journal_continue: "Welcome back! Let's continue your daily check-in 📝\n\nHow are you feeling emotionally right now? (1-10)",
@@ -109,6 +128,15 @@ const STRINGS: Record<Lang, StringDict> = {
     week_prompt_again: "Sikuelewa — jaribu tena tafadhali.\n\n• Nambari peke yake inafaa: \"22\"\n• Au \"wiki 22\"\n• Au tarehe ya hedhi yako ya mwisho: \"22 Machi\" au \"22/3/2026\"",
     location_done: "Vizuri! Sasa nina taarifa zako za msingi:\n{summary}\n\nUnaweza:\n• Kushiriki unavyojisikia leo\n• Kuniuliza maswali yoyote ya ujauzito\n• Kuniambia kuhusu dalili zozote unazoona\n• Andika \"help\" kuona ninayoweza kufanya\n\nUnajisikiaje leo? 💚",
     welcome_back: "Karibu tena {name}! Ninawezaje kukusaidia leo?",
+
+    // Consent (P3-B, Kenya DPA) — Kiswahili variants of the EN copy above.
+    consent_request: "Kabla hatujaanza, ninahitaji ruhusa yako kuhifadhi na kutumia ujumbe wako ili nikusaidie 💚 Amaaii huhifadhi mazungumzo na taarifa zako za afya kwa usalama, hukupa huduma ya kibinafsi, na hugundua dalili za hatari moja kwa moja — hata kabla hujamaliza kujisajili. Soma taarifa yetu ya faragha: {url}\n\nJibu *NAKUBALI* kuendelea, au *SITAKI* kama hutaki.",
+    consent_reprompt: "Sikuelewa vizuri. Ili kutumia Amaaii, tafadhali jibu na neno *NAKUBALI* kukubali taarifa yetu ya faragha na kuendelea — nitakuarifu daima kuhusu dalili za hatari hata hivyo. Soma taarifa hapa: {url}\n\nAu jibu *SITAKI* kama hutaki kuendelea.",
+    consent_thanks: "✅ Asante — umekamilisha faragha. Sasa hebu tukujue kidogo.",
+
+    web_consent_required: "Unahitaji kukubali idhini ya matumizi ya data ya Amaaii kabla sijazungumza nawe. Tafadhali fungua Mipangilio kwenye programu na utoe idhini ili kuendelea — bado nitakuarifu kuhusu dalili za hatari unazotaja.",
+
+    ai_off_reply: "Majibu ya AI yamezimwa. Unaweza kuyawasha kwenye Mipangilio. Bado ninaweza kukusaidia kufuatilia ukaguzi wako na daima nitakuarifu kuhusu dalili za hatari.",
 
     // Journal
     journal_greeting: "Hebu tufanye ukaguzi wako wa kila siku! 📝\n\nKwanza, unajisikiaje kihisia leo? (Kadiri 1-10, ambapo 1 ni chini sana na 10 ni bora kabisa)",
