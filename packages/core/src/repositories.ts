@@ -125,6 +125,14 @@ export interface ConversationRepository {
   ): Promise<number>;
   getConversationHistory(userPhone: string, limit?: number): Promise<ConversationRow[]>;
   getLastBotMessage(userPhone: string): Promise<LastBotMessageRow | null>;
+  /**
+   * ALL conversation rows for this user, oldest first (unlike
+   * getConversationHistory's newest-first + LIMIT, which exists to feed
+   * the AI prompt's last-N-turns window). P3-C data-portability export
+   * (GET /me/export) is the only caller — a data-subject's "complete
+   * data" view needs every row, not a capped recent slice.
+   */
+  getAllForUser(userPhone: string): Promise<ConversationRow[]>;
 }
 
 // --- Journals -------------------------------------------------------------
@@ -160,6 +168,13 @@ export interface JournalRepository {
    * set client_entry_id).
    */
   findByClientEntryId(userPhone: string, clientEntryId: string): Promise<JournalRow | undefined>;
+  /**
+   * ALL journal rows for this user, oldest first — unlike
+   * getJournalHistory's `days`-windowed query (which backs trend/insights
+   * charts with a fixed lookback), this ignores date entirely. P3-C
+   * data-portability export (GET /me/export) is the only caller.
+   */
+  getAllForUser(userPhone: string): Promise<JournalRow[]>;
 }
 
 // --- Journal sessions -------------------------------------------------------
@@ -191,6 +206,21 @@ export interface JournalSessionRepository {
 
 // --- Symptoms ---------------------------------------------------------------
 
+/**
+ * Row shape of the `symptoms` table — WhatsApp free-text danger-sign
+ * detections (distinct from `journals.physical_symptoms`, which is the
+ * structured daily check-in's own symptom field). `symptoms` is a
+ * JSON-stringified array, same encoding saveSymptoms() writes.
+ */
+export interface SymptomRow {
+  id: number;
+  user_phone: string;
+  symptoms: string | null;
+  mood: string | null;
+  urgency: string | null;
+  timestamp: string;
+}
+
 export interface SymptomRepository {
   saveSymptoms(
     userPhone: string,
@@ -198,6 +228,12 @@ export interface SymptomRepository {
     mood: string,
     urgency: string
   ): Promise<number>;
+  /**
+   * ALL symptom rows for this user, oldest first. No prior reader of this
+   * table existed before P3-C — GET /me/export (data-portability) is the
+   * first and only caller.
+   */
+  getAllForUser(userPhone: string): Promise<SymptomRow[]>;
 }
 
 // --- Medical history ---------------------------------------------------------
@@ -237,6 +273,13 @@ export interface AncVisitRepository {
   scheduleANCVisit(userPhone: string, scheduledDate: string, notes?: string): Promise<number>;
   getUpcomingANCVisits(userPhone: string): Promise<AncVisitRow[]>;
   markANCVisitAttended(visitId: number): Promise<number>;
+  /**
+   * ALL ANC visit rows for this user (upcoming, past, attended or not) —
+   * unlike getUpcomingANCVisits' `attended = 0 AND scheduled_date >=
+   * today` filter. P3-C data-portability export (GET /me/export) is the
+   * only caller.
+   */
+  getAllForUser(userPhone: string): Promise<AncVisitRow[]>;
 }
 
 // --- OTP codes (P2-B) --------------------------------------------------------
@@ -436,4 +479,33 @@ export interface DatabaseAdapter {
    *  JS module never exposed a close path (it was a process-lifetime
    *  singleton); nothing currently calls this. */
   close(): Promise<void>;
+  /**
+   * Kenya DPA erasure right (P3-C, DELETE /me/account): hard-deletes
+   * every row keyed to `phone` from users, conversations, symptoms,
+   * anc_visits, journals, journal_sessions, medical_history, otp_codes,
+   * and consents — in a single transaction, so a partial failure rolls
+   * everything back instead of leaving some tables cleared and others
+   * not (see the adapter implementation for the transaction mechanics).
+   *
+   * DELIBERATE TENSION, documented here rather than left implicit:
+   * this method does NOT touch `audit_log`. The two DPA obligations
+   * (erasure vs. keeping a record of processing) point in opposite
+   * directions for that one table, and we resolve it in favor of
+   * retention: audit_log rows — including the 'delete'/'account' event
+   * this very erasure fires (see apps/server/src/app.ts's DELETE
+   * /me/account, which audits BEFORE calling this) — are themselves the
+   * DPA-mandated record of what processing/access happened and when,
+   * which by nature must survive the event it's recording. The
+   * alternative (a minimal "account deleted" tombstone that also purges
+   * prior audit rows for the phone) was considered and rejected: it
+   * would erase the very access history a data subject or regulator
+   * might need to review *because* an account was deleted. Audit rows
+   * do retain the phone as `actor`/`resource_owner` after this call —
+   * that residual is the accepted cost of an auditable erasure.
+   *
+   * Idempotent: a phone with zero rows in every table (already erased,
+   * or never had any) resolves normally — `DELETE ... WHERE` matching
+   * zero rows is not an error.
+   */
+  eraseUser(phone: string): Promise<void>;
 }

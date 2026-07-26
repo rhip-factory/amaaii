@@ -16,6 +16,7 @@ import { SqliteAncVisitRepository } from './ancVisitRepository';
 import { SqliteOtpRepository } from './otpRepository';
 import { SqliteConsentRepository } from './consentRepository';
 import { SqliteAuditRepository } from './auditRepository';
+import { eraseUserData } from './erasure';
 
 export * from './connection';
 export * from './userRepository';
@@ -28,6 +29,7 @@ export * from './ancVisitRepository';
 export * from './otpRepository';
 export * from './consentRepository';
 export * from './auditRepository';
+export * from './erasure';
 
 /**
  * Builds a fully-wired DatabaseAdapter backed by a single sqlite3
@@ -54,5 +56,6 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
       new Promise<void>((resolve, reject) => {
         db.close((err) => (err ? reject(err) : resolve()));
       }),
+    eraseUser: (phone: string) => eraseUserData(db, phone),
   };
 }

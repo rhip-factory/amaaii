@@ -119,6 +119,21 @@ export class SqliteJournalRepository implements JournalRepository {
     });
   }
 
+  // P3-C data-portability export — ALL rows regardless of date, oldest
+  // first (unlike getJournalHistory's `days`-windowed query).
+  getAllForUser(userPhone: string): Promise<JournalRow[]> {
+    return new Promise((resolve, reject) => {
+      this.db.all<JournalRow>(
+        `SELECT * FROM journals WHERE user_phone = ? ORDER BY date ASC, id ASC`,
+        [userPhone],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
   getJournalHistory(userPhone: string, days = 7): Promise<JournalRow[]> {
     return new Promise((resolve, reject) => {
       this.db.all<JournalRow>(

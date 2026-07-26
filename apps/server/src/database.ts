@@ -25,6 +25,7 @@ import type {
   MedicalHistoryInput,
   MedicalHistoryRecord,
   OtpRecord,
+  SymptomRow,
   UpdateUserInput,
   UserRow,
 } from '@amaaii/core';
@@ -78,6 +79,12 @@ export async function getLastBotMessage(userPhone: string): Promise<LastBotMessa
   return adapter.conversations.getLastBotMessage(userPhone);
 }
 
+// P3-C data-portability export (GET /me/export) — ALL conversation rows,
+// not the last-N-turns slice getConversationHistory returns.
+export async function getAllConversationsForUser(userPhone: string): Promise<ConversationRow[]> {
+  return adapter.conversations.getAllForUser(userPhone);
+}
+
 export async function getMedicalHistory(userPhone: string): Promise<MedicalHistoryRecord | null> {
   return adapter.medicalHistory.getMedicalHistory(userPhone);
 }
@@ -107,6 +114,11 @@ export async function saveSymptoms(
   return adapter.symptoms.saveSymptoms(userPhone, symptoms, mood, urgency);
 }
 
+// P3-C data-portability export (GET /me/export) — ALL symptom rows.
+export async function getAllSymptomsForUser(userPhone: string): Promise<SymptomRow[]> {
+  return adapter.symptoms.getAllForUser(userPhone);
+}
+
 export async function scheduleANCVisit(userPhone: string, scheduledDate: string, notes = ''): Promise<number> {
   return adapter.ancVisits.scheduleANCVisit(userPhone, scheduledDate, notes);
 }
@@ -117,6 +129,12 @@ export async function getUpcomingANCVisits(userPhone: string): Promise<AncVisitR
 
 export async function markANCVisitAttended(visitId: number): Promise<number> {
   return adapter.ancVisits.markANCVisitAttended(visitId);
+}
+
+// P3-C data-portability export (GET /me/export) — ALL ANC visit rows,
+// not just the upcoming/unattended slice getUpcomingANCVisits returns.
+export async function getAllAncVisitsForUser(userPhone: string): Promise<AncVisitRow[]> {
+  return adapter.ancVisits.getAllForUser(userPhone);
 }
 
 export async function createOrUpdateJournal(
@@ -146,6 +164,12 @@ export async function getJournalAnalytics(userPhone: string, days = 7): Promise<
 // P2-C idempotency lookup for POST /journal/entries.
 export async function findJournalByClientEntryId(userPhone: string, clientEntryId: string): Promise<JournalRow | undefined> {
   return adapter.journals.findByClientEntryId(userPhone, clientEntryId);
+}
+
+// P3-C data-portability export (GET /me/export) — ALL journal rows,
+// unbounded by the `days` window getJournalHistory uses.
+export async function getAllJournalsForUser(userPhone: string): Promise<JournalRow[]> {
+  return adapter.journals.getAllForUser(userPhone);
 }
 
 // --- OTP (P2-B) ---------------------------------------------------------
@@ -204,4 +228,13 @@ export async function recordAudit(event: AuditEventInput): Promise<void> {
 
 export async function listAuditForUser(phone: string, limit?: number): Promise<AuditEvent[]> {
   return adapter.audit.listForUser(phone, limit);
+}
+
+// --- Erasure (P3-C) ---------------------------------------------------------
+// Kenya DPA right to erasure. See DatabaseAdapter#eraseUser's doc comment
+// in packages/core/src/repositories.ts for the tables cleared, the
+// transaction guarantee, and — most importantly — why audit_log is
+// deliberately NOT among them.
+export async function eraseUser(phone: string): Promise<void> {
+  return adapter.eraseUser(phone);
 }

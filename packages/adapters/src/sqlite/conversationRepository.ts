@@ -64,6 +64,22 @@ export class SqliteConversationRepository implements ConversationRepository {
     });
   }
 
+  // P3-C data-portability export — ALL rows, oldest first (no LIMIT).
+  getAllForUser(userPhone: string): Promise<ConversationRow[]> {
+    return new Promise((resolve, reject) => {
+      this.db.all<ConversationRow>(
+        `SELECT * FROM conversations
+         WHERE user_phone = ?
+         ORDER BY timestamp ASC, id ASC`,
+        [userPhone],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
+
   getLastBotMessage(userPhone: string): Promise<LastBotMessageRow | null> {
     return new Promise((resolve, reject) => {
       // Same tie-breaking rationale as getConversationHistory above —

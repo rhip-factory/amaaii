@@ -28,6 +28,12 @@ import {
   getConsents,
   recordConsent,
   revokeConsent,
+  getAllConversationsForUser,
+  getAllJournalsForUser,
+  getAllSymptomsForUser,
+  getAllAncVisitsForUser,
+  listAuditForUser,
+  eraseUser,
 } from './database';
 import { getRecentTrend } from './trend';
 import * as llmExtract from './llmExtract';
@@ -1102,6 +1108,121 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       }
     }
   );
+
+  // --- Data-subject rights (P3-C, Kenya DPA) -----------------------------------
+  // Server-side halves of the two core DPA rights: portability (export)
+  // and erasure (delete). The PWA UI for these ships in P3-D — these
+  // routes are usable today via curl/Postman/etc.
+
+  // Effectively-unbounded LIMIT for the audit-log read inside an export:
+  // GET /me/export needs the data subject's COMPLETE access history, not
+  // listAuditForUser's normal page-sized default. No real user will ever
+  // approach this many rows.
+  const EXPORT_AUDIT_LIMIT = 1_000_000;
+
+  // GET /me/export — data portability. Gathers every table this user's
+  // phone appears in (except otp_codes, which is short-lived auth
+  // material, not portable "data about you") into one JSON document and
+  // hands it back as a downloadable attachment.
+  app.get('/me/export', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      // getOrCreate mirrors GET /me's own fix: a phone that only ever
+      // signed in (never chatted, never journaled) still gets a real
+      // profile object here instead of a 500.
+      const user = await userManager.getOrCreateUser(userPhone);
+      const [consents, conversations, journals, symptoms, ancVisits, medicalHistory] = await Promise.all([
+        getConsents(userPhone),
+        getAllConversationsForUser(userPhone),
+        getAllJournalsForUser(userPhone),
+        getAllSymptomsForUser(userPhone),
+        getAllAncVisitsForUser(userPhone),
+        getMedicalHistory(userPhone),
+      ]);
+
+      // Audit BEFORE returning — and BEFORE the final audit-log read
+      // below, so this very export event is itself part of the
+      // "complete access history" the export hands back.
+      await recordAuditSafe({
+        actor: userPhone,
+        action: 'export',
+        resource: 'account',
+        resourceOwner: userPhone,
+      });
+      const auditLog = await listAuditForUser(userPhone, EXPORT_AUDIT_LIMIT);
+
+      const exportedAt = new Date().toISOString();
+      // `isNewUser` is a transient flag getOrCreateUser() stamps onto the
+      // in-memory object for THIS call, not a persisted column — strip it
+      // so `profile` is exactly the users-table row (phone_number, name,
+      // age, pregnancy_week, edd, location, risk_level, lmp, anc_visits,
+      // language, created_at, updated_at).
+      const { isNewUser: _isNewUser, ...profile } = user;
+      const filenameDate = exportedAt.slice(0, 10);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="amaaii-my-data-${filenameDate}.json"`
+      );
+      res.json({
+        exportedAt,
+        phone: userPhone,
+        profile,
+        consents,
+        conversations,
+        journals,
+        symptoms,
+        ancVisits,
+        medicalHistory,
+        auditLog,
+      });
+    } catch (err) {
+      log.error('GET /me/export failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  // DELETE /me/account — erasure. Irreversible: hard-deletes every row
+  // this phone owns (see eraseUser()'s doc comment in
+  // packages/core/src/repositories.ts for the full table list and why
+  // audit_log is the one deliberate exception). Idempotent by
+  // construction — eraseUser() against a phone with nothing left simply
+  // deletes zero rows from each table, which is not an error.
+  app.delete('/me/account', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      // SAFETY: this endpoint erases ONLY the authenticated caller's own
+      // phone, taken from the verified bearer token — never a phone from
+      // the request body. That's a hard invariant (the body is never
+      // even read for a phone below), enforced defensively here by
+      // rejecting outright if the body tries to supply one — so a caller
+      // can never be under the impression a body-supplied phone did
+      // anything, successfully or otherwise.
+      if (req.body && typeof req.body === 'object' && 'phone' in (req.body as Record<string, unknown>)) {
+        res.status(400).json({
+          error: 'phone_not_accepted',
+          message: 'DELETE /me/account always deletes the authenticated caller’s own account (from the bearer token); it never accepts a phone in the request body.',
+        });
+        return;
+      }
+      // Audit FIRST, before the erasure below removes the data (including
+      // the consent ledger) this event refers to — see eraseUser()'s doc
+      // comment for why audit_log itself survives the erasure.
+      await recordAuditSafe({
+        actor: userPhone,
+        action: 'delete',
+        resource: 'account',
+        resourceOwner: userPhone,
+      });
+      await eraseUser(userPhone);
+      res.status(200).json({
+        deleted: true,
+        message: 'Your Amaaii account and data have been permanently deleted.',
+      });
+    } catch (err) {
+      log.error('DELETE /me/account failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
 
   // --- Static: the Next.js PWA (apps/web/out) ---------------------------------
   // `public/` (the older vanilla-JS PWA) is retired — this serves the
