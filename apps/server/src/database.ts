@@ -48,6 +48,12 @@ export function initializeDatabase(): Promise<void> {
   return adapter.initialize();
 }
 
+// P4-B: GET /health/ready's DB reachability check — see
+// DatabaseAdapter#ping's doc comment in packages/core/src/repositories.ts.
+export async function pingDatabase(): Promise<void> {
+  return adapter.ping();
+}
+
 // Every other export mirrors the original's `async function` declaration
 // exactly (not just "returns a Promise") — e.g. updateUser's whitelist
 // check throws synchronously, and only `async` turns that into a

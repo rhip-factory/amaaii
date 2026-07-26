@@ -252,6 +252,37 @@ describe('DELETE /me/account', () => {
     expect(deleteEvent.resource_owner).toBe(phone);
   });
 
+  it('P4-B: also clears the caller\'s pending jobs (e.g. a scheduled checkin_followup), leaving other users\' jobs intact', async () => {
+    const app = createApp();
+    const { token: tokenA, phone: phoneA } = await seedFullUser(app, freshPhone());
+    const { phone: phoneB } = await seedFullUser(app, freshPhone());
+
+    await db.enqueueJob({
+      type: 'checkin_followup',
+      payload: { phone: phoneA },
+      runAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+    await db.enqueueJob({
+      type: 'checkin_followup',
+      payload: { phone: phoneB },
+      runAt: new Date(Date.now() + 3600000).toISOString(),
+    });
+
+    const before = await db.countJobsByStatus();
+    expect(before.pending).toBeGreaterThanOrEqual(2);
+
+    const res = await request(app).delete('/me/account').set('Authorization', `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+
+    // Exactly one job removed (phoneA's) — phoneB's stays pending. A job
+    // mid-flight at the moment of erasure is an accepted trade-off (see
+    // DatabaseAdapter#eraseUser's doc comment in
+    // packages/core/src/repositories.ts) — not exercised here since this
+    // test enqueues a future-dated job that was never claimed.
+    const after = await db.countJobsByStatus();
+    expect(after.pending).toBe(before.pending - 1);
+  });
+
   it("isolation: deleting user A leaves user B's data fully intact (mandatory)", async () => {
     const app = createApp();
     const { token: tokenA, phone: phoneA } = await seedFullUser(app, freshPhone());

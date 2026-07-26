@@ -75,6 +75,7 @@ interface JobRow {
   locked_at: string | null;
   locked_by: string | null;
   dedupe_key: string | null;
+  user_phone: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,9 +93,21 @@ function toJobRecord(row: JobRow): JobRecord {
     lockedAt: row.locked_at,
     lockedBy: row.locked_by,
     dedupeKey: row.dedupe_key,
+    userPhone: row.user_phone,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// P4-B (DPA erasure gap fix): best-effort phone extraction from a job's
+// payload, used ONLY to populate the jobs.user_phone column at enqueue
+// time (see JobRecord#userPhone's doc comment for the full rationale).
+// Deliberately permissive — any payload shape with a string `phone`
+// field qualifies, not just checkin_followup's; a future job type gets
+// this for free without this file needing to know its specific shape.
+function phoneFromPayload(payload: Record<string, unknown> | undefined): string | null {
+  const phone = payload?.phone;
+  return typeof phone === 'string' && phone.length > 0 ? phone : null;
 }
 
 // Same duck-typed "does this look like a UNIQUE violation" check as
@@ -112,6 +125,7 @@ export class SqliteJobRepository implements JobRepository {
     const dedupeKey = input.dedupeKey ?? null;
     const maxAttempts = input.maxAttempts ?? DEFAULT_JOB_MAX_ATTEMPTS;
     const payloadJson = JSON.stringify(input.payload ?? {});
+    const userPhone = phoneFromPayload(input.payload);
     const db = this.db;
 
     const readById = (id: number): Promise<JobRecord> =>
@@ -134,9 +148,9 @@ export class SqliteJobRepository implements JobRepository {
     const insert = (): Promise<JobRecord> =>
       new Promise((resolve, reject) => {
         db.run(
-          `INSERT INTO jobs (type, payload, run_at, status, attempts, max_attempts, dedupe_key, created_at, updated_at)
-           VALUES (?, ?, ?, 'pending', 0, ?, ?, datetime('now'), datetime('now'))`,
-          [input.type, payloadJson, input.runAt, maxAttempts, dedupeKey],
+          `INSERT INTO jobs (type, payload, run_at, status, attempts, max_attempts, dedupe_key, user_phone, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', 0, ?, ?, ?, datetime('now'), datetime('now'))`,
+          [input.type, payloadJson, input.runAt, maxAttempts, dedupeKey, userPhone],
           function (err) {
             if (err) return reject(err);
             resolve(readById(this.lastID));

@@ -408,6 +408,7 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
           locked_at DATETIME,
           locked_by TEXT,
           dedupe_key TEXT,
+          user_phone TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -416,6 +417,40 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
           if (err) log.error('Error creating jobs table', err);
         }
       );
+
+      // Idempotent migration: jobs.user_phone (P4-B — DPA erasure gap
+      // fix). Nullable and best-effort: SqliteJobRepository#enqueue
+      // populates it from `payload.phone` when that field is a string
+      // (true for the one job type that exists today, checkin_followup's
+      // `{ phone }` payload); a job type with no phone-shaped payload
+      // simply leaves this NULL. Lets DELETE /me/account's erasure
+      // cascade (erasure.ts) clear a user's pending jobs like every
+      // other user-data table, without parsing `payload` per job type.
+      //
+      // Same "chain the dependent index inside the ALTER's own callback"
+      // idiom as journals.client_entry_id's ensureClientEntryIndex above
+      // — idx_jobs_user_phone (below) references the column directly, so
+      // it must only ever be queued once the column is known to exist,
+      // not as an unconditional sibling statement that could run before
+      // an old DB's ALTER has landed.
+      db.all<{ name: string }>(`PRAGMA table_info(jobs)`, (err, rows) => {
+        if (err) return;
+        const have = new Set((rows || []).map((r) => r.name));
+        const ensureUserPhoneIndex = () => {
+          // Backs erasure.ts's `DELETE FROM jobs WHERE user_phone = ?`.
+          db.run(`CREATE INDEX IF NOT EXISTS idx_jobs_user_phone ON jobs(user_phone)`, (e) => {
+            if (e) log.error('Error creating jobs user_phone index', e);
+          });
+        };
+        if (!have.has('user_phone')) {
+          db.run(`ALTER TABLE jobs ADD COLUMN user_phone TEXT`, (e) => {
+            if (e) log.error('Error adding jobs.user_phone', e);
+            else ensureUserPhoneIndex();
+          });
+        } else {
+          ensureUserPhoneIndex();
+        }
+      });
 
       // Idempotent enqueue: only enforced when dedupe_key is non-NULL,
       // so the many jobs that never set one can coexist freely (partial

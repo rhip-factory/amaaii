@@ -18,6 +18,7 @@
 
 import { log } from './logger';
 import * as db from './database';
+import { notifyCritical } from './alerts';
 import type { JobRecord } from '@amaaii/core';
 
 export type JobHandler = (payload: Record<string, unknown>, job: JobRecord) => Promise<void>;
@@ -35,6 +36,16 @@ const DEFAULT_CLAIM_LIMIT = 10;
 // registers should ever take (a single WhatsApp send), short enough
 // that a genuine crash doesn't leave a job stranded for long.
 const DEFAULT_STALE_MS = 5 * 60_000;
+
+// P4-B: proportionate alerting seam (see apps/server/src/alerts.ts) —
+// if a single poll cycle sees at least this many job EXECUTION failures
+// (retryable failures counted the same as permanent ones; see the
+// notifyCritical() call at the bottom of runOnce for the honest
+// wording), that is treated as worth paging a human about, not just
+// logging. Env-configurable so a pilot can tune it without a code
+// change; default chosen to tolerate an isolated one-off failure
+// without alerting on it.
+const DEFAULT_FAILED_ALERT_THRESHOLD = 3;
 
 const handlers = new Map<string, JobHandler>();
 
@@ -138,6 +149,13 @@ export async function runOnce(now: Date = new Date(), opts: RunOnceOptions = {})
         log.error(`jobWorker: failed to record failure for job ${job.id}`, markErr);
       }
     }
+  }
+
+  const failedAlertThreshold = Number(process.env.JOBS_FAILED_ALERT_THRESHOLD) || DEFAULT_FAILED_ALERT_THRESHOLD;
+  if (failed >= failedAlertThreshold) {
+    notifyCritical('jobs_failed_threshold', {
+      message: `${failed} job execution(s) failed in one poll cycle (includes jobs still being retried, not only permanently-failed ones) — threshold ${failedAlertThreshold}`,
+    });
   }
 
   return { reclaimed, claimed: claimed.length, succeeded, failed };

@@ -490,6 +490,19 @@ export interface JobRecord {
   /** Idempotent-enqueue key, or null for jobs that don't need one. See
    *  JobRepository#enqueue. */
   dedupeKey: string | null;
+  /**
+   * P4-B (DPA erasure gap fix): the phone this job is FOR, when
+   * derivable — populated by the adapter's enqueue() from
+   * `input.payload.phone` when that field is a string (e.g. the
+   * checkin_followup job's `{ phone }` payload), null otherwise. Exists
+   * so DELETE /me/account's erasure cascade (packages/adapters/src/
+   * sqlite/erasure.ts) can clear a user's pending jobs the same way it
+   * clears every other user-data table, without needing to
+   * JSON.parse(payload) and guess its shape per job type. Not every job
+   * type necessarily has a phone-shaped payload — this is best-effort,
+   * not a schema guarantee.
+   */
+  userPhone: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -582,12 +595,30 @@ export interface DatabaseAdapter {
    *  singleton); nothing currently calls this. */
   close(): Promise<void>;
   /**
+   * P4-B readiness check (GET /health/ready): runs a trivial `SELECT 1`
+   * against the connection and resolves if it succeeds, rejects
+   * otherwise. Deliberately the cheapest possible real query — proves
+   * the connection/file is actually usable (not just that this module
+   * loaded), without touching any user table or row.
+   */
+  ping(): Promise<void>;
+  /**
    * Kenya DPA erasure right (P3-C, DELETE /me/account): hard-deletes
    * every row keyed to `phone` from users, conversations, symptoms,
    * anc_visits, journals, journal_sessions, medical_history, otp_codes,
-   * and consents — in a single transaction, so a partial failure rolls
-   * everything back instead of leaving some tables cleared and others
-   * not (see the adapter implementation for the transaction mechanics).
+   * consents, and (P4-B) jobs — in a single transaction, so a partial
+   * failure rolls everything back instead of leaving some tables cleared
+   * and others not (see the adapter implementation for the transaction
+   * mechanics).
+   *
+   * jobs is matched on the best-effort `user_phone` column (see
+   * JobRecord#userPhone) — a job mid-flight (claimed by the poller,
+   * status='running') at the moment of erasure is still deleted; the
+   * accepted trade-off is that its in-progress side effect (e.g. an
+   * already-in-transit WhatsApp send) is not recalled, only the row
+   * bookkeeping it. Documented here rather than treated as a bug: an
+   * erasure request racing a live job is a rare edge case, and there is
+   * no way to "cancel" a send that may have already left the process.
    *
    * DELIBERATE TENSION, documented here rather than left implicit:
    * this method does NOT touch `audit_log`. The two DPA obligations

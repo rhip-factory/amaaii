@@ -109,6 +109,37 @@ describe('JobRepository#enqueue', () => {
     expect(counts.pending).toBe(1); // exactly one row total in this fresh file
   });
 
+  // P4-B: DPA erasure gap fix — jobs.user_phone lets DELETE /me/account's
+  // erasure cascade (packages/adapters/src/sqlite/erasure.ts) clear a
+  // user's pending jobs. See JobRecord#userPhone's doc comment in
+  // packages/core/src/repositories.ts for the full rationale.
+  it('P4-B: populates userPhone from a string `phone` field in the payload', async () => {
+    const db = await freshAdapter();
+    const job = await db.jobs.enqueue({
+      type: 'checkin_followup',
+      payload: { phone: 'whatsapp:+254700000777' },
+      runAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(job.userPhone).toBe('whatsapp:+254700000777');
+  });
+
+  it('P4-B: leaves userPhone null when the payload has no string `phone` field', async () => {
+    const db = await freshAdapter();
+    const withoutPhone = await db.jobs.enqueue({
+      type: 'checkin_followup',
+      payload: { i: 1 },
+      runAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(withoutPhone.userPhone).toBeNull();
+
+    const nonStringPhone = await db.jobs.enqueue({
+      type: 'checkin_followup',
+      payload: { phone: 12345 },
+      runAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(nonStringPhone.userPhone).toBeNull();
+  });
+
   it('two DIFFERENT dedupeKeys never collide with each other', async () => {
     const db = await freshAdapter();
     const a = await db.jobs.enqueue({

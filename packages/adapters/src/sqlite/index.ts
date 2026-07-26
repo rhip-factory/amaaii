@@ -59,6 +59,12 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
       new Promise<void>((resolve, reject) => {
         db.close((err) => (err ? reject(err) : resolve()));
       }),
+    // P4-B: GET /health/ready's DB check — see DatabaseAdapter#ping's
+    // doc comment in packages/core/src/repositories.ts.
+    ping: () =>
+      new Promise<void>((resolve, reject) => {
+        db.get('SELECT 1', (err) => (err ? reject(err) : resolve()));
+      }),
     eraseUser: (phone: string) => eraseUserData(db, phone),
   };
 }
