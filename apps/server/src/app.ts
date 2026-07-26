@@ -683,6 +683,32 @@ export function createApp(opts: CreateAppOptions = {}): Express {
     }
   });
 
+  // --- Activity log (P3-D, Kenya DPA transparency) ---------------------------
+  // "Who's accessed your data" for the Profile screen. Thin wrapper over
+  // the same listAuditForUser() the P3-C export already exposes — this
+  // just gives the PWA a way to show a human-readable slice of it
+  // without downloading the full export every time. ACTIVITY_LIST_LIMIT
+  // is generous enough to cover "recent activity" without approaching
+  // EXPORT_AUDIT_LIMIT's effectively-unbounded read above; a user who
+  // wants the complete history already has GET /me/export for that.
+  const ACTIVITY_LIST_LIMIT = 100;
+
+  app.get('/me/activity', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const events = await listAuditForUser(userPhone, ACTIVITY_LIST_LIMIT);
+      // Recorded AFTER the read above (mirrors GET /me, GET /history,
+      // GET /me/medical-history) so viewing your activity log doesn't
+      // retroactively insert itself into the very list just returned —
+      // it'll show up on the NEXT view instead, same as any other read.
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'account', resourceOwner: userPhone });
+      res.json({ events });
+    } catch (err) {
+      log.error('GET /me/activity failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   // PWA chat endpoint — same brain as the WhatsApp webhook. The user phone
   // comes from the auth token; users keyed by `whatsapp:+E.164` so a phone
   // that has messaged the WhatsApp sandbox sees its conversation history

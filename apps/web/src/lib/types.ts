@@ -161,6 +161,83 @@ export interface JournalHistoryResponse {
 // through packages/core/src/trend.ts's computeTrend / computeDailySeries /
 // computeSymptomCounts / computeRedFlagDates output).
 
+// --- Consent (P3-D) -----------------------------------------------------
+// Shapes mirrored from apps/server/src/app.ts's GET/POST /me/consent and
+// POST /me/consent/revoke (which in turn mirror packages/core/src/
+// consent.ts's ConsentPurpose/buildConsentView). Read directly, not
+// invented — see CLAUDE.md's "Repository pattern" / consent notes.
+
+export type ConsentPurpose = "data_processing" | "ai_responses";
+
+export interface ConsentPurposeView {
+  purpose: ConsentPurpose;
+  granted: boolean;
+  /** Active RIGHT NOW at the current CONSENT_VERSION — false for a
+   *  never-granted, revoked, OR stale (old-version) purpose. */
+  active: boolean;
+  version: number | null;
+}
+
+export interface ConsentResponse {
+  version: number;
+  needsConsent: boolean;
+  isStale: boolean;
+  purposes: ConsentPurposeView[];
+  canUseAi: boolean;
+  /** Present only on POST /me/consent/revoke of data_processing. */
+  note?: string;
+}
+
+export interface ConsentGrants {
+  data_processing?: boolean;
+  ai_responses?: boolean;
+}
+
+// --- Activity / audit log (P3-D) -----------------------------------------
+// Shapes mirrored from apps/server/src/app.ts's GET /me/activity, which
+// passes AuditEvent rows (packages/core/src/repositories.ts) straight
+// through — metadata stays a JSON string here; the UI parses it lazily
+// per-event only when rendering needs a field out of it.
+
+export type AuditAction =
+  | "read"
+  | "write"
+  | "delete"
+  | "export"
+  | "ai_call"
+  | "consent_grant"
+  | "consent_revoke"
+  | "danger_escalation"
+  | "login";
+
+export type AuditResource =
+  | "profile"
+  | "journal"
+  | "conversation"
+  | "medical_history"
+  | "insights"
+  | "consent"
+  | "account";
+
+export interface AuditEvent {
+  id: number;
+  actor: string;
+  action: AuditAction;
+  resource: AuditResource;
+  resource_owner: string;
+  metadata: string | null;
+  created_at: string;
+}
+
+export interface ActivityResponse {
+  events: AuditEvent[];
+}
+
+export interface DeleteAccountResponse {
+  deleted: boolean;
+  message: string;
+}
+
 export type InsightsWindow = 14 | 30;
 
 /** One per-day averaged observation (multiple same-day check-ins are
