@@ -70,7 +70,7 @@ import {
   canUseAi,
 } from '@amaaii/core';
 import type { JournalPatch, JournalRow, Symptom, ConsentPurpose, ConsentState } from '@amaaii/core';
-import { recordAuditSafe, auditDangerEscalation } from './audit';
+import { recordAuditSafe, auditDangerEscalation, wasAccountDeleted } from './audit';
 import userManager, { type UserWithFlag } from './userManager';
 
 // The original JS attached `req.userPhone` ad hoc inside requireAuth();
@@ -587,6 +587,21 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   app.get('/me/consent', requireAuth, async (req: Request, res: Response) => {
     try {
       const userPhone = req.userPhone as string;
+      // P3-E: this route never creates a `users` row (consent lives in
+      // its own table, keyed by phone), so it never literally
+      // "resurrects" anything — but a deleted account's still-valid
+      // bearer token would otherwise get a plausible-looking
+      // "needsConsent: true" response forever, as if nothing happened.
+      // Gate ONLY on "no current row AND was deleted before" (not
+      // wasAccountDeleted alone) — a phone that deletes and later signs
+      // up again for real (fresh OTP verify, which recreates the row)
+      // must not stay locked out just because its audit log still
+      // remembers an old delete event. See userManager.ts#getUserForRead
+      // for the same current-row-first pattern.
+      if (!(await getUser(userPhone)) && (await wasAccountDeleted(userPhone))) {
+        res.status(401).json({ error: 'no_account', message: 'This account no longer exists.' });
+        return;
+      }
       const state = deriveConsentState(await getConsents(userPhone));
       res.json(buildConsentView(state));
     } catch (err) {
@@ -696,6 +711,17 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   app.get('/me/activity', requireAuth, async (req: Request, res: Response) => {
     try {
       const userPhone = req.userPhone as string;
+      // P3-E: same guard as GET /me/consent (see its comment for why the
+      // check is "no current row AND was deleted", not wasAccountDeleted
+      // alone) — this route reads audit_log directly and never creates a
+      // `users` row, but a deleted account's stale token would otherwise
+      // still get back its own (deliberately-retained) audit history,
+      // including the delete event itself, as if the account were still
+      // active.
+      if (!(await getUser(userPhone)) && (await wasAccountDeleted(userPhone))) {
+        res.status(401).json({ error: 'no_account', message: 'This account no longer exists.' });
+        return;
+      }
       const events = await listAuditForUser(userPhone, ACTIVITY_LIST_LIMIT);
       // Recorded AFTER the read above (mirrors GET /me, GET /history,
       // GET /me/medical-history) so viewing your activity log doesn't
@@ -753,13 +779,25 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   app.get('/me', requireAuth, async (req: Request, res: Response) => {
     try {
       const userPhone = req.userPhone as string;
-      // P2-B fix: getOrCreate (not getUser) — a phone that only ever
-      // signed in via OTP/demo login (never sent a WhatsApp/chat message,
-      // which used to be the only path that created the row via
-      // processMessage) previously hit the `!user` placeholder branch
-      // forever. See the PUT /me fix below for the write-side half of the
-      // same bug.
-      const user = await userManager.getOrCreateUser(userPhone);
+      // P2-B fix: getOrCreate-shaped (not a bare getUser) — a phone that
+      // only ever signed in via OTP/demo login (never sent a WhatsApp/
+      // chat message, which used to be the only path that created the
+      // row via processMessage) previously hit the `!user` placeholder
+      // branch forever. See the PUT /me fix below for the write-side
+      // half of the same bug.
+      //
+      // P3-E fix: getUserForRead (not a bare getOrCreateUser) — the
+      // latter would silently recreate a blank profile for a phone whose
+      // account was deleted, since a stale bearer token issued before
+      // DELETE /me/account still verifies fine (tokens are stateless).
+      // getUserForRead keeps the P2-B auto-vivify behavior for genuinely
+      // new phones but returns undefined for a deleted one instead — see
+      // its doc comment in userManager.ts.
+      const user = await userManager.getUserForRead(userPhone);
+      if (!user) {
+        res.status(401).json({ error: 'no_account', message: 'This account no longer exists.' });
+        return;
+      }
       const todaysJournals = await getTodaysJournals(userPhone);
       const completedToday = todaysJournals.filter((j) => j.completed);
       const lastJournal = todaysJournals[todaysJournals.length - 1] || null;
@@ -1153,10 +1191,17 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   app.get('/me/export', requireAuth, async (req: Request, res: Response) => {
     try {
       const userPhone = req.userPhone as string;
-      // getOrCreate mirrors GET /me's own fix: a phone that only ever
-      // signed in (never chatted, never journaled) still gets a real
-      // profile object here instead of a 500.
-      const user = await userManager.getOrCreateUser(userPhone);
+      // getUserForRead mirrors GET /me's own fix (P2-B auto-vivify for a
+      // genuinely new phone, P3-E no-resurrect for a deleted one) — see
+      // userManager.ts's doc comment. A phone that only ever signed in
+      // (never chatted, never journaled) still gets a real profile
+      // object here instead of a 500; a deleted phone gets a clean 401
+      // instead of an export of a just-recreated blank account.
+      const user = await userManager.getUserForRead(userPhone);
+      if (!user) {
+        res.status(401).json({ error: 'no_account', message: 'This account no longer exists.' });
+        return;
+      }
       const [consents, conversations, journals, symptoms, ancVisits, medicalHistory] = await Promise.all([
         getConsents(userPhone),
         getAllConversationsForUser(userPhone),

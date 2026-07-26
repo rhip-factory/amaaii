@@ -227,10 +227,13 @@ export default function PrivacySection() {
     try {
       await deleteAccount();
       // P3-C flagged that the stateless bearer token still resolves after
-      // server-side erasure, and /me-family routes would otherwise
-      // resurrect a blank profile via getOrCreateUser. Client-side
-      // mitigation (server-side hardening is deferred — see P3-E):
-      // clear the session immediately and never fetch again.
+      // server-side erasure. P3-E closed that server-side (the /me-family
+      // GET routes no longer resurrect a blank profile — see
+      // userManager.ts#getUserForRead — and instead answer 401, which
+      // authedFetch already treats as a hard logout). This client-side
+      // half stays regardless, as defense in depth: clear the session
+      // immediately and never fetch again, rather than relying on the
+      // next request's 401 round-trip to notice.
       setDeletedFlag();
       clearSession();
       router.replace("/login");

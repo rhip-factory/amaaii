@@ -47,3 +47,31 @@ export async function auditDangerEscalation(
     metadata: { urgencyLevel },
   });
 }
+
+// --- Post-delete read hardening (P3-E) --------------------------------------
+// A stateless bearer token issued before DELETE /me/account still verifies
+// fine afterwards (there's no session table to invalidate) — see
+// userManager.ts#getUserForRead and its call sites in app.ts for the read
+// side of this fix. wasAccountDeleted() is the primitive both lean on to
+// tell apart two states that otherwise look identical from "does a `users`
+// row exist for this phone?" alone:
+//   - never signed up: no row, and never had one — safe to auto-vivify
+//     (the legacy /auth/login demo path relies on exactly this, via
+//     getOrCreateUser — see its own comment).
+//   - deleted: no row NOW, but a 'delete'/'account' audit_log row exists
+//     for this phone — audit_log is the one table eraseUser() deliberately
+//     leaves alone (see its doc comment in packages/core/src/repositories.ts),
+//     specifically so events like this survive erasure and remain queryable.
+// A generous limit — not listAuditForUser's normal 50-row page default —
+// so an old delete event can't fall off the scan if this same stale token
+// got used against other endpoints (which don't create rows either) many
+// times afterwards. Cheap: a `WHERE resource_owner = ?` scan bounded by
+// however many rows this one phone actually has, same pattern GET
+// /me/export's own EXPORT_AUDIT_LIMIT already uses for a "give me
+// everything" read.
+const DELETE_EVENT_SCAN_LIMIT = 100_000;
+
+export async function wasAccountDeleted(phone: string): Promise<boolean> {
+  const events = await db.listAuditForUser(phone, DELETE_EVENT_SCAN_LIMIT);
+  return events.some((e) => e.action === 'delete' && e.resource === 'account');
+}
