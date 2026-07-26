@@ -37,7 +37,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sleep 2
+# Wait for the server to actually accept connections (robust to boot time
+# drifting past a fixed sleep under load — see lib/send.sh#wait_for_server).
+source "$(dirname "$0")/lib/send.sh"
+wait_for_server "http://localhost:${PORT}" || { cat "$LOG"; exit 1; }
 
 # 1. Boot log line — smoke scripts and ops muscle memory grep for this
 #    exact text, so it's asserted directly against the process's own

@@ -41,7 +41,7 @@ rm -f "$DB_FILE"
 # apps/server/src/index.ts, assembled from TypeScript throughout, so it must run under tsx, not plain node.
 PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-04.log 2>&1 &
 SID=$!
-sleep 2
+wait_for_server "http://localhost:${PORT}"
 
 # Grant consent first (P3-B) — a brand-new phone's first turn is now the
 # consent prompt, not the name prompt; "I AGREE" records consent and the

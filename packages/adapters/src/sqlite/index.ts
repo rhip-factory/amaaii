@@ -16,6 +16,7 @@ import { SqliteAncVisitRepository } from './ancVisitRepository';
 import { SqliteOtpRepository } from './otpRepository';
 import { SqliteConsentRepository } from './consentRepository';
 import { SqliteAuditRepository } from './auditRepository';
+import { SqliteJobRepository } from './jobRepository';
 import { eraseUserData } from './erasure';
 
 export * from './connection';
@@ -29,6 +30,7 @@ export * from './ancVisitRepository';
 export * from './otpRepository';
 export * from './consentRepository';
 export * from './auditRepository';
+export * from './jobRepository';
 export * from './erasure';
 
 /**
@@ -51,6 +53,7 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
     otp: new SqliteOtpRepository(db),
     consents: new SqliteConsentRepository(db),
     audit: new SqliteAuditRepository(db),
+    jobs: new SqliteJobRepository(db),
     initialize: () => initializeSchema(db),
     close: () =>
       new Promise<void>((resolve, reject) => {

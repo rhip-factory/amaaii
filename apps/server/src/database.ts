@@ -16,6 +16,9 @@ import type {
   ConversationAnalysis,
   ConversationRow,
   CreateUserInput,
+  EnqueueJobInput,
+  JobRecord,
+  JobStatus,
   JournalAnalytics,
   JournalPatch,
   JournalRow,
@@ -237,4 +240,32 @@ export async function listAuditForUser(phone: string, limit?: number): Promise<A
 // deliberately NOT among them.
 export async function eraseUser(phone: string): Promise<void> {
   return adapter.eraseUser(phone);
+}
+
+// --- Jobs (P4-A durable queue) -----------------------------------------
+// See packages/core/src/repositories.ts's Jobs section for the contract
+// and apps/server/src/jobWorker.ts for the poller that drives these.
+
+export async function enqueueJob(input: EnqueueJobInput): Promise<JobRecord> {
+  return adapter.jobs.enqueue(input);
+}
+
+export async function claimDueJobs(now: string, limit: number, workerId: string): Promise<JobRecord[]> {
+  return adapter.jobs.claimDueJobs(now, limit, workerId);
+}
+
+export async function markJobDone(id: number): Promise<void> {
+  return adapter.jobs.markDone(id);
+}
+
+export async function markJobFailedOrRetry(id: number, error: string, now: string): Promise<void> {
+  return adapter.jobs.markFailedOrRetry(id, error, now);
+}
+
+export async function reclaimStuckJobs(now: string, staleMs: number): Promise<number> {
+  return adapter.jobs.reclaimStuck(now, staleMs);
+}
+
+export async function countJobsByStatus(): Promise<Record<JobStatus, number>> {
+  return adapter.jobs.countByStatus();
 }

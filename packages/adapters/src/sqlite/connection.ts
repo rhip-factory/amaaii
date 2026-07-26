@@ -24,7 +24,18 @@ export function resolveDbPath(explicitPath?: string): string {
 
 /** Opens (or creates) the sqlite3 database file at the resolved path. */
 export function createConnection(dbPath?: string): sqlite3.Database {
-  return new sqlite3.Database(resolveDbPath(dbPath));
+  const db = new sqlite3.Database(resolveDbPath(dbPath));
+  // P4-A: the job queue (jobRepository.ts#claimDueJobs) introduces a
+  // second regular writer against this same file — the poller — on top
+  // of whatever Express request is already writing. SQLite allows only
+  // one writer at a time; without a busy timeout, a writer that loses a
+  // lock race gets an immediate SQLITE_BUSY error instead of waiting a
+  // moment for the other writer to finish. 5s comfortably covers any
+  // single statement this codebase runs (nothing here holds a write
+  // lock anywhere near that long) and costs nothing in the common
+  // uncontended case.
+  db.configure('busyTimeout', 5000);
+  return db;
 }
 
 // P1-E: utils/logger.js is gone — the logger now lives in
@@ -366,6 +377,63 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_audit_log_resource_owner ON audit_log(resource_owner)`,
         (err) => {
           if (err) log.error('Error creating audit_log index', err);
+        }
+      );
+
+      // Durable job queue (P4-A). Replaces the in-process
+      // `setTimeout(..., 3600000)` the check-in follow-up used to run
+      // directly out of handleIncomingMessage — see CLAUDE.md's
+      // Architecture section and packages/core/src/jobs.ts for the
+      // pure scheduling/retry policy this table backs.
+      //
+      // status is one of 'pending' | 'running' | 'done' | 'failed' (see
+      // JobStatus in packages/core/src/jobs.ts) — stored as plain TEXT,
+      // same "no native enum" pattern as every other status/urgency
+      // column in this schema. dedupe_key lets a caller enqueue()
+      // idempotently (see JobRepository#enqueue); most jobs won't set
+      // one, hence the partial unique index below rather than a bare
+      // UNIQUE column constraint (which would forbid more than one
+      // NULL).
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          payload TEXT NOT NULL DEFAULT '{}',
+          run_at DATETIME NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          attempts INTEGER NOT NULL DEFAULT 0,
+          max_attempts INTEGER NOT NULL DEFAULT 5,
+          last_error TEXT,
+          locked_at DATETIME,
+          locked_by TEXT,
+          dedupe_key TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating jobs table', err);
+        }
+      );
+
+      // Idempotent enqueue: only enforced when dedupe_key is non-NULL,
+      // so the many jobs that never set one can coexist freely (partial
+      // unique index — same idiom as idx_journals_client_entry_id above).
+      db.run(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe_key
+         ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL`,
+        (err) => {
+          if (err) log.error('Error creating jobs dedupe_key index', err);
+        }
+      );
+
+      // Backs claimDueJobs' `WHERE status = 'pending' AND run_at <= ?`
+      // due-jobs scan — the poller's hot query, run every JOB_POLL_MS.
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_jobs_status_run_at ON jobs(status, run_at)`,
+        (err) => {
+          if (err) log.error('Error creating jobs status/run_at index', err);
           else resolve();
         }
       );

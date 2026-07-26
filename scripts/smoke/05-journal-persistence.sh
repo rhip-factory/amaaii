@@ -42,7 +42,7 @@ rm -f "$DB_FILE"
 # apps/server/src/index.ts, assembled from TypeScript throughout, so every boot below runs under tsx, not plain node.
 PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-05a.log 2>&1 &
 SID=$!
-sleep 2
+wait_for_server "http://localhost:${PORT}"
 kill "$SID"; wait "$SID" 2>/dev/null || true; SID=""
 
 node -e "
@@ -70,7 +70,7 @@ db.serialize(() => {
 # --- First run: drive partway through the journal -------------------------
 PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-05b.log 2>&1 &
 SID=$!
-sleep 2
+wait_for_server "http://localhost:${PORT}"
 
 send "$PHONE" "journal" "" >/dev/null   # greeting → mood
 send "$PHONE" "7" "" >/dev/null         # mood → symptoms
@@ -91,7 +91,7 @@ db.get('SELECT current_stage FROM journal_sessions WHERE user_phone = ?', ['$PHO
 kill "$SID"; wait "$SID" 2>/dev/null || true
 PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > /tmp/amaaii-05c.log 2>&1 &
 SID=$!
-sleep 2
+wait_for_server "http://localhost:${PORT}"
 
 # Continue from the persisted stage.
 send "$PHONE" "8/10, 7 hours" "" >/dev/null
