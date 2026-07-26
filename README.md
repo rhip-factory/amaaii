@@ -39,7 +39,7 @@ Point the Twilio WhatsApp sandbox webhook at `https://<your-ngrok>/webhook` (POS
 ### Tests
 
 ```bash
-pnpm test                              # vitest — 342 tests
+pnpm test                              # vitest — 414 tests
 pnpm typecheck                         # tsc --noEmit
 pnpm build                             # compile to dist/ (node dist/apps/server/src/index.js)
 PORT=4690 bash scripts/smoke/run-all.sh  # shell smoke suite (boots its own servers on $PORT, scratch DBs)
@@ -60,6 +60,10 @@ All optional — the server boots without any of them.
 | `AMAAII_API_ORIGIN` | `next dev` only: where the PWA proxies API calls. |
 | `NEXT_PUBLIC_API_ORIGIN` | Static PWA builds: the API origin baked in at `pnpm build:web` time. |
 | `PUBLIC_BASE_URL` | Links the WhatsApp consent prompt to `{PUBLIC_BASE_URL}/privacy`. Unset (the default everywhere so far) falls back to a generic phrase instead of a broken link. |
+| `JOB_POLL_MS` | Poll interval for the durable job-queue worker. Default 15000ms. |
+| `METRICS_TOKEN` | Bearer token required on `GET /metrics`. Unset → open in non-production, `404` in production. |
+| `ALERT_WEBHOOK_URL` | Optional webhook (e.g. a Slack incoming webhook) that receives a small PII-free JSON payload on critical alerts. Always logged either way. |
+| `JOBS_FAILED_ALERT_THRESHOLD` | Job-execution failures in one poll cycle before an alert fires. Default 3. |
 
 ## Architecture (one paragraph)
 
@@ -86,6 +90,17 @@ Amaaii implements a Kenya Data Protection Act–shaped consent and data-rights l
 - **Your data, your call.** `GET /me/export` downloads everything Amaaii holds about you as one JSON file; `DELETE /me/account` permanently and irreversibly erases your profile, journals, conversations, symptoms, ANC visits, medical history, and consent records (the audit log's record that you existed and deleted your account is the one thing kept, for accountability). Both are in the PWA's Profile screen; both are also plain authenticated HTTP endpoints (`GET /me/export`, `DELETE /me/account`) for anyone who wants to script it.
 - **Cross-border processing disclosure.** The privacy notice discloses that AI replies are processed by OpenAI (a US-based sub-processor) — see `/privacy` in the app, or `apps/web/src/app/privacy/page.tsx` in source.
 - New API surface (bearer auth, same as the rest of the web API): `GET/POST /me/consent`, `POST /me/consent/revoke`, `GET /me/activity`, `GET /me/export`, `DELETE /me/account`.
+
+## Reliability & operations
+
+Pilot-hardening work (Phase 4) made the parts of the system a real pilot deployment leans on durable and inspectable, without pulling in an external monitoring stack. **Demo-stage framing still applies**: this is "durable and observable enough for a small pilot," not a production SRE setup — there's no external uptime monitor, no dashboard, and no on-call rotation; a pilot has to wire those up around what's described here.
+
+- **Durable reminders.** The 1-hour "how are you feeling now" follow-up sent after a critical/high-urgency message used to be an in-process `setTimeout` — lost if the server restarted or crashed mid-wait. It's now a row in a SQLite-backed `jobs` table, drained by a polling worker (`JOB_POLL_MS`, default 15s) that starts at boot. A follow-up scheduled before a restart still fires afterward; a crashed send retries with backoff (1m → 5m → 30m, up to 5 attempts) instead of silently vanishing. Delivery is at-least-once (a crash right after a successful send but before the job is marked done can, rarely, resend) — an accepted trade-off for a low-stakes reminder message, not a bug.
+- **Health & readiness, for a host's probes.** `GET /health` answers instantly once the process is up (liveness); `GET /health/ready` also pings SQLite and returns `503` if that fails (readiness) — the pair a container platform, load balancer, or `systemd` unit needs to know when to route traffic to (or restart) this process.
+- **Metrics.** `GET /metrics` exposes Prometheus text-format counters/gauges — HTTP request counts and latency by route template and status class, danger-sign escalations, LLM call/failure counts, OTP outcomes, and current job-queue counts by status — plus process uptime and memory. No external dependency (no prom-client); every label is a closed vocabulary (route templates, status classes, urgency levels) so the endpoint is PII-free by construction. Open in non-production when `METRICS_TOKEN` is unset (dev/CI convenience); requires `Authorization: Bearer <METRICS_TOKEN>` otherwise, and `404`s in production if no token is configured at all.
+- **Structured logging + correlation ids.** Every request gets an `X-Request-Id` (echoed back on the response, included in error responses), and one structured log line on completion (method, path, status, duration) — through the same PII-redacting logger everything else in this codebase already uses.
+- **A global error-handling backstop** catches anything that escaped a route's own try/catch, logs the real error server-side only, and returns a generic `{error:'internal_error', requestId}` to the client — never a stack trace or message.
+- **Wiring alerting for a pilot.** Every critical failure (an error reaching the global backstop, a poll cycle with several job failures) always logs one ERROR-level line — enough for host log-based alerting (Render/Railway/journal `grep`-style filters) with zero setup. Set `ALERT_WEBHOOK_URL` to also POST a small `{event, message, requestId, timestamp}` JSON payload (message redacted, never a phone number or name) to a Slack incoming webhook or an on-call tool's HTTP intake; tune sensitivity with `JOBS_FAILED_ALERT_THRESHOLD` (default 3 failures/cycle).
 
 ## Notes
 

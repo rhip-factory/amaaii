@@ -8,6 +8,54 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ### Added
 
+- **Phase 4 — pilot hardening** (`8403560`, `c2b4c3e`, and this commit —
+  P4-A through P4-C):
+  - **Durable SQLite job queue** (`8403560`): a `jobs` table
+    (`packages/adapters/src/sqlite/jobRepository.ts`) with pure
+    backoff/retry/due-ness decisions in `packages/core/src/jobs.ts`
+    (1m/5m/30m backoff schedule, capped at 5 attempts) and a poller
+    (`apps/server/src/jobWorker.ts`, default `JOB_POLL_MS=15000`) with a
+    handler registry, atomic `claimDueJobs`, and `reclaimStuck` recovery
+    for a worker that crashed mid-job. The 1-hour critical/high check-in
+    follow-up — previously an in-process `setTimeout(..., 3600000)`, lost
+    on restart — is now a durable `checkin_followup` job, deduped per
+    phone/hour-bucket, delivered at-least-once. `scripts/smoke/lib/send.sh`
+    gained `wait_for_server` (polls instead of a fixed sleep) after boot
+    time crept past 2s under load once the worker started registering at
+    boot.
+  - **Observability** (`c2b4c3e`): request logging + `X-Request-Id`
+    correlation (`middleware/requestObservability.ts`); a dependency-free
+    Prometheus-text `GET /metrics` (`apps/server/src/metrics.ts` —
+    `http_requests_total`, `http_request_duration_ms`,
+    `danger_escalations_total`, `llm_calls_total`/`llm_failures_total`,
+    `otp_requests_total`/`otp_verifications_total`, `jobs_total`, process
+    uptime/memory), gated by `METRICS_TOKEN` (open in non-production when
+    unset, `404` in production); `GET /health` (liveness) and
+    `GET /health/ready` (readiness — SQLite ping, `503` on failure); a
+    global Express error-handling backstop
+    (`apps/server/src/errorHandler.ts`) that never leaks a stack trace or
+    message to the client; process-level `unhandledRejection` (log, keep
+    running) and `uncaughtException` (log, alert, exit so the host
+    restarts a clean process — safe because of the durable job queue)
+    handlers in `index.ts`; and a minimal alerting seam
+    (`apps/server/src/alerts.ts#notifyCritical` — always logs ERROR-level,
+    optionally POSTs a small PII-free JSON payload to `ALERT_WEBHOOK_URL`),
+    wired to the error handler and to the job worker via
+    `JOBS_FAILED_ALERT_THRESHOLD`. Every metrics label is a closed
+    vocabulary (route templates, status classes, urgency/job-status
+    strings) — never a phone number, name, or message content.
+  - **DPA erasure gap closed**: `jobs.user_phone` (populated at enqueue
+    time) is now in the erasure cascade (`erasure.ts`'s
+    `ERASURE_TARGETS`) — `DELETE /me/account` clears a deleted user's
+    pending/failed job rows, closing a gap where P4-A's job queue landed
+    without this hook.
+  - New table: `jobs`. New env vars: `JOB_POLL_MS`, `METRICS_TOKEN`,
+    `ALERT_WEBHOOK_URL`, `JOBS_FAILED_ALERT_THRESHOLD`.
+  - Docs (this commit, P4-C): CLAUDE.md, README, and this changelog
+    brought current for Phase 4 — including correcting an Architecture
+    note that had described the check-in follow-up as "in-process and
+    lost on restart," which stopped being true once P4-A landed.
+
 - **Phase 3 — Kenya DPA compliance** (`9926703`, `db5d189`, `33e5c88`,
   `1fef028`, and this commit — P3-A through P3-E):
   - **Two-tier consent** (`packages/core/src/consent.ts`): `data_processing`
