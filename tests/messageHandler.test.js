@@ -56,37 +56,57 @@ async function deliver(phone, message, profileName = null) {
   return sent.slice(before).map((s) => s.message).join('\n');
 }
 
+// P3-B: consent now precedes profile onboarding for every un-onboarded
+// WhatsApp user (see messageHandler.ts's consent-gate block). These
+// tests used to assert the FIRST turn gets the name prompt directly;
+// that behavior legitimately changed by design (data_processing consent
+// is now REQUIRED before onboarding, or anything else, proceeds) — see
+// tests/consentGate.test.ts for the dedicated new-behavior coverage.
+// Updated here to grant consent first, preserving each test's original
+// intent (onboarding/profile-capture precedence over free-text replies,
+// and danger copy still surfacing) rather than weakening it.
 describe('routing — onboarding precedence', () => {
-  it('new user sending a moderate-symptom message gets the name prompt, not a moderate response', async () => {
+  it('new user sending a moderate-symptom message gets the consent prompt, not a moderate-only response', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'I have a headache');
-    expect(reply).toMatch(/what'?s your name/i);
+    expect(reply).toMatch(/reply \*i agree\*/i);
   });
 
-  it('new user sending "Hi" gets the name prompt', async () => {
+  it('new user sending "Hi" gets the consent prompt, not the name prompt', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'Hi');
-    expect(reply).toMatch(/what'?s your name/i);
+    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).not.toMatch(/what'?s your name/i);
   });
 
-  it('CRITICAL urgency still short-circuits to escalation for a new user', async () => {
+  it('CRITICAL urgency still short-circuits to escalation for a new user (bypasses consent too — vital interests)', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'I am bleeding heavily');
     expect(reply).toMatch(/URGENT/i);
     expect(reply).not.toMatch(/what'?s your name/i);
+    expect(reply).not.toMatch(/reply \*i agree\*/i);
   });
 
-  it('HIGH urgency from a new user still asks for name (escalation may also appear)', async () => {
+  it('HIGH urgency from a new user still gets the consent prompt (escalation copy also appears)', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'I have a severe headache');
-    expect(reply).toMatch(/what'?s your name/i);
+    expect(reply).toMatch(/Important/i);
+    expect(reply).toMatch(/reply \*i agree\*/i);
+  });
+
+  it('once consent is granted ("I AGREE"), the very same turn moves on to the name prompt', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const grantReply = await deliver(phone, 'I AGREE');
+    expect(grantReply).toMatch(/what'?s your name/i);
   });
 });
 
-describe('onboarding — name persistence', () => {
+describe('onboarding — name persistence (after granting consent)', () => {
   it("persists the user's first reply as their name", async () => {
     const phone = nextPhone();
     await deliver(phone, 'Hi');
+    await deliver(phone, 'I AGREE'); // consent gate -> falls straight into the name prompt
     await deliver(phone, 'Grace');
     const user = await db.getUser(phone);
     expect(user.name).toBe('Grace');
@@ -95,6 +115,7 @@ describe('onboarding — name persistence', () => {
   it('then captures age, then pregnancy week (with EDD)', async () => {
     const phone = nextPhone();
     await deliver(phone, 'Hi');
+    await deliver(phone, 'I AGREE');
     await deliver(phone, 'Grace');
     const ageReply = await deliver(phone, '26');
     expect(ageReply).toMatch(/weeks?/i);

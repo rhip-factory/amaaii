@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import styles from "./login.module.css";
 import { OtpError, requestOtp, verifyOtp } from "@/lib/authOtp";
-import { setSession, getToken } from "@/lib/storage";
+import { fetchConsent } from "@/lib/api";
+import { setSession, getToken, consumeDeletedFlag } from "@/lib/storage";
 
 type Step = "phone" | "code";
 
@@ -25,12 +26,21 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [cooldownEndsAt, setCooldownEndsAt] = useState<number | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [deletedNotice, setDeletedNotice] = useState(false);
   const codeInputRef = useRef<HTMLInputElement>(null);
 
   // Already signed in? Skip straight to the app.
   useEffect(() => {
     if (getToken()) router.replace("/home");
   }, [router]);
+
+  // P3-D: a one-shot "your account and data have been deleted"
+  // confirmation, set by the Profile page's delete flow right before it
+  // clears the session and redirects here. consumeDeletedFlag() clears
+  // the flag on read, so refreshing /login afterwards doesn't re-show it.
+  useEffect(() => {
+    if (consumeDeletedFlag()) setDeletedNotice(true);
+  }, []);
 
   // Countdown tick for the resend cooldown.
   useEffect(() => {
@@ -92,7 +102,19 @@ export default function LoginPage() {
     try {
       const { token, user } = await verifyOtp(phone.trim(), code.trim());
       setSession(token, user);
-      router.replace("/home");
+      // P3-D: route straight into the consent gate for a brand-new user
+      // (or a returning one whose consent has gone stale — see
+      // packages/core/src/consent.ts's isStale) instead of bouncing
+      // through /home first. AppShell's useConsentGuard is a second,
+      // redundant safety net for this same check (covers a version bump
+      // mid-session, or this fetch simply failing offline) — a failure
+      // here just falls through to /home and lets that net catch it.
+      try {
+        const consent = await fetchConsent();
+        router.replace(consent.needsConsent ? "/consent" : "/home");
+      } catch {
+        router.replace("/home");
+      }
     } catch (err) {
       setError(
         err instanceof OtpError ? err.message : "Network trouble. Please try again."
@@ -127,6 +149,12 @@ export default function LoginPage() {
         />
         <h1 className={styles.title}>Welcome to Amaaii</h1>
         <p className={styles.lead}>Your pregnancy companion — through every week.</p>
+
+        {deletedNotice && (
+          <p className={styles.deletedNotice} role="status">
+            Your Amaaii account and data have been permanently deleted.
+          </p>
+        )}
 
         {step === "phone" && (
           <form onSubmit={onPhoneSubmit} noValidate>

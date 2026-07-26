@@ -11,8 +11,13 @@
 import { clearSession, getToken } from "./storage";
 import { cachedGet, type CachedResult } from "./offlineCache";
 import type {
+  ActivityResponse,
   ApiErrorBody,
   ChatResponse,
+  ConsentGrants,
+  ConsentPurpose,
+  ConsentResponse,
+  DeleteAccountResponse,
   HistoryResponse,
   InsightsResponse,
   InsightsWindow,
@@ -146,6 +151,70 @@ export async function fetchInsights(days: InsightsWindow = 14): Promise<CachedRe
     const res = await authedFetch(`/insights?days=${days}`);
     return parseJsonOrThrow<InsightsResponse>(res);
   });
+}
+
+// --- Consent (P3-D) -----------------------------------------------------
+// Thin wrappers over GET/POST /me/consent + POST /me/consent/revoke.
+// Not offline-cached (unlike fetchMe/fetchTodayJournal/etc. above) —
+// consent is a gate, not a read-and-render screen, so a stale cached
+// "you're fine" would be actively wrong to show while offline.
+
+export async function fetchConsent(): Promise<ConsentResponse> {
+  const res = await authedFetch("/me/consent");
+  return parseJsonOrThrow<ConsentResponse>(res);
+}
+
+export async function submitConsent(grants: ConsentGrants): Promise<ConsentResponse> {
+  const res = await authedFetch("/me/consent", { method: "POST", body: JSON.stringify({ grants }) });
+  return parseJsonOrThrow<ConsentResponse>(res);
+}
+
+export async function revokeConsentPurpose(purpose: ConsentPurpose): Promise<ConsentResponse> {
+  const res = await authedFetch("/me/consent/revoke", { method: "POST", body: JSON.stringify({ purpose }) });
+  return parseJsonOrThrow<ConsentResponse>(res);
+}
+
+// --- Activity log (P3-D) --------------------------------------------------
+
+export async function fetchActivity(): Promise<ActivityResponse> {
+  const res = await authedFetch("/me/activity");
+  return parseJsonOrThrow<ActivityResponse>(res);
+}
+
+// --- Data-subject rights: export + delete (P3-D) --------------------------
+// GET /me/export is an authed endpoint, so a plain <a href="/me/export">
+// can't carry the bearer token — fetch the JSON as a blob and trigger the
+// download via a throwaway object URL instead (the standard workaround
+// for authed downloads in a browser).
+export async function downloadMyData(): Promise<void> {
+  const res = await authedFetch("/me/export");
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as ApiErrorBody;
+    throw new ApiError(data.message || data.error || `Request failed (${res.status})`, res.status);
+  }
+  const blob = await res.blob();
+  const disposition = res.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  const filename = match?.[1] || `amaaii-my-data-${new Date().toISOString().slice(0, 10)}.json`;
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+// DELETE /me/account — irreversible erasure. Body is an explicit empty
+// object: apps/server/src/app.ts 400s if the body carries a `phone` key
+// at all (the caller's own phone always comes from the bearer token,
+// never the body — see its handler comment), so this must never be
+// changed to pass one.
+export async function deleteAccount(): Promise<DeleteAccountResponse> {
+  const res = await authedFetch("/me/account", { method: "DELETE", body: JSON.stringify({}) });
+  return parseJsonOrThrow<DeleteAccountResponse>(res);
 }
 
 // /chat's error body (see apps/server/src/app.ts) carries a user-facing

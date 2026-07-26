@@ -3,6 +3,7 @@
 
 import * as db from './database';
 import { log } from './logger';
+import { wasAccountDeleted } from './audit';
 import type { UpdateUserInput, UserRow } from '@amaaii/core';
 
 /** UserRow plus the `isNewUser` flag getOrCreateUser() stamps onto it —
@@ -40,6 +41,42 @@ class UserManager {
       log.error('Error in getOrCreateUser', error);
       throw error;
     }
+  }
+
+  /**
+   * Non-creating counterpart to getOrCreateUser(), for GET-style reads
+   * that must not resurrect a deleted account (P3-E). A stale bearer
+   * token issued before DELETE /me/account still verifies fine (tokens
+   * are stateless HMACs, not session records — see auth.ts), so without
+   * this, GET /me / GET /me/export's old getOrCreateUser() call would
+   * silently recreate a blank `users` row on the very first read after
+   * deletion.
+   *
+   * Behavior:
+   *  - row exists -> return it (isNewUser: false), same as
+   *    getOrCreateUser's "found" branch.
+   *  - row missing, phone was NEVER deleted (wasAccountDeleted() false)
+   *    -> genuinely brand new; auto-vivify exactly like getOrCreateUser
+   *    always has. This preserves the legacy /auth/login demo path
+   *    (kept for back-compat — it never calls getOrCreateUser at login
+   *    time the way the real OTP verify flow does) and any other
+   *    first-touch-via-GET case.
+   *  - row missing, phone WAS deleted (a 'delete'/'account' audit_log
+   *    row exists — deliberately retained through erasure) -> returns
+   *    undefined. Callers turn that into a 401 { error: 'no_account' }
+   *    instead of a blank resurrected profile. A real return requires a
+   *    fresh OTP verification, which legitimately creates a new row via
+   *    its own getOrCreateUser() call — that path is untouched by this.
+   */
+  async getUserForRead(phoneNumber: string): Promise<UserWithFlag | undefined> {
+    const existing = await db.getUser(phoneNumber);
+    if (existing) {
+      return { ...existing, isNewUser: false };
+    }
+    if (await wasAccountDeleted(phoneNumber)) {
+      return undefined;
+    }
+    return this.getOrCreateUser(phoneNumber);
   }
 
   async updateUserProfile(phoneNumber: string, updates: Record<string, unknown>): Promise<UserRow | undefined> {

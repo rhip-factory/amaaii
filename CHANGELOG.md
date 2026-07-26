@@ -6,6 +6,46 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- **Phase 3 — Kenya DPA compliance** (`9926703`, `db5d189`, `33e5c88`,
+  `1fef028`, and this commit — P3-A through P3-E):
+  - **Two-tier consent** (`packages/core/src/consent.ts`): `data_processing`
+    (required — the app has no lawful basis to operate for a user without
+    it) and `ai_responses` (optional — gates only the LLM chokepoint;
+    declining it leaves journaling and danger detection unaffected), backed
+    by an append-only `consents` ledger and a `CONSENT_VERSION` constant to
+    force re-consent on a future policy change. Enforced inside the shared
+    `processMessage` brain, not just at the HTTP edge: WhatsApp gets a
+    stateless conversational request/reprompt (replying `I AGREE`/
+    `NAKUBALI` grants both purposes together, since the WhatsApp bot is
+    itself an AI chat); the web PWA's `POST /chat` returns
+    `{ consentRequired: true }` instead, and the two purposes are granted
+    independently via the `/consent` screen and a Profile toggle.
+    **Danger signs always escalate regardless of consent state** — checked
+    before consent is even loaded, the Kenya DPA vital-interests basis.
+  - **Audit logging** (`apps/server/src/audit.ts`, append-only `audit_log`
+    table): every profile/journal/insights/medical-history/consent
+    read-or-write is recorded (actor, action, resource, metadata,
+    timestamp); `GET /me/activity` lets a user see their own "who's
+    accessed your data" log. Deliberately retained through account erasure
+    (see below) rather than cleared with everything else.
+  - **Data-subject rights**: `GET /me/export` downloads a single JSON
+    document with everything Amaaii holds about a user (profile, consents,
+    conversations, journals, symptoms, ANC visits, medical history, audit
+    log); `DELETE /me/account` is a transactional hard-delete cascade
+    across every user-owned table (audit log excepted), idempotent by
+    construction.
+  - **PWA UI**: a `/consent` gate on first login, a public `/privacy`
+    notice (including a cross-border disclosure that AI replies are
+    processed by OpenAI in the US — the notice's legal wording has not yet
+    been reviewed by counsel, flagged in an HTML comment in the page
+    source), and a Profile "Privacy & data" section (consent status + AI
+    toggle, activity list, data export, delete-with-type-to-confirm).
+  - New endpoints: `GET/POST /me/consent`, `POST /me/consent/revoke`,
+    `GET /me/activity`, `GET /me/export`, `DELETE /me/account`.
+  - New tables: `consents`, `audit_log`.
+
 ### Changed
 
 - **Express now serves the Next.js PWA** (`apps/web/out`) at `/` — single
@@ -40,6 +80,18 @@ All notable changes to Amaaii are documented here. This project adheres to
   which delegates the boundary enforcement to Express's `send` dependency;
   regression-tested with real sockets (supertest normalizes `..`
   client-side, so it can't reach the vulnerable path itself).
+- **Post-delete read hardening (P3-E)**: a bearer token issued before
+  `DELETE /me/account` still verified fine afterwards (tokens are
+  stateless HMACs, not session records), and `GET /me` / `GET /me/export`
+  would silently recreate a blank profile row via `getOrCreateUser` on the
+  very next read — a stale session could resurrect an account a user had
+  just deleted. `GET /me`, `GET /me/export`, `GET /me/consent`, and
+  `GET /me/activity` now distinguish "this phone never signed up" (still
+  safe to auto-vivify) from "this phone signed up, then was deleted" (via
+  the retained `delete`/`account` audit event) and answer the latter with
+  a clean `401 { error: 'no_account' }` instead of a resurrected row. The
+  PWA's existing 401 handling already logs the session out, so no client
+  change was needed.
 
 ## [0.2.0] - 2026-07-16
 

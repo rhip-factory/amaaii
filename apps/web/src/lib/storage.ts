@@ -31,3 +31,30 @@ export function clearSession(): void {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
 }
+
+// --- Post-delete one-shot notice (P3-D) -----------------------------------
+// sessionStorage (not localStorage — this should not survive a fresh tab
+// or linger indefinitely) carries a single flag from the Profile page's
+// delete flow across the redirect to /login, so the login screen can
+// show "your account and data have been deleted" exactly once. Reading
+// it via consumeDeletedFlag() clears it immediately, so a refresh of
+// /login afterwards doesn't keep re-showing the notice.
+const DELETED_FLAG_KEY = "amaaii.web.deletedNotice";
+
+export function setDeletedFlag(): void {
+  try {
+    window.sessionStorage.setItem(DELETED_FLAG_KEY, "1");
+  } catch {
+    /* best-effort — a missed notice is not worth failing the delete flow over */
+  }
+}
+
+export function consumeDeletedFlag(): boolean {
+  try {
+    const present = window.sessionStorage.getItem(DELETED_FLAG_KEY) === "1";
+    if (present) window.sessionStorage.removeItem(DELETED_FLAG_KEY);
+    return present;
+  } catch {
+    return false;
+  }
+}

@@ -49,6 +49,20 @@
   margin-bottom: 8px;
 }
 
+/* P3-D: post-delete confirmation — neutral/informational, not an error
+   (matches .devHint's chrome, not .error's). */
+.deletedNotice {
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  line-height: 1.5;
+}
+
 .phoneRow {
   border: 1.5px solid var(--lavender);
   border-radius: 12px;

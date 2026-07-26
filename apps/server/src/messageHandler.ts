@@ -17,14 +17,19 @@ import {
   cleanName,
   parseWeekOrLMP,
   calculateEDDFromWeeks,
+  CONSENT_VERSION,
+  deriveConsentState,
+  needsConsent,
+  canUseAi,
 } from '@amaaii/core';
-import type { UpdateUserInput } from '@amaaii/core';
+import type { UpdateUserInput, ConsentState } from '@amaaii/core';
 import userManager, { type UserWithFlag } from './userManager';
 import * as db from './database';
 import journalManager from './journalManager';
 import { log } from './logger';
 import { getRecentTrend, trendForPrompt } from './trend';
 import * as llm from './llmExtract';
+import { recordAuditSafe, auditDangerEscalation } from './audit';
 
 // We compare against BOTH the EN and SW reminder markers when checking
 // "did we already nudge the user this session?" — language can change
@@ -34,10 +39,103 @@ const JOURNAL_REMINDER_MARKERS = [
   t('sw', 'journal_reminder'),
 ];
 
+// --- Consent gate (P3-B) -----------------------------------------------
+// Fixed, var-free substrings of consent_request/consent_reprompt (both
+// strings interpolate {url}, so the rendered text itself can't be used
+// as a marker the way NAME_PROMPT_MARKERS reuses the full literal
+// name_prompt string) — same "was the bot's last message asking X?"
+// detection pattern as NAME_PROMPT_MARKERS / WEEK_REPROMPT_MARKERS
+// above, kept stateless per CLAUDE.md's onboarding design.
+const CONSENT_PROMPT_MARKERS = ['Reply *I AGREE* to continue', 'Jibu *NAKUBALI* kuendelea'];
+const CONSENT_REPROMPT_MARKERS = ['please reply with the word *AGREE*', 'tafadhali jibu na neno *NAKUBALI*'];
+
+function isAffirmativeConsent(message: string): boolean {
+  return /\b(agree|yes|nakubali|ndiyo)\b/i.test(message.trim());
+}
+
+// PUBLIC_BASE_URL is read at call time (not module load) so it can vary
+// per-request in tests/dev without restarting the process. The /privacy
+// page itself ships in P3-D — this only wires the mechanism (a 404 on
+// that path today is expected and fine).
+function privacyNoticeUrl(): string {
+  const base = process.env.PUBLIC_BASE_URL;
+  if (!base) return 'the Amaaii app';
+  return `${base.replace(/\/+$/, '')}/privacy`;
+}
+
+async function loadConsentState(phoneNumber: string): Promise<ConsentState> {
+  return deriveConsentState(await db.getConsents(phoneNumber));
+}
+
+// Stateless consent gate for the WhatsApp channel — re-reads state each
+// turn, same design as handleOnboarding below. Grants BOTH purposes on
+// agreement (see the file-level note near processMessage for why the
+// WhatsApp channel differs from the web PWA here): the WhatsApp bot IS
+// an AI chat, so there's no meaningful "use WhatsApp without AI replies"
+// state the way there is on the web PWA's structured check-in form.
+async function handleConsentGate(
+  message: string,
+  phoneNumber: string,
+  lang: string
+): Promise<{ response: string; granted: boolean }> {
+  const lastBot = await db.getLastBotMessage(phoneNumber);
+  const lastResp = lastBot?.response || '';
+  const alreadyPrompted =
+    CONSENT_PROMPT_MARKERS.some((m) => lastResp.includes(m)) ||
+    CONSENT_REPROMPT_MARKERS.some((m) => lastResp.includes(m));
+
+  if (alreadyPrompted && isAffirmativeConsent(message)) {
+    await db.recordConsent(phoneNumber, 'data_processing', true, CONSENT_VERSION);
+    await db.recordConsent(phoneNumber, 'ai_responses', true, CONSENT_VERSION);
+    await recordAuditSafe({
+      actor: phoneNumber,
+      action: 'consent_grant',
+      resource: 'consent',
+      resourceOwner: phoneNumber,
+      metadata: { purpose: 'data_processing', granted: true, channel: 'whatsapp' },
+    });
+    await recordAuditSafe({
+      actor: phoneNumber,
+      action: 'consent_grant',
+      resource: 'consent',
+      resourceOwner: phoneNumber,
+      metadata: { purpose: 'ai_responses', granted: true, channel: 'whatsapp' },
+    });
+    return { response: t(lang, 'consent_thanks'), granted: true };
+  }
+
+  if (alreadyPrompted) {
+    // Negative or unrecognized reply to an already-issued prompt: switch
+    // to (and keep repeating) the clearer re-prompt. Never advance to
+    // onboarding without an explicit affirmative — see the work order's
+    // "do not proceed to onboarding without consent" requirement.
+    return { response: t(lang, 'consent_reprompt', { url: privacyNoticeUrl() }), granted: false };
+  }
+
+  // Brand-new: this phone has never been asked.
+  return { response: t(lang, 'consent_request', { url: privacyNoticeUrl() }), granted: false };
+}
+
 export interface ProcessMessageResult {
   response: string;
   urgencyLevel: string;
   context: string;
+  /** true only for the web /chat "you need to consent first" response —
+   *  never set for the WhatsApp channel (which handles the same gate
+   *  conversationally instead). */
+  consentRequired?: boolean;
+  /** true only when the AI chokepoint (getAmaaiiResponse) actually ran
+   *  this turn — lets callers (POST /chat's audit wiring) log 'ai_call'
+   *  vs a plain 'write' without re-deriving consent state themselves. */
+  aiUsed?: boolean;
+}
+
+export interface ProcessMessageOptions {
+  /** Defaults to 'whatsapp' (existing callers/behavior unchanged). The
+   *  web PWA's POST /chat passes 'web' explicitly — see rule (b) in the
+   *  consent-gate block below for why the two channels diverge on a
+   *  non-consented user. */
+  channel?: 'whatsapp' | 'web';
 }
 
 // Pure(-ish) message processor: derives the bot's response from the
@@ -46,8 +144,10 @@ export interface ProcessMessageResult {
 export async function processMessage(
   from: string,
   message: string,
-  profileName: string | null
+  profileName: string | null,
+  opts: ProcessMessageOptions = {}
 ): Promise<ProcessMessageResult> {
+  const channel = opts.channel ?? 'whatsapp';
   log.info(`Processing message from ${from}`, { profileName, message });
 
   const user = await userManager.getOrCreateUser(from, profileName);
@@ -59,15 +159,99 @@ export async function processMessage(
   let response = '';
   let conversationContext = 'general';
   let dangerSignAnalysis: ReturnType<typeof detectDangerSigns> | null = null;
+  // Set below only when the WhatsApp consent gate grants consent THIS
+  // turn for an already-onboarded (returning) user — see the gate block
+  // and its application further down.
+  let consentGrantedPrefix = '';
+  // True only when getAmaaiiResponse (the LLM chokepoint) actually runs
+  // this turn — see ProcessMessageResult.aiUsed.
+  let aiUsed = false;
+
+  // CRITICAL danger signs short-circuit everything, including consent —
+  // Kenya DPA vital-interests basis (see CLAUDE.md / the P3-B work
+  // order). `earlyDanger` is recomputed against the SAME `message`
+  // further down (as `dangerSignAnalysis`), so a CRITICAL message always
+  // lands in that branch regardless of what happens between here and
+  // there — nothing below this line is allowed to intercept it.
+  const earlyDanger = detectDangerSigns(message);
+
+  // --- Consent gate (P3-B) --------------------------------------------
+  // Sits BEFORE profile onboarding but AFTER the CRITICAL bypass above.
+  // HIGH/MODERATE danger copy is still prepended here, same as the
+  // onboarding block below — consent status never suppresses escalation
+  // copy, only ever gates the AI/profile/journaling features layered on
+  // top of it.
+  //
+  // Storage note: while consent is outstanding we skip saveConversation
+  // (and saveSymptoms) entirely — "do the minimum storage needed" per
+  // the work order. The only unavoidable write is the user row itself
+  // (already created by getOrCreateUser above), which is what a consent
+  // ledger event needs to key against in the first place.
+  if (earlyDanger.urgencyLevel !== 'critical') {
+    const consentState = await loadConsentState(from);
+    if (needsConsent(consentState)) {
+      if (channel === 'web') {
+        let webResponse = t(lang, 'web_consent_required');
+        if (earlyDanger.urgencyLevel === 'high' || earlyDanger.urgencyLevel === 'moderate') {
+          webResponse = `${dangerCopy(earlyDanger.urgencyLevel, lang)}\n\n${webResponse}`;
+        }
+        await auditDangerEscalation(from, earlyDanger.urgencyLevel);
+        return {
+          response: webResponse,
+          urgencyLevel: earlyDanger.urgencyLevel,
+          context: 'consent_required',
+          consentRequired: true,
+        };
+      }
+
+      // WhatsApp: stateless consent gate (see handleConsentGate above).
+      const gate = await handleConsentGate(message, from, lang);
+      if (!gate.granted) {
+        let gateResponse = gate.response;
+        if (earlyDanger.urgencyLevel === 'high' || earlyDanger.urgencyLevel === 'moderate') {
+          gateResponse = `${dangerCopy(earlyDanger.urgencyLevel, lang)}\n\n${gateResponse}`;
+        }
+        await auditDangerEscalation(from, earlyDanger.urgencyLevel);
+        // Persisted here — unlike the web consentRequired path above —
+        // because handleConsentGate's own "was the last bot message the
+        // consent prompt?" detection (mirroring handleOnboarding's
+        // NAME_PROMPT_MARKERS pattern) depends on conversations being
+        // saved; without this the gate could never see its own prior
+        // prompt and would re-ask forever, never recognizing "I AGREE".
+        // This is the same storage un-onboarded users already relied on
+        // before P3-B existed. The web channel has no such dependency —
+        // its consentRequired check re-derives fresh from the consent
+        // ledger on every request — so it can skip storage entirely.
+        const sx = extractSymptoms(message);
+        if (sx.length > 0) {
+          await db.saveSymptoms(from, sx, assessMood(message), earlyDanger.urgencyLevel);
+        }
+        await db.saveConversation(from, message, gateResponse, {
+          dangerSigns: earlyDanger.detectedSigns || [],
+          urgencyLevel: earlyDanger.urgencyLevel,
+          context: 'consent_gate',
+        });
+        return { response: gateResponse, urgencyLevel: earlyDanger.urgencyLevel, context: 'consent_gate' };
+      }
+      // Granted this turn: fall through into the normal routing below
+      // (onboarding is still needed — consent and profile are separate
+      // concerns) with a short confirmation prefixed onto whatever
+      // that routing produces. Held separately from `response` (rather
+      // than assigned into it directly) because every branch further
+      // down — onboarding, journaling, danger, AI — does a plain
+      // `response = ...` assignment, not an append; see where
+      // consentGrantedPrefix is applied below.
+      consentGrantedPrefix = `${gate.response}\n\n`;
+    }
+  }
 
   // Onboarding takes precedence over every command except CRITICAL
   // danger signs (per spec §7.4). Otherwise un-onboarded users could
   // type `journal` (or paste anything) and bypass the profile capture
   // entirely, leaving downstream features without context.
-  const earlyDanger = detectDangerSigns(message);
   if (earlyDanger.urgencyLevel !== 'critical' && userContext.needsOnboarding) {
     conversationContext = 'onboarding';
-    response = await handleOnboarding(user, message, from, lang);
+    response = consentGrantedPrefix + await handleOnboarding(user, message, from, lang);
     if (
       earlyDanger.urgencyLevel === 'high' ||
       earlyDanger.urgencyLevel === 'moderate'
@@ -141,12 +325,14 @@ export async function processMessage(
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
+      await auditDangerEscalation(from, dangerSignAnalysis.urgencyLevel);
     } else if (dangerSignAnalysis.urgencyLevel === 'high') {
       response = dangerCopy('high', lang);
       conversationContext = 'danger_sign_detected';
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
+      await auditDangerEscalation(from, dangerSignAnalysis.urgencyLevel);
     } else {
       const conversationHistory = await db.getConversationHistory(from, 5);
 
@@ -158,17 +344,31 @@ export async function processMessage(
       const trendLine = trendForPrompt(trend);
       const mh = await db.getMedicalHistory(from).catch(() => null);
 
-      response = await getAmaaiiResponse(message, {
-        userName: user.name,
-        pregnancyWeek: user.pregnancy_week,
-        location: user.location,
-        isNewUser: userContext.isNewUser,
-        conversationHistory,
-        currentContext: conversationContext,
-        language: lang,
-        trendLine,
-        medicalHistory: mh,
-      });
+      // P3-B: the AI/consent gate. data_processing is already guaranteed
+      // active by this point (the consent-gate block above returned
+      // early otherwise) — this only checks the OPTIONAL ai_responses
+      // purpose. When it's not active, the LLM chokepoint
+      // (getAmaaiiResponse -> @amaaii/adapters#chat ->
+      // openai.chat.completions.create) is simply never called; the
+      // canned ai_off_reply takes its place. Journaling/danger detection
+      // above this branch are entirely unaffected either way.
+      const aiConsentState = await loadConsentState(from);
+      if (canUseAi(aiConsentState)) {
+        response = await getAmaaiiResponse(message, {
+          userName: user.name,
+          pregnancyWeek: user.pregnancy_week,
+          location: user.location,
+          isNewUser: userContext.isNewUser,
+          conversationHistory,
+          currentContext: conversationContext,
+          language: lang,
+          trendLine,
+          medicalHistory: mh,
+        });
+        aiUsed = true;
+      } else {
+        response = t(lang, 'ai_off_reply');
+      }
 
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
@@ -190,6 +390,13 @@ export async function processMessage(
     }
   }
 
+  // Applied here (rather than at the point consent was granted) because
+  // every branch between here and there does a plain `response = ...`
+  // assignment — see the consent-gate block's comment. A no-op
+  // (`consentGrantedPrefix` stays '') for every turn that didn't just
+  // grant consent, which is the overwhelming majority of turns.
+  response = consentGrantedPrefix + response;
+
   const analysisData =
     conversationContext === 'journaling' ||
     conversationContext === 'journal_summary' ||
@@ -207,6 +414,7 @@ export async function processMessage(
     response,
     urgencyLevel: analysisData.urgencyLevel,
     context: conversationContext,
+    aiUsed,
   };
 }
 

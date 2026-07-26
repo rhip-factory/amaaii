@@ -13,6 +13,7 @@
 // and the services/database.js shim that delegates to it.
 
 import type { JournalRow, JournalAnalytics } from './types';
+import type { ConsentPurpose } from './consent';
 
 // --- Users ------------------------------------------------------------
 
@@ -124,6 +125,14 @@ export interface ConversationRepository {
   ): Promise<number>;
   getConversationHistory(userPhone: string, limit?: number): Promise<ConversationRow[]>;
   getLastBotMessage(userPhone: string): Promise<LastBotMessageRow | null>;
+  /**
+   * ALL conversation rows for this user, oldest first (unlike
+   * getConversationHistory's newest-first + LIMIT, which exists to feed
+   * the AI prompt's last-N-turns window). P3-C data-portability export
+   * (GET /me/export) is the only caller — a data-subject's "complete
+   * data" view needs every row, not a capped recent slice.
+   */
+  getAllForUser(userPhone: string): Promise<ConversationRow[]>;
 }
 
 // --- Journals -------------------------------------------------------------
@@ -159,6 +168,13 @@ export interface JournalRepository {
    * set client_entry_id).
    */
   findByClientEntryId(userPhone: string, clientEntryId: string): Promise<JournalRow | undefined>;
+  /**
+   * ALL journal rows for this user, oldest first — unlike
+   * getJournalHistory's `days`-windowed query (which backs trend/insights
+   * charts with a fixed lookback), this ignores date entirely. P3-C
+   * data-portability export (GET /me/export) is the only caller.
+   */
+  getAllForUser(userPhone: string): Promise<JournalRow[]>;
 }
 
 // --- Journal sessions -------------------------------------------------------
@@ -190,6 +206,21 @@ export interface JournalSessionRepository {
 
 // --- Symptoms ---------------------------------------------------------------
 
+/**
+ * Row shape of the `symptoms` table — WhatsApp free-text danger-sign
+ * detections (distinct from `journals.physical_symptoms`, which is the
+ * structured daily check-in's own symptom field). `symptoms` is a
+ * JSON-stringified array, same encoding saveSymptoms() writes.
+ */
+export interface SymptomRow {
+  id: number;
+  user_phone: string;
+  symptoms: string | null;
+  mood: string | null;
+  urgency: string | null;
+  timestamp: string;
+}
+
 export interface SymptomRepository {
   saveSymptoms(
     userPhone: string,
@@ -197,6 +228,12 @@ export interface SymptomRepository {
     mood: string,
     urgency: string
   ): Promise<number>;
+  /**
+   * ALL symptom rows for this user, oldest first. No prior reader of this
+   * table existed before P3-C — GET /me/export (data-portability) is the
+   * first and only caller.
+   */
+  getAllForUser(userPhone: string): Promise<SymptomRow[]>;
 }
 
 // --- Medical history ---------------------------------------------------------
@@ -236,6 +273,13 @@ export interface AncVisitRepository {
   scheduleANCVisit(userPhone: string, scheduledDate: string, notes?: string): Promise<number>;
   getUpcomingANCVisits(userPhone: string): Promise<AncVisitRow[]>;
   markANCVisitAttended(visitId: number): Promise<number>;
+  /**
+   * ALL ANC visit rows for this user (upcoming, past, attended or not) —
+   * unlike getUpcomingANCVisits' `attended = 0 AND scheduled_date >=
+   * today` filter. P3-C data-portability export (GET /me/export) is the
+   * only caller.
+   */
+  getAllForUser(userPhone: string): Promise<AncVisitRow[]>;
 }
 
 // --- OTP codes (P2-B) --------------------------------------------------------
@@ -277,6 +321,138 @@ export interface OtpRepository {
   delete(phone: string): Promise<void>;
 }
 
+// --- Consent (P3-A / Kenya DPA) ----------------------------------------------
+
+/**
+ * One row of the append-only consent ledger — never UPDATEd. A grant is
+ * a fresh row with granted=1 and revoked_at=NULL. An outright decline
+ * of an OPTIONAL purpose is also a fresh row, granted=0, revoked_at
+ * still NULL (it was never active, so there's nothing to mark as
+ * "revoked"). Withdrawing a *previously active* consent is ALSO a fresh
+ * row — granted=0, but this one has revoked_at stamped on itself at
+ * insert time (see ConsentRepository#revokeConsent) — which is how the
+ * ledger tells "declined from the start" apart from "granted, then
+ * later withdrawn" for audit purposes, without ever mutating a prior
+ * row. Current state for a purpose is always just its most recent row;
+ * see packages/core/src/consent.ts#deriveConsentState for the
+ * (oldest-first-in, latest-wins) reconstruction.
+ */
+export interface ConsentRecord {
+  id: number;
+  user_phone: string;
+  purpose: ConsentPurpose;
+  /** SQLite stores this as 0/1; deriveConsentState() coerces either
+   *  representation to a real boolean. */
+  granted: number | boolean;
+  version: number;
+  granted_at: string;
+  revoked_at: string | null;
+}
+
+export interface ConsentRepository {
+  /** Every ledger row for this user, oldest first — feed straight into
+   *  packages/core/src/consent.ts#deriveConsentState to get the current
+   *  ConsentState. Empty array for a user who has never been asked. */
+  getConsents(phone: string): Promise<ConsentRecord[]>;
+  /**
+   * Appends one new event to the ledger — never an UPDATE, so the full
+   * history stays auditable (who consented to what, when, at which
+   * notice version). Used for both an initial grant (granted=true) and
+   * an outright decline of an OPTIONAL purpose (granted=false); either
+   * way this call leaves revoked_at NULL on the new row — that's what
+   * distinguishes it from revokeConsent() below.
+   */
+  recordConsent(
+    phone: string,
+    purpose: ConsentPurpose,
+    granted: boolean,
+    version: number
+  ): Promise<ConsentRecord>;
+  /**
+   * Appends a withdrawal event for a purpose the user had previously
+   * granted: a new row with granted=false AND revoked_at stamped on
+   * that same new row (not a mutation of the earlier grant row) — keeps
+   * the ledger append-only while still recording "this was actively
+   * revoked", not just "never granted".
+   */
+  revokeConsent(phone: string, purpose: ConsentPurpose): Promise<void>;
+}
+
+// --- Audit log (P3-A / Kenya DPA) --------------------------------------------
+
+/** What kind of thing happened. 'consent_grant'/'consent_revoke' log the
+ *  consent ledger's own events into the audit trail too (belt-and-braces
+ *  — the consent table is itself append-only and auditable, but a
+ *  data-subject's unified "what happened to my data" view should not
+ *  have to know to cross-reference two tables). */
+export type AuditAction =
+  | 'read'
+  | 'write'
+  | 'delete'
+  | 'export'
+  | 'ai_call'
+  | 'consent_grant'
+  | 'consent_revoke'
+  | 'danger_escalation'
+  | 'login';
+
+/** What kind of data the action touched. */
+export type AuditResource =
+  | 'profile'
+  | 'journal'
+  | 'conversation'
+  | 'medical_history'
+  | 'insights'
+  | 'consent'
+  | 'account';
+
+/**
+ * Row shape of the `audit_log` table — append-only, one row per
+ * data-touching event. `resource_owner` is the phone number the DATA
+ * belongs to (the data subject); `actor` is who/what performed the
+ * action (may be the same phone for a self-service action, or a
+ * system-level identifier like "system" for an automated danger
+ * escalation) — that distinction is what makes listForUser() a genuine
+ * "who accessed MY data" view rather than merely "what did I do".
+ */
+export interface AuditEvent {
+  id: number;
+  actor: string;
+  action: AuditAction;
+  resource: AuditResource;
+  resource_owner: string;
+  /** JSON-stringified free-form context, or null. */
+  metadata: string | null;
+  created_at: string;
+}
+
+/** Input to AuditRepository#record — everything except the id/created_at
+ *  the store assigns (unless `timestamp` is passed explicitly, e.g. by
+ *  a test that wants a deterministic row). */
+export interface AuditEventInput {
+  actor: string;
+  action: AuditAction;
+  resource: AuditResource;
+  resourceOwner: string;
+  /** Arbitrary JSON-serializable context (e.g. which fields were read).
+   *  Repository implementations own the JSON.stringify/parse round-trip
+   *  — callers pass/receive a plain object, never a pre-serialized
+   *  string. */
+  metadata?: Record<string, unknown> | null;
+  /** ISO timestamp. Storage layer defaults to "now" when omitted. */
+  timestamp?: string;
+}
+
+export interface AuditRepository {
+  /** Appends one audit row. Append-only — there is no update/delete
+   *  method on this interface by design. */
+  record(event: AuditEventInput): Promise<void>;
+  /** Events for this user's data, newest first — the data-subject-facing
+   *  "who accessed my data" view. Defaults to a reasonable page size
+   *  when `limit` is omitted (see the adapter for the exact default). */
+  listForUser(phone: string, limit?: number): Promise<AuditEvent[]>;
+}
+
 // --- Aggregate --------------------------------------------------------------
 
 /**
@@ -294,6 +470,8 @@ export interface DatabaseAdapter {
   medicalHistory: MedicalHistoryRepository;
   ancVisits: AncVisitRepository;
   otp: OtpRepository;
+  consents: ConsentRepository;
+  audit: AuditRepository;
   /** Creates tables/indexes and runs idempotent migrations. Mirrors
    *  services/database.js#initializeDatabase(). */
   initialize(): Promise<void>;
@@ -301,4 +479,33 @@ export interface DatabaseAdapter {
    *  JS module never exposed a close path (it was a process-lifetime
    *  singleton); nothing currently calls this. */
   close(): Promise<void>;
+  /**
+   * Kenya DPA erasure right (P3-C, DELETE /me/account): hard-deletes
+   * every row keyed to `phone` from users, conversations, symptoms,
+   * anc_visits, journals, journal_sessions, medical_history, otp_codes,
+   * and consents — in a single transaction, so a partial failure rolls
+   * everything back instead of leaving some tables cleared and others
+   * not (see the adapter implementation for the transaction mechanics).
+   *
+   * DELIBERATE TENSION, documented here rather than left implicit:
+   * this method does NOT touch `audit_log`. The two DPA obligations
+   * (erasure vs. keeping a record of processing) point in opposite
+   * directions for that one table, and we resolve it in favor of
+   * retention: audit_log rows — including the 'delete'/'account' event
+   * this very erasure fires (see apps/server/src/app.ts's DELETE
+   * /me/account, which audits BEFORE calling this) — are themselves the
+   * DPA-mandated record of what processing/access happened and when,
+   * which by nature must survive the event it's recording. The
+   * alternative (a minimal "account deleted" tombstone that also purges
+   * prior audit rows for the phone) was considered and rejected: it
+   * would erase the very access history a data subject or regulator
+   * might need to review *because* an account was deleted. Audit rows
+   * do retain the phone as `actor`/`resource_owner` after this call —
+   * that residual is the accepted cost of an auditable erasure.
+   *
+   * Idempotent: a phone with zero rows in every table (already erased,
+   * or never had any) resolves normally — `DELETE ... WHERE` matching
+   * zero rows is not an error.
+   */
+  eraseUser(phone: string): Promise<void>;
 }

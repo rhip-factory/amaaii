@@ -9,6 +9,10 @@
 import { createSqliteDatabaseAdapter } from '@amaaii/adapters';
 import type {
   AncVisitRow,
+  AuditEvent,
+  AuditEventInput,
+  ConsentPurpose,
+  ConsentRecord,
   ConversationAnalysis,
   ConversationRow,
   CreateUserInput,
@@ -21,6 +25,7 @@ import type {
   MedicalHistoryInput,
   MedicalHistoryRecord,
   OtpRecord,
+  SymptomRow,
   UpdateUserInput,
   UserRow,
 } from '@amaaii/core';
@@ -74,6 +79,12 @@ export async function getLastBotMessage(userPhone: string): Promise<LastBotMessa
   return adapter.conversations.getLastBotMessage(userPhone);
 }
 
+// P3-C data-portability export (GET /me/export) — ALL conversation rows,
+// not the last-N-turns slice getConversationHistory returns.
+export async function getAllConversationsForUser(userPhone: string): Promise<ConversationRow[]> {
+  return adapter.conversations.getAllForUser(userPhone);
+}
+
 export async function getMedicalHistory(userPhone: string): Promise<MedicalHistoryRecord | null> {
   return adapter.medicalHistory.getMedicalHistory(userPhone);
 }
@@ -103,6 +114,11 @@ export async function saveSymptoms(
   return adapter.symptoms.saveSymptoms(userPhone, symptoms, mood, urgency);
 }
 
+// P3-C data-portability export (GET /me/export) — ALL symptom rows.
+export async function getAllSymptomsForUser(userPhone: string): Promise<SymptomRow[]> {
+  return adapter.symptoms.getAllForUser(userPhone);
+}
+
 export async function scheduleANCVisit(userPhone: string, scheduledDate: string, notes = ''): Promise<number> {
   return adapter.ancVisits.scheduleANCVisit(userPhone, scheduledDate, notes);
 }
@@ -113,6 +129,12 @@ export async function getUpcomingANCVisits(userPhone: string): Promise<AncVisitR
 
 export async function markANCVisitAttended(visitId: number): Promise<number> {
   return adapter.ancVisits.markANCVisitAttended(visitId);
+}
+
+// P3-C data-portability export (GET /me/export) — ALL ANC visit rows,
+// not just the upcoming/unattended slice getUpcomingANCVisits returns.
+export async function getAllAncVisitsForUser(userPhone: string): Promise<AncVisitRow[]> {
+  return adapter.ancVisits.getAllForUser(userPhone);
 }
 
 export async function createOrUpdateJournal(
@@ -144,6 +166,12 @@ export async function findJournalByClientEntryId(userPhone: string, clientEntryI
   return adapter.journals.findByClientEntryId(userPhone, clientEntryId);
 }
 
+// P3-C data-portability export (GET /me/export) — ALL journal rows,
+// unbounded by the `days` window getJournalHistory uses.
+export async function getAllJournalsForUser(userPhone: string): Promise<JournalRow[]> {
+  return adapter.journals.getAllForUser(userPhone);
+}
+
 // --- OTP (P2-B) ---------------------------------------------------------
 
 export async function createOrReplaceOtp(
@@ -165,4 +193,48 @@ export async function recordOtpAttempt(phone: string): Promise<number> {
 
 export async function deleteOtp(phone: string): Promise<void> {
   return adapter.otp.delete(phone);
+}
+
+// --- Consent (P3-A) ------------------------------------------------------
+// Pure foundation only — nothing in this file enforces consent yet (no
+// route checks these). P3-B wires needsConsent()/canUseAi() (packages/
+// core/src/consent.ts) against the ConsentState these facade functions
+// let a caller reconstruct via deriveConsentState(await getConsents(...)).
+
+export async function getConsents(phone: string): Promise<ConsentRecord[]> {
+  return adapter.consents.getConsents(phone);
+}
+
+export async function recordConsent(
+  phone: string,
+  purpose: ConsentPurpose,
+  granted: boolean,
+  version: number
+): Promise<ConsentRecord> {
+  return adapter.consents.recordConsent(phone, purpose, granted, version);
+}
+
+export async function revokeConsent(phone: string, purpose: ConsentPurpose): Promise<void> {
+  return adapter.consents.revokeConsent(phone, purpose);
+}
+
+// --- Audit log (P3-A) ------------------------------------------------------
+// Same "foundation, not enforcement" note as above — nothing currently
+// calls recordAudit() from a real route handler; that's P3-B.
+
+export async function recordAudit(event: AuditEventInput): Promise<void> {
+  return adapter.audit.record(event);
+}
+
+export async function listAuditForUser(phone: string, limit?: number): Promise<AuditEvent[]> {
+  return adapter.audit.listForUser(phone, limit);
+}
+
+// --- Erasure (P3-C) ---------------------------------------------------------
+// Kenya DPA right to erasure. See DatabaseAdapter#eraseUser's doc comment
+// in packages/core/src/repositories.ts for the tables cleared, the
+// transaction guarantee, and — most importantly — why audit_log is
+// deliberately NOT among them.
+export async function eraseUser(phone: string): Promise<void> {
+  return adapter.eraseUser(phone);
 }

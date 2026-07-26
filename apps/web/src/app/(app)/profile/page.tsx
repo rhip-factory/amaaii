@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import PageContainer from "@/components/PageContainer";
+import PrivacySection from "@/components/PrivacySection";
 import { ApiError, updateMe } from "@/lib/api";
 import { useMe } from "@/lib/MeContext";
 import type { Language } from "@/lib/types";
@@ -157,6 +158,8 @@ export default function ProfilePage() {
           share this number.
         </p>
       </div>
+
+      <PrivacySection />
     </PageContainer>
   );
 }

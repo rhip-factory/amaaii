@@ -43,4 +43,19 @@ export class SqliteAncVisitRepository implements AncVisitRepository {
       });
     });
   }
+
+  // P3-C data-portability export — ALL rows regardless of attended/date,
+  // oldest first (unlike getUpcomingANCVisits' attended=0/future filter).
+  getAllForUser(userPhone: string): Promise<AncVisitRow[]> {
+    return new Promise((resolve, reject) => {
+      this.db.all<AncVisitRow>(
+        `SELECT * FROM anc_visits WHERE user_phone = ? ORDER BY scheduled_date ASC, id ASC`,
+        [userPhone],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        }
+      );
+    });
+  }
 }

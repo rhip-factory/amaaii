@@ -39,7 +39,7 @@ Point the Twilio WhatsApp sandbox webhook at `https://<your-ngrok>/webhook` (POS
 ### Tests
 
 ```bash
-pnpm test                              # vitest — 240 tests
+pnpm test                              # vitest — 342 tests
 pnpm typecheck                         # tsc --noEmit
 pnpm build                             # compile to dist/ (node dist/apps/server/src/index.js)
 PORT=4690 bash scripts/smoke/run-all.sh  # shell smoke suite (boots its own servers on $PORT, scratch DBs)
@@ -59,6 +59,7 @@ All optional — the server boots without any of them.
 | `TWILIO_SIGNATURE_ENFORCE` | `true`/`false`/unset — unset enforces webhook signatures only in production. |
 | `AMAAII_API_ORIGIN` | `next dev` only: where the PWA proxies API calls. |
 | `NEXT_PUBLIC_API_ORIGIN` | Static PWA builds: the API origin baked in at `pnpm build:web` time. |
+| `PUBLIC_BASE_URL` | Links the WhatsApp consent prompt to `{PUBLIC_BASE_URL}/privacy`. Unset (the default everywhere so far) falls back to a generic phrase instead of a broken link. |
 
 ## Architecture (one paragraph)
 
@@ -73,9 +74,21 @@ A TypeScript pnpm monorepo: `packages/core` holds the pure domain logic (determi
 - Insights: mood/sleep trends, symptom counts, red-flag dates over 14/30 days
 - Home dashboard with pregnancy-week ribbon and mood sparkline
 - Installable, offline-capable app shell (service worker)
+- Consent gate on first login + a Profile "Privacy & data" section (AI on/off toggle, activity log, data export, account deletion)
+
+## Privacy & data protection
+
+Amaaii implements a Kenya Data Protection Act–shaped consent and data-rights layer. **Demo-stage**: the mechanics below are real and tested, but the privacy notice's legal wording has not had a lawyer's review — see the disclaimer in `apps/web/src/app/privacy/page.tsx`.
+
+- **Two-tier consent.** `data_processing` is required (the app can't operate for a user without it); `ai_responses` is optional and only ever turns the AI chat replies on or off — declining it still leaves journaling and danger-sign detection fully working. Every grant/revoke is appended to a `consents` ledger (never overwritten), versioned so a future policy change can force re-consent.
+- **Danger signs always escalate**, regardless of consent status — a critical message is answered and flagged before consent is even checked. This never changes.
+- **Audit trail.** Every read/write of a user's own data is logged (`audit_log`, append-only); `GET /me/activity` lets a user see their own "who's accessed your data" list, and it's retained even after account deletion (the deletion event itself is part of that record).
+- **Your data, your call.** `GET /me/export` downloads everything Amaaii holds about you as one JSON file; `DELETE /me/account` permanently and irreversibly erases your profile, journals, conversations, symptoms, ANC visits, medical history, and consent records (the audit log's record that you existed and deleted your account is the one thing kept, for accountability). Both are in the PWA's Profile screen; both are also plain authenticated HTTP endpoints (`GET /me/export`, `DELETE /me/account`) for anyone who wants to script it.
+- **Cross-border processing disclosure.** The privacy notice discloses that AI replies are processed by OpenAI (a US-based sub-processor) — see `/privacy` in the app, or `apps/web/src/app/privacy/page.tsx` in source.
+- New API surface (bearer auth, same as the rest of the web API): `GET/POST /me/consent`, `POST /me/consent/revoke`, `GET /me/activity`, `GET /me/export`, `DELETE /me/account`.
 
 ## Notes
 
-- Demo/dev setup only: WhatsApp Business API approval, real auth, and clinical review are all future work.
-- The bot never diagnoses or prescribes; escalation copy directs users to clinics/999 and includes disclaimers.
+- Demo/dev setup only: WhatsApp Business API approval and clinical review are still future work; real OTP sign-in (WhatsApp-delivered, with a no-Twilio dev fallback) is already implemented.
+- The bot never diagnoses or prescribes; escalation copy directs users to clinics/999 and includes disclaimers, and always fires ahead of any consent check (see Privacy & data protection above).
 - Example/test phone numbers in this repo use the dummy `+254700000xxx` range.

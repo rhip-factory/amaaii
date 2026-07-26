@@ -9,6 +9,7 @@ import HelpSheet from "./HelpSheet";
 import OfflineBanner from "./OfflineBanner";
 import { AlertIcon, ChatIcon, HomeIcon, InsightsIcon, JournalIcon, LogoutIcon, ProfileIcon } from "./icons";
 import { useLogout, useSession } from "@/lib/useSession";
+import { useConsentGuard } from "@/lib/useConsentGuard";
 import { useMe } from "@/lib/MeContext";
 
 const NAV_ITEMS = [
@@ -25,6 +26,7 @@ interface AppShellProps {
 
 export default function AppShell({ children }: AppShellProps) {
   const { ready, user } = useSession();
+  useConsentGuard(ready);
   const logout = useLogout();
   const pathname = usePathname();
   const { me } = useMe();
