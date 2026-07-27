@@ -31,6 +31,15 @@
 
 import OpenAI from 'openai';
 import { redactForLLM } from '@amaaii/core';
+// P4-B: metrics increments live at THIS single chokepoint (not at
+// amaaii.ts's or llmExtract.ts's call sites) per CLAUDE.md's
+// single-LLM-chokepoint rule — same "one funnel, instrumented once"
+// reasoning as apps/server/src/audit.ts#auditDangerEscalation.
+// packages/adapters already depends on a file inside apps/server for
+// its logger (see connection.ts's own comment on this same
+// cross-boundary import) — this is the same pre-existing, documented
+// shortcut, not a new pattern introduced here.
+import { incrementLlmCall, incrementLlmFailure } from '../../../apps/server/src/metrics';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 
@@ -117,5 +126,11 @@ export async function chat(
     ...(response_format ? { response_format } : {}),
   };
 
-  return getOpenAIClient().chat.completions.create(params);
+  incrementLlmCall();
+  try {
+    return await getOpenAIClient().chat.completions.create(params);
+  } catch (err) {
+    incrementLlmFailure();
+    throw err;
+  }
 }

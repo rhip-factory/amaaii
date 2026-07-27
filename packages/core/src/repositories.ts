@@ -14,6 +14,7 @@
 
 import type { JournalRow, JournalAnalytics } from './types';
 import type { ConsentPurpose } from './consent';
+import type { JobStatus } from './jobs';
 
 // --- Users ------------------------------------------------------------
 
@@ -453,6 +454,119 @@ export interface AuditRepository {
   listForUser(phone: string, limit?: number): Promise<AuditEvent[]>;
 }
 
+// --- Jobs (P4-A durable queue) -----------------------------------------------
+//
+// Replaces the in-process `setTimeout(..., 3600000)` follow-up
+// apps/server/src/messageHandler.ts#handleIncomingMessage used to
+// schedule directly (see CLAUDE.md's Architecture section, which
+// documented that as explicitly deferred future work). Backed by
+// SQLite today (packages/adapters/src/sqlite/jobRepository.ts); the
+// pure scheduling/retry policy this repository leans on lives in
+// packages/core/src/jobs.ts (computeBackoff/nextRunAt/shouldRetry/isDue)
+// — this interface is storage only, same split as every other
+// repository in this file.
+
+/** Row shape of the `jobs` table. `payload` is a JSON-stringified
+ *  object — repositories store/return the raw string (same "adapter
+ *  doesn't parse it for you" convention as MedicalHistoryRecord's
+ *  extracted_json); callers (job handlers) JSON.parse it themselves. */
+export interface JobRecord {
+  id: number;
+  type: string;
+  payload: string;
+  /** ISO timestamp — when this job becomes eligible to run. */
+  runAt: string;
+  status: JobStatus;
+  attempts: number;
+  maxAttempts: number;
+  lastError: string | null;
+  /** ISO timestamp of the current claim, or null when not claimed. */
+  lockedAt: string | null;
+  /** Opaque claim token identifying which claimDueJobs() call currently
+   *  holds this job (see the SQLite adapter for the exact format) — not
+   *  just a bare worker id, so two calls that happen to share a worker
+   *  id can never be confused with one another. Null when not claimed. */
+  lockedBy: string | null;
+  /** Idempotent-enqueue key, or null for jobs that don't need one. See
+   *  JobRepository#enqueue. */
+  dedupeKey: string | null;
+  /**
+   * P4-B (DPA erasure gap fix): the phone this job is FOR, when
+   * derivable — populated by the adapter's enqueue() from
+   * `input.payload.phone` when that field is a string (e.g. the
+   * checkin_followup job's `{ phone }` payload), null otherwise. Exists
+   * so DELETE /me/account's erasure cascade (packages/adapters/src/
+   * sqlite/erasure.ts) can clear a user's pending jobs the same way it
+   * clears every other user-data table, without needing to
+   * JSON.parse(payload) and guess its shape per job type. Not every job
+   * type necessarily has a phone-shaped payload — this is best-effort,
+   * not a schema guarantee.
+   */
+  userPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EnqueueJobInput {
+  type: string;
+  /** Plain object — the repository owns the JSON.stringify round-trip
+   *  (same convention as AuditEventInput#metadata). */
+  payload: Record<string, unknown>;
+  /** ISO timestamp this job becomes due. */
+  runAt: string;
+  maxAttempts?: number;
+  /** When provided, a second enqueue() with the same key is a no-op that
+   *  returns the ALREADY-EXISTING row instead of inserting a duplicate —
+   *  see enqueue()'s doc comment below for the exact semantics. */
+  dedupeKey?: string | null;
+}
+
+export interface JobRepository {
+  /**
+   * Inserts a new job, unless `input.dedupeKey` is set AND a row with
+   * that same key already exists — in which case this is a no-op that
+   * resolves the EXISTING row (not a fresh insert, not an error). This
+   * is what lets a caller "enqueue" from a code path that might run more
+   * than once for the same logical event (e.g. a retried webhook)
+   * without ever double-scheduling.
+   */
+  enqueue(input: EnqueueJobInput): Promise<JobRecord>;
+  /**
+   * Atomically claims up to `limit` due jobs (status='pending' AND
+   * run_at <= now), flips them to status='running' with `locked_at`/
+   * `locked_by` stamped, and returns exactly the rows THIS call
+   * successfully claimed. Safe against a second concurrent caller (same
+   * or different process) claiming the same row twice — see the SQLite
+   * adapter's file header for the exact mechanism and its limits.
+   */
+  claimDueJobs(now: string, limit: number, workerId: string): Promise<JobRecord[]>;
+  /** Marks a claimed job as permanently succeeded; clears its lock. */
+  markDone(id: number): Promise<void>;
+  /**
+   * Records a handler failure for a claimed job: increments `attempts`,
+   * then either requeues it (status back to 'pending', `run_at` pushed
+   * out per packages/core/src/jobs.ts#nextRunAt, lock cleared) or marks
+   * it permanently 'failed' (per packages/core/src/jobs.ts#shouldRetry
+   * against the row's own `max_attempts`). `error` is stored verbatim in
+   * `last_error` — callers must pass an already-redacted message if the
+   * failure could contain PII (mirrors the rest of this codebase's
+   * "redact before it reaches a log/store" discipline).
+   */
+  markFailedOrRetry(id: number, error: string, now: string): Promise<void>;
+  /**
+   * Requeues jobs stuck in 'running' for longer than `staleMs` — the
+   * restart-recovery mechanism for a worker that crashed mid-execution
+   * (a claimed job whose process died before markDone/markFailedOrRetry
+   * ever ran). Applies the SAME attempts/backoff/give-up policy as
+   * markFailedOrRetry (a stale lock counts as a failed attempt, so a
+   * job that keeps crashing the worker eventually stops being retried
+   * instead of looping forever). Returns the number of jobs reclaimed.
+   */
+  reclaimStuck(now: string, staleMs: number): Promise<number>;
+  /** Counts of jobs per status — tests/metrics only, not on any hot path. */
+  countByStatus(): Promise<Record<JobStatus, number>>;
+}
+
 // --- Aggregate --------------------------------------------------------------
 
 /**
@@ -472,6 +586,7 @@ export interface DatabaseAdapter {
   otp: OtpRepository;
   consents: ConsentRepository;
   audit: AuditRepository;
+  jobs: JobRepository;
   /** Creates tables/indexes and runs idempotent migrations. Mirrors
    *  services/database.js#initializeDatabase(). */
   initialize(): Promise<void>;
@@ -480,12 +595,30 @@ export interface DatabaseAdapter {
    *  singleton); nothing currently calls this. */
   close(): Promise<void>;
   /**
+   * P4-B readiness check (GET /health/ready): runs a trivial `SELECT 1`
+   * against the connection and resolves if it succeeds, rejects
+   * otherwise. Deliberately the cheapest possible real query — proves
+   * the connection/file is actually usable (not just that this module
+   * loaded), without touching any user table or row.
+   */
+  ping(): Promise<void>;
+  /**
    * Kenya DPA erasure right (P3-C, DELETE /me/account): hard-deletes
    * every row keyed to `phone` from users, conversations, symptoms,
    * anc_visits, journals, journal_sessions, medical_history, otp_codes,
-   * and consents — in a single transaction, so a partial failure rolls
-   * everything back instead of leaving some tables cleared and others
-   * not (see the adapter implementation for the transaction mechanics).
+   * consents, and (P4-B) jobs — in a single transaction, so a partial
+   * failure rolls everything back instead of leaving some tables cleared
+   * and others not (see the adapter implementation for the transaction
+   * mechanics).
+   *
+   * jobs is matched on the best-effort `user_phone` column (see
+   * JobRecord#userPhone) — a job mid-flight (claimed by the poller,
+   * status='running') at the moment of erasure is still deleted; the
+   * accepted trade-off is that its in-progress side effect (e.g. an
+   * already-in-transit WhatsApp send) is not recalled, only the row
+   * bookkeeping it. Documented here rather than treated as a bug: an
+   * erasure request racing a live job is a rare edge case, and there is
+   * no way to "cancel" a send that may have already left the process.
    *
    * DELIBERATE TENSION, documented here rather than left implicit:
    * this method does NOT touch `audit_log`. The two DPA obligations

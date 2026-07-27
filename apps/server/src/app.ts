@@ -34,15 +34,24 @@ import {
   getAllAncVisitsForUser,
   listAuditForUser,
   eraseUser,
+  countJobsByStatus,
+  pingDatabase,
 } from './database';
 import { getRecentTrend } from './trend';
 import * as llmExtract from './llmExtract';
 import { log } from './logger';
 import twilioSignature from './middleware/twilioSignature';
+import { requestObservability } from './middleware/requestObservability';
 import * as auth from './auth';
 import { generateOtpCode, hashOtpCode, hashesMatch } from './otp';
-import { WEB_OUT_DIR } from './paths';
+import { WEB_OUT_DIR, REPO_ROOT } from './paths';
 import { sendWhatsAppMessage } from '@amaaii/adapters';
+import {
+  renderMetrics,
+  incrementOtpRequest,
+  incrementOtpVerification,
+} from './metrics';
+import { globalErrorHandler } from './errorHandler';
 import {
   checkOtpRateLimit,
   pruneSentTimestamps,
@@ -91,6 +100,21 @@ declare global {
 }
 
 const PROFILE_FIELDS = ['name', 'age', 'pregnancy_week', 'location', 'language'] as const;
+
+// P4-B: read once at module load (not per-request — GET /health must
+// return fast) from the repo's own package.json via paths.ts's REPO_ROOT,
+// the same "walk up to find package.json, works under tsx AND a
+// compiled dist/ boot" resolution WEB_OUT_DIR already relies on. Falls
+// back to 'unknown' rather than throwing if the read ever fails — a
+// liveness probe must never itself be a reason the process looks down.
+const APP_VERSION: string = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8')) as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 function trimesterFromWeek(w?: number | null): string | null {
   if (!w) return null;
@@ -341,13 +365,97 @@ export interface CreateAppOptions {
   // (apps/server/src/index.ts) never pass this — they get the real
   // WEB_OUT_DIR from paths.ts.
   webOutDirOverride?: string;
+  // P4-B test seam ONLY: mounts a route that unconditionally throws, so
+  // tests/observability.test.ts can drive the global error handler
+  // (errorHandler.ts) deterministically without depending on a
+  // coincidental existing failure path. Never set by production callers
+  // (apps/server/src/index.ts never passes it) — the route does not
+  // exist unless a test explicitly opts in.
+  enableTestErrorRoute?: boolean;
 }
 
 export function createApp(opts: CreateAppOptions = {}): Express {
   const app = express();
 
+  // P4-B: mounted FIRST — before body-parsing, before every route — so
+  // the correlation id / timing / completion log wraps the ENTIRE
+  // request lifecycle, including a body-parser JSON error and whatever
+  // the global error handler (registered LAST, below) ends up doing.
+  // See middleware/requestObservability.ts's header for the full design.
+  app.use(requestObservability);
+
   app.use(bodyParser.urlencoded({ extended: false }));
   app.use(bodyParser.json());
+
+  // --- Ops endpoints (P4-B) ---------------------------------------------
+  // Unauthenticated by design (a load balancer / host / scraper calls
+  // these, not a logged-in user) and mounted ahead of every other route
+  // so they can never be shadowed by the PWA static-export catch-all
+  // further down. Neither collides with a PWA page route — apps/web's
+  // page set (see apps/web/src/app/*/page.tsx) has no '/health' or
+  // '/metrics' page, unlike '/insights' and '/chat', which is why
+  // neither needs that pair's X-Amaaii-Api-header discrimination.
+
+  // GET /health — liveness: the process is up and can respond. Must
+  // return FAST and never touch a request's user data or the DB — if
+  // this handler ever blocks, a host's liveness probe would start
+  // killing/restarting an otherwise-healthy process.
+  app.get('/health', (_req: Request, res: Response) => {
+    res.status(200).json({ status: 'ok', uptime: process.uptime(), version: APP_VERSION });
+  });
+
+  // GET /health/ready — readiness: the process is up AND its
+  // dependencies are reachable. Today that's just SQLite — a trivial
+  // `SELECT 1` proves the connection/file is actually usable, not just
+  // that the module loaded. 503 (not 200-with-a-flag) on failure so a
+  // host's readiness check can act on the HTTP status directly without
+  // parsing the body.
+  app.get('/health/ready', async (_req: Request, res: Response) => {
+    try {
+      await pingDatabase();
+      res.status(200).json({ status: 'ok' });
+    } catch (err) {
+      log.error('GET /health/ready: DB check failed', err);
+      res.status(503).json({ status: 'unavailable' });
+    }
+  });
+
+  // GET /metrics — Prometheus text exposition (see metrics.ts's header
+  // for the format/dependency-free rationale). Gated behind
+  // METRICS_TOKEN when set (any environment); when unset, served openly
+  // in non-production (dev/CI/smoke convenience) but 404'd in production
+  // — an unauthenticated pilot deploy should never expose request
+  // volumes/route shapes/job counts to the open internet by accident.
+  // PII: every label here is a closed vocabulary (route templates,
+  // status classes, urgency levels, job statuses) — see metrics.ts's
+  // header; this handler adds no new label surface of its own.
+  app.get('/metrics', async (req: Request, res: Response) => {
+    const token = process.env.METRICS_TOKEN;
+    if (token) {
+      const header = req.get('authorization') || '';
+      const match = header.match(/^Bearer\s+(.+)$/i);
+      if (!match || match[1] !== token) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      res.status(404).end();
+      return;
+    }
+    const jobs = await countJobsByStatus().catch((err) => {
+      log.error('GET /metrics: countJobsByStatus failed (jobs_total omitted)', err);
+      return null;
+    });
+    res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+    res.status(200).send(renderMetrics({ jobs }));
+  });
+
+  // P4-B test seam — see CreateAppOptions.enableTestErrorRoute above.
+  if (opts.enableTestErrorRoute) {
+    app.get('/__test/throw', () => {
+      throw new Error('boom (test-only route, apps/server/src/app.ts#enableTestErrorRoute)');
+    });
+  }
 
   // Twilio WhatsApp webhook
   app.post('/webhook', twilioSignature, async (req: Request, res: Response) => {
@@ -398,6 +506,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const { phone } = req.body || {};
       const normalized = auth.normalizePhone(phone);
       if (!normalized) {
+        incrementOtpRequest('invalid_phone');
         res.status(400).json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' });
         return;
       }
@@ -407,6 +516,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const priorSends = existing?.sentTimestamps ?? [];
       const rateCheck = checkOtpRateLimit(priorSends, now);
       if (rateCheck.limited) {
+        incrementOtpRequest('rate_limited');
         res.status(429).json({
           error: 'rate_limited',
           message: formatRateLimitMessage(rateCheck.retryAfterMs),
@@ -430,6 +540,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
             `Your Amaaii sign-in code is ${code}. It expires in 10 minutes.`
           );
         } catch (err) {
+          incrementOtpRequest('delivery_failed');
           log.error('Failed to send OTP via WhatsApp', err, { phone: normalized });
           res.status(502).json({
             error: 'delivery_failed',
@@ -437,6 +548,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
           });
           return;
         }
+        incrementOtpRequest('sent');
       } else {
         log.info('OTP dev-mode code generated (no Twilio creds configured)', {
           phone: normalized,
@@ -445,6 +557,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         if (process.env.NODE_ENV !== 'production') {
           devCode = code;
         }
+        incrementOtpRequest('dev_mode');
       }
 
       // Only persist (and count against the rate limit) once delivery
@@ -470,10 +583,12 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const { phone, code } = req.body || {};
       const normalized = auth.normalizePhone(phone);
       if (!normalized) {
+        incrementOtpVerification('invalid_phone');
         res.status(400).json({ error: 'invalid_phone', message: 'Please enter a valid phone number.' });
         return;
       }
       if (typeof code !== 'string' || !/^\d{6}$/.test(code.trim())) {
+        incrementOtpVerification('invalid_code');
         res.status(400).json({ error: 'invalid_code', message: 'Enter the 6-digit code.' });
         return;
       }
@@ -481,6 +596,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
 
       const record = await getOtp(normalized);
       if (!record) {
+        incrementOtpVerification('no_code');
         res.status(400).json({
           error: 'no_code',
           message: 'No active code for this number — request a new one.',
@@ -491,12 +607,14 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const now = new Date();
       if (isOtpExpired(record.expiresAt, now)) {
         await deleteOtp(normalized);
+        incrementOtpVerification('expired');
         res.status(410).json({ error: 'expired', message: 'Code expired — send a new one.' });
         return;
       }
 
       if (record.attempts >= OTP_MAX_ATTEMPTS) {
         await deleteOtp(normalized);
+        incrementOtpVerification('too_many_attempts');
         res.status(429).json({
           error: 'too_many_attempts',
           message: 'Too many incorrect tries — send a new code.',
@@ -510,12 +628,14 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         const remaining = Math.max(0, OTP_MAX_ATTEMPTS - attempts);
         if (remaining === 0) {
           await deleteOtp(normalized);
+          incrementOtpVerification('too_many_attempts');
           res.status(429).json({
             error: 'too_many_attempts',
             message: 'Too many incorrect tries — send a new code.',
           });
           return;
         }
+        incrementOtpVerification('wrong_code');
         res.status(401).json({
           error: 'wrong_code',
           message: formatWrongCodeMessage(remaining),
@@ -532,6 +652,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const token = auth.issueToken(normalized);
       log.info('PWA OTP login', { phone: normalized });
       await recordAuditSafe({ actor: normalized, action: 'login', resource: 'account', resourceOwner: normalized, metadata: { method: 'otp' } });
+      incrementOtpVerification('success');
       res.json({ token, user: { phone: normalized } });
     } catch (err) {
       log.error('POST /auth/otp/verify failed', err);
@@ -1390,6 +1511,14 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         );
     });
   }
+
+  // P4-B: global error-handling backstop — MUST be registered last (its
+  // 4-arg arity is what makes Express treat it as an error handler at
+  // all; registration ORDER is what makes it a backstop rather than
+  // intercepting errors meant for something else). See
+  // apps/server/src/errorHandler.ts's header for exactly what reaches
+  // this in practice.
+  app.use(globalErrorHandler);
 
   return app;
 }

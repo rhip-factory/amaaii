@@ -40,11 +40,14 @@ export OPENAI_API_KEY="${OPENAI_API_KEY:-sk-smoke-dummy}"
 PORT="${PORT:-3000}"
 URL="http://localhost:${PORT}/webhook"
 
+# Robust boot-wait helper (polls the port instead of a fixed sleep).
+source "$(dirname "$0")/lib/send.sh"
+
 # --- Run 1: enforce=true, missing signature → 403 ----------------------------
 LOG=$(mktemp)
 PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=true NODE_ENV=production ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG" 2>&1 &
 SID=$!
-sleep 2
+wait_for_server "http://localhost:${PORT}"
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
   -d "From=whatsapp:+254700000715" -d "Body=hello" -d "ProfileName=Test" \
   "$URL")
@@ -57,7 +60,7 @@ SID=""
 LOG2=$(mktemp)
 PORT="$PORT" DB_PATH="$DB_FILE" TWILIO_SIGNATURE_ENFORCE=false ./node_modules/.bin/tsx apps/server/src/index.ts > "$LOG2" 2>&1 &
 SID=$!
-sleep 2
+wait_for_server "http://localhost:${PORT}"
 code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
   -d "From=whatsapp:+254700000715" -d "Body=hello" -d "ProfileName=Test" \
   "$URL")

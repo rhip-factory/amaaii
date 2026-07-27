@@ -20,6 +20,14 @@ import type sqlite3 from 'sqlite3';
 // only in-progress WhatsApp stage-machine state, not durable "data" —
 // the work order is explicit that erasure covers it. audit_log is
 // deliberately ABSENT from this list; see the eraseUser() doc comment.
+//
+// jobs (P4-B, carried over from P4-A's durable job queue landing without
+// this): matched on the best-effort `user_phone` column populated at
+// enqueue time from a phone-shaped payload (see JobRecord#userPhone's
+// doc comment in packages/core/src/repositories.ts) — a job whose
+// payload never carried a phone (none exist today, but a future job
+// type might not) simply has user_phone=NULL and is untouched by this
+// DELETE, same as it would be by any other WHERE-clause-scoped erasure.
 const ERASURE_TARGETS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'conversations', column: 'user_phone' },
   { table: 'symptoms', column: 'user_phone' },
@@ -29,6 +37,7 @@ const ERASURE_TARGETS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'medical_history', column: 'user_phone' },
   { table: 'otp_codes', column: 'phone' },
   { table: 'consents', column: 'user_phone' },
+  { table: 'jobs', column: 'user_phone' },
   { table: 'users', column: 'phone_number' },
 ];
 

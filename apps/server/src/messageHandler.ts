@@ -418,6 +418,60 @@ export async function processMessage(
   };
 }
 
+// --- Check-in follow-up job (P4-A) --------------------------------------
+// Migrated off the in-process `setTimeout(..., 3600000)` this file used
+// to run directly (see CLAUDE.md's Architecture section, which
+// documented that as deferred future work) onto the durable SQLite job
+// queue (apps/server/src/database.ts's enqueueJob, apps/server/src/
+// jobWorker.ts's poller). Message content, recipient, and the
+// 1-hour delay are all UNCHANGED from the old setTimeout — only the
+// delivery mechanism moved, so a follow-up scheduled before a server
+// restart still fires afterward (the whole point of this migration; see
+// the P4-A work order's restart-durability requirement).
+
+export const CHECKIN_FOLLOWUP_JOB_TYPE = 'checkin_followup';
+
+/** Verbatim copy of the message the old setTimeout sent — do not reword
+ *  without also checking any test/fixture that asserts on this exact
+ *  string. */
+export const CHECKIN_FOLLOWUP_MESSAGE =
+  "Hi! I wanted to check in - were you able to see a healthcare provider? How are you feeling now? 💚";
+
+export interface CheckinFollowupPayload {
+  phone: string;
+}
+
+/**
+ * Job handler for CHECKIN_FOLLOWUP_JOB_TYPE (registered against the
+ * worker in apps/server/src/index.ts). Sends the SAME follow-up message
+ * the old setTimeout sent, then logs it into the conversation history
+ * with the same 'follow_up' context/urgency shape.
+ *
+ * IDEMPOTENCY: at-least-once, by design, not exactly-once. A crash
+ * between sendWhatsAppMessage succeeding and markDone() persisting would
+ * cause the worker to retry this job (per the normal
+ * markFailedOrRetry/reclaimStuck paths) and could send a second,
+ * duplicate follow-up on the same phone. This is an accepted, documented
+ * trade-off rather than an oversight: the cost of an occasional
+ * duplicate "how are you feeling" nudge is low, while building true
+ * exactly-once delivery (e.g. a send-outbox row checked/written in the
+ * same transaction as the status flip) is disproportionate effort for a
+ * single low-stakes reminder message. In the overwhelmingly common case
+ * — no crash mid-send — this sends exactly once, identical to the old
+ * setTimeout's behavior.
+ */
+export async function sendCheckinFollowup(payload: CheckinFollowupPayload): Promise<void> {
+  const { phone } = payload;
+  await sendWhatsAppMessage(phone, CHECKIN_FOLLOWUP_MESSAGE);
+  await db.saveConversation(phone, '[System Follow-up]', CHECKIN_FOLLOWUP_MESSAGE, {
+    context: 'follow_up',
+    dangerSigns: [],
+    urgencyLevel: 'low',
+  });
+}
+
+const CHECKIN_FOLLOWUP_DELAY_MS = 3600000; // 1 hour — unchanged from the old setTimeout.
+
 // Twilio WhatsApp transport: process + send + schedule follow-up.
 export async function handleIncomingMessage(
   from: string,
@@ -430,18 +484,35 @@ export async function handleIncomingMessage(
     await sendWhatsAppMessage(from, response);
     log.info(`Response sent successfully to ${from}`);
 
-    // In-process follow-up for high-risk cases (D20: deferred — proper
-    // durable queue lands in Phase 4).
+    // Durable follow-up for high-risk cases (P4-A — see the job/handler
+    // pair above; this used to be an in-process setTimeout).
     if (urgencyLevel === 'high' || urgencyLevel === 'critical') {
-      setTimeout(async () => {
-        const followUp = "Hi! I wanted to check in - were you able to see a healthcare provider? How are you feeling now? 💚";
-        await sendWhatsAppMessage(from, followUp);
-        await db.saveConversation(from, '[System Follow-up]', followUp, {
-          context: 'follow_up',
-          dangerSigns: [],
-          urgencyLevel: 'low',
+      const now = new Date();
+      const runAt = new Date(now.getTime() + CHECKIN_FOLLOWUP_DELAY_MS).toISOString();
+      // Dedupe key buckets by wall-clock hour: if the same user sends
+      // several HIGH/CRITICAL messages within one hour, only the FIRST
+      // schedules a follow-up. Without this, an anxious user re-tripping
+      // danger signs repeatedly would pile up several duplicate "how are
+      // you feeling" nudges an hour later — the old setTimeout had no
+      // such guard (every qualifying message scheduled its own timer);
+      // this is a deliberate improvement made possible by having a real
+      // queue to dedupe against, not a behavior preserved from before.
+      const hourBucket = now.toISOString().slice(0, 13); // YYYY-MM-DDTHH
+      const dedupeKey = `${CHECKIN_FOLLOWUP_JOB_TYPE}:${from}:${hourBucket}`;
+      try {
+        await db.enqueueJob({
+          type: CHECKIN_FOLLOWUP_JOB_TYPE,
+          payload: { phone: from },
+          runAt,
+          dedupeKey,
         });
-      }, 3600000);
+      } catch (err) {
+        // Never let a scheduling failure take down the primary reply
+        // path — the user already has their immediate response; a
+        // missed follow-up nudge is degraded service, not a broken
+        // conversation.
+        log.error('Failed to enqueue checkin_followup job', err);
+      }
     }
   } catch (error) {
     log.error('Error in message handler', error);

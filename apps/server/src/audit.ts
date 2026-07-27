@@ -12,6 +12,7 @@
 
 import * as db from './database';
 import { log } from './logger';
+import { incrementDangerEscalation } from './metrics';
 import type { AuditEventInput, Urgency } from '@amaaii/core';
 
 export async function recordAuditSafe(event: AuditEventInput): Promise<void> {
@@ -33,12 +34,20 @@ export async function recordAuditSafe(event: AuditEventInput): Promise<void> {
  * making an automated decision, not a user-initiated data access (see
  * AuditEvent's actor-vs-resource_owner distinction in
  * packages/core/src/repositories.ts).
+ *
+ * P4-B: also the single funnel danger_escalations_total is incremented
+ * from — every CRITICAL/HIGH escalation path (WhatsApp's danger branch,
+ * the web /chat consent-gate bypass, POST /journal/entries' re-scan)
+ * already calls this function for the audit row, so reusing it here
+ * avoids a second, separately-maintained instrumentation site that could
+ * drift out of sync with the audit one.
  */
 export async function auditDangerEscalation(
   phone: string,
   urgencyLevel: Urgency | string | undefined
 ): Promise<void> {
   if (urgencyLevel !== 'critical' && urgencyLevel !== 'high') return;
+  incrementDangerEscalation(urgencyLevel);
   await recordAuditSafe({
     actor: 'system',
     action: 'danger_escalation',
