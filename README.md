@@ -102,6 +102,25 @@ Pilot-hardening work (Phase 4) made the parts of the system a real pilot deploym
 - **A global error-handling backstop** catches anything that escaped a route's own try/catch, logs the real error server-side only, and returns a generic `{error:'internal_error', requestId}` to the client — never a stack trace or message.
 - **Wiring alerting for a pilot.** Every critical failure (an error reaching the global backstop, a poll cycle with several job failures) always logs one ERROR-level line — enough for host log-based alerting (Render/Railway/journal `grep`-style filters) with zero setup. Set `ALERT_WEBHOOK_URL` to also POST a small `{event, message, requestId, timestamp}` JSON payload (message redacted, never a phone number or name) to a Slack incoming webhook or an on-call tool's HTTP intake; tune sensitivity with `JOBS_FAILED_ALERT_THRESHOLD` (default 3 failures/cycle).
 
+## Deployment (Railway)
+
+The repo ships a `Dockerfile` + `railway.json` for a single-process, single-origin deploy (Express serves the API *and* the Next.js static export on one port). `railway up` builds and ships it; the notes below are the parts that are easy to get wrong.
+
+- **A volume is mandatory, not optional.** The database is SQLite on disk, and a container filesystem is ephemeral — without a mounted volume, every redeploy silently discards all user data. Attach one (`railway volume add -m /data`) and point `DB_PATH` inside it (`/data/amaaii.db`). `GET /health/ready` is wired as the healthcheck precisely because it pings the DB, so a missing or unwritable volume fails the deploy loudly instead of quietly starting an amnesiac server.
+- **Volume mounts are root-owned; the app runs as `node`.** `docker-entrypoint.sh` starts as root, chowns the mount, then drops privileges via `gosu` before exec'ing node. Without it the first boot dies on `SQLITE_CANTOPEN: unable to open database file` and crash-loops. Don't add a `USER node` line to the Dockerfile — that reintroduces exactly this failure.
+- **`AUTH_SECRET` must be set.** It falls back to a hardcoded string that is published in this repo, and it keys both the bearer-token HMAC and the OTP code hashes — unset in production means anyone can forge a token for any phone number.
+- **Set `NODE_ENV=production`.** It is what enables Twilio webhook signature enforcement, disables the inline `devCode` OTP fallback, and disables the legacy phone-only `POST /auth/login` (see Security below).
+- **Leave `NEXT_PUBLIC_API_ORIGIN` unset** so the PWA issues same-origin relative fetches. Set `METRICS_TOKEN` to expose `/metrics`, and `PUBLIC_BASE_URL` to your public URL so WhatsApp consent messages link to the real `/privacy` page.
+- **Single replica only.** One SQLite file on one volume can't be shared across replicas; `railway.json` pins `numReplicas: 1`. Horizontal scaling is what the repository-pattern Postgres seam exists for.
+
+### Security: the legacy `POST /auth/login`
+
+`POST /auth/login` predates the OTP flow and issues a full 30-day bearer token from **a phone number alone** — no code, no secret. That is a harmless dev convenience locally (a dozen test files use it as a token factory) and a complete authentication bypass on a public URL: phone numbers are public, so anyone could mint a token for any mother's number and then read, export, or erase her health data via `/me`, `/history`, `/me/export`, and `DELETE /me/account`, bypassing both the OTP challenge and the Phase 3 data-rights layer. It now returns `404` whenever `NODE_ENV=production`, and `tests/legacyLoginGate.test.ts` pins both halves of that behaviour. **Deploy with `NODE_ENV=production` set.**
+
+### Seeding demo data
+
+`scripts/seed-demo-user.js` writes a 60-day, two-check-ins-a-day story arc (baseline → rough patch → recovery → strong) so History and Insights show real trends. `SEED_PHONE` / `SEED_NAME` override the target. In production the default `+254700000888` **cannot be signed into** — OTP sign-in there does a genuine WhatsApp delivery and that dummy number has never joined the Twilio sandbox — so seed a sandbox-joined number too if you want a demo account you can actually log into.
+
 ## Notes
 
 - Demo/dev setup only: WhatsApp Business API approval and clinical review are still future work; real OTP sign-in (WhatsApp-delivered, with a no-Twilio dev fallback) is already implemented.

@@ -6,7 +6,47 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Security
+
+- **Closed an authentication bypass in `POST /auth/login`.** The pre-OTP
+  demo endpoint issued a full 30-day bearer token from a phone number
+  alone — no code, no secret. Harmless locally (a dozen test files use it
+  as a token factory) but a complete account takeover on a publicly
+  reachable deployment: phone numbers are public, so anyone could mint a
+  token for any mother's number and then read, export, or erase her health
+  data through `/me`, `/history`, `/insights`, `/me/export`, and
+  `DELETE /me/account`, bypassing both the OTP challenge and the entire
+  Phase 3 data-rights layer. Confirmed live against the first hosted
+  deploy before being closed. Now returns `404` when
+  `NODE_ENV === 'production'` (404 rather than 403 so a deployment doesn't
+  advertise the endpoint); unchanged outside production. Pinned by
+  `tests/legacyLoginGate.test.ts`.
+- **`AUTH_SECRET` must now be set for any real deployment.** It falls back
+  to `'amaaii-dev-secret-change-me'`, a value published in this public
+  repo, and keys both the bearer-token HMAC and the OTP code hashes — so
+  an unset value on a public URL lets anyone forge a token for any phone
+  number. Documented as mandatory in README's Deployment section and set
+  on the hosted deploy.
+
 ### Added
+
+- **Hosted deployment (Railway).** `Dockerfile`, `.dockerignore`,
+  `railway.json`, and `docker-entrypoint.sh` for a single-process,
+  single-origin container (Express serves the API and the Next.js static
+  export on one port), with a persistent volume at `/data` backing SQLite
+  and `GET /health/ready` wired as the deploy healthcheck so a missing or
+  unwritable volume fails the deploy instead of quietly starting an
+  amnesiac server. `docker-entrypoint.sh` chowns the root-owned volume
+  mount and drops privileges via `gosu` — without it the container
+  crash-loops on `SQLITE_CANTOPEN`. `PUBLIC_BASE_URL` is now set in the
+  hosted environment, so WhatsApp consent messages link to the real
+  `/privacy` page instead of falling back to generic copy (closes a
+  Phase 3 deferred item).
+- `scripts/seed-demo-user.js` accepts `SEED_PHONE` / `SEED_NAME`, so the
+  demo story arc can be seeded onto a real, sandbox-joined number. In
+  production the default `+254700000888` cannot be signed into: OTP
+  sign-in does a genuine WhatsApp delivery there and the inline `devCode`
+  fallback is disabled outside dev.
 
 - **Phase 4 — pilot hardening** (`8403560`, `c2b4c3e`, and this commit —
   P4-A through P4-C):
