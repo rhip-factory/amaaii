@@ -37,6 +37,14 @@ const PHONE = process.env.SEED_PHONE || 'whatsapp:+254700000888';
 const NAME = process.env.SEED_NAME || 'Amina';
 const AGE = 32;
 const LOCATION = 'Nairobi';
+
+// SEED_JOURNALS_ONLY=1 seeds ONLY the journal history — it leaves the users
+// row and medical_history untouched (and skips the "already exists" guard,
+// since the account is expected to exist). Use it to give a REAL account
+// populated History/Insights charts without overwriting that person's actual
+// profile with the fictional demo identity, or putting invented obstetric
+// history where the AI system prompt will read it back to them.
+const JOURNALS_ONLY = process.env.SEED_JOURNALS_ONLY === '1';
 // Span: 60 days. Story arc start week = 14, end week ≈ 22.5.
 const TOTAL_DAYS = 60;
 
@@ -264,18 +272,26 @@ async function insertJournal(db, date, startedAt, completedAt, s) {
 async function main() {
   const db = new sqlite3.Database(DB_PATH);
   try {
-    if (RESET) {
-      await wipe(db);
+    if (JOURNALS_ONLY) {
+      // Only clear this phone's journals — deliberately NOT the users row,
+      // medical_history, consents, or conversations, so a live account keeps
+      // its real profile and history of use.
+      await run(db, 'DELETE FROM journals WHERE user_phone = ?', [PHONE]);
+      await seedJournals(db);
     } else {
-      const existing = await get(db, 'SELECT phone_number FROM users WHERE phone_number = ?', [PHONE]);
-      if (existing) {
-        console.error(`User ${PHONE} already exists. Re-run with --reset to wipe and re-seed.`);
-        process.exit(1);
+      if (RESET) {
+        await wipe(db);
+      } else {
+        const existing = await get(db, 'SELECT phone_number FROM users WHERE phone_number = ?', [PHONE]);
+        if (existing) {
+          console.error(`User ${PHONE} already exists. Re-run with --reset to wipe and re-seed.`);
+          process.exit(1);
+        }
       }
+      await seedUser(db);
+      await seedMedicalHistory(db);
+      await seedJournals(db);
     }
-    await seedUser(db);
-    await seedMedicalHistory(db);
-    await seedJournals(db);
 
     // Quick stats
     const journals = await get(db, 'SELECT COUNT(*) AS n FROM journals WHERE user_phone = ?', [PHONE]);

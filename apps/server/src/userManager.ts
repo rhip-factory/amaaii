@@ -135,11 +135,13 @@ class UserManager {
       riskFactors.push('age');
     }
 
-    if (user.pregnancy_week && user.pregnancy_week < 12) {
+    // `!= null` not truthiness: week 0 IS first-trimester and must count
+    // as a risk factor. Truthiness silently dropped it.
+    if (user.pregnancy_week != null && user.pregnancy_week < 12) {
       riskFactors.push('first_trimester');
     }
 
-    if (user.pregnancy_week && user.pregnancy_week > 36) {
+    if (user.pregnancy_week != null && user.pregnancy_week > 36) {
       riskFactors.push('near_term');
     }
 
@@ -162,13 +164,15 @@ class UserManager {
   getUserContext(user: UserWithFlag): UserContext {
     const context: UserContext = {
       isNewUser: user.isNewUser || false,
-      hasProfile: !!(user.name && user.age && user.pregnancy_week),
+      // pregnancy_week checked with `!= null` so a stored 0 counts as a
+      // completed answer; truthiness would leave hasProfile false forever.
+      hasProfile: !!(user.name && user.age) && user.pregnancy_week != null,
       pregnancyStage: this.getPregnancyStage(user.pregnancy_week),
       daysToDelivery: this.getDaysToDelivery(user.edd),
       // Stays true until name, age, week, AND location are all set;
       // otherwise handleOnboarding's location step is never reached
       // (the router skips onboarding once this flag flips).
-      needsOnboarding: !user.name || !user.age || !user.pregnancy_week || !user.location,
+      needsOnboarding: !user.name || !user.age || user.pregnancy_week == null || !user.location,
     };
 
     return context;
@@ -199,7 +203,7 @@ class UserManager {
 
     if (user.name) summary.push(`Name: ${user.name}`);
     if (user.age) summary.push(`Age: ${user.age}`);
-    if (user.pregnancy_week) summary.push(`Week: ${user.pregnancy_week}`);
+    if (user.pregnancy_week != null) summary.push(`Week: ${user.pregnancy_week}`);
     if (user.edd) summary.push(`Due: ${user.edd}`);
     if (user.location) summary.push(`Location: ${user.location}`);
 

@@ -20,8 +20,11 @@ const STRINGS: Record<Lang, StringDict> = {
     name_thanks: "Thank you {name}! 💚 To provide you with the best support, could you tell me your age?",
     age_thanks: "Thank you! How many weeks pregnant are you? (If you're not sure, you can tell me the date of your last period)",
     age_prompt_again: "Thank you {name}! 💚 To provide you with the best support, could you tell me your age?",
-    week_thanks: "Great! You're {weeks} weeks along. 🤰\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
-    week_lmp_thanks: "Based on your last period, you're about {weeks} weeks pregnant. Your expected delivery date is around {edd}.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
+    // "at week {weeks}" rather than "{weeks} weeks along" so the copy stays
+    // grammatical for every value the parser can now produce — the old
+    // wording rendered "You're 1 weeks along", and week 0 is valid too.
+    week_thanks: "Great! You're at week {weeks}. 🤰\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
+    week_lmp_thanks: "Based on your last period, you're at about week {weeks}. Your expected delivery date is around {edd}.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
     week_prompt_again: "I didn't catch that — could you try again?\n\n• Just a number works: \"22\"\n• Or \"22 weeks\"\n• Or your last period date: \"22 March\" or \"22/3/2026\"",
     location_done: "Perfect! I now have your basic information:\n{summary}\n\nYou can:\n• Share how you're feeling today\n• Ask me any pregnancy questions\n• Tell me about any symptoms you're experiencing\n• Type \"help\" to see what I can do\n\nHow are you feeling today? 💚",
     welcome_back: "Welcome back {name}! How can I help you today?",

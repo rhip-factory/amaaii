@@ -100,7 +100,12 @@ export function parseWeekOrLMP(raw: string): WeekOrLmp | null {
     lower.match(/(?:i'?m|im|i\s*am|niko|niko\s*kwa|nina)\s+(?:at\s+|kwa\s+)?(\d+)\b/i);
   if (m) {
     const w = parseInt(m[1] as string, 10);
-    if (w >= 1 && w <= 42) return { weeks: w };
+    // Lower bound is 0, not 1: an LMP within the last 6 days legitimately
+    // dates to week 0, and a woman that early is exactly who benefits most
+    // from being enrolled. Everything downstream treats pregnancy_week with
+    // explicit null checks rather than truthiness so a stored 0 is a real
+    // value, not "unset" — see userManager.getUserContext.
+    if (w >= 0 && w <= 42) return { weeks: w };
   }
 
   // Last resort: bare integer in a plausible week range, with no other
@@ -109,7 +114,7 @@ export function parseWeekOrLMP(raw: string): WeekOrLmp | null {
   m = lower.match(/^\s*(\d+)\s*$/);
   if (m) {
     const n = parseInt(m[1] as string, 10);
-    if (n >= 1 && n <= 42) return { weeks: n };
+    if (n >= 0 && n <= 42) return { weeks: n };
   }
 
   return null;

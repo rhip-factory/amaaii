@@ -176,7 +176,7 @@ function tipFor(
   user: Pick<UserWithFlag, 'pregnancy_week'> | null,
   todayJournal: JournalRow | null
 ): { headline: string; body: string } {
-  if (!user || !user.pregnancy_week) {
+  if (!user || user.pregnancy_week == null) {
     return { headline: 'Add your pregnancy week', body: 'Once I know how far along you are, the tips and reminders here become much more useful.' };
   }
   if (todayJournal) {
