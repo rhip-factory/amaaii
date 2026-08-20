@@ -806,7 +806,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const userPhone = req.userPhone as string;
       const grants = (req.body || {}).grants;
       if (grants === null || typeof grants !== 'object' || Array.isArray(grants)) {
-        res.status(400).json({ error: 'invalid_grants', message: 'Body must be { grants: { data_processing?, ai_responses? } }.' });
+        res.status(400).json({ error: 'invalid_grants', message: `Body must be { grants: { ${ALL_PURPOSES.join('?, ')}? } }.` });
         return;
       }
       const entries = Object.entries(grants as Record<string, unknown>);

@@ -128,6 +128,7 @@ export default function PrivacySection() {
   const [consentLoading, setConsentLoading] = useState(true);
   const [consentError, setConsentError] = useState<string | null>(null);
   const [aiSaving, setAiSaving] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
 
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [activityLoading, setActivityLoading] = useState(true);
@@ -173,6 +174,33 @@ export default function PrivacySection() {
   const dataProcessingActive =
     consent?.purposes.find((p) => p.purpose === "data_processing")?.active ?? false;
   const aiActive = consent?.purposes.find((p) => p.purpose === "ai_responses")?.active ?? false;
+  const providerActive =
+    consent?.purposes.find((p) => p.purpose === "provider_access")?.active ?? false;
+
+  // Stage B. Without this control the provider portal tells a facility that a
+  // mother "can grant access anytime from her own privacy settings" — while
+  // the settings screen offered no way to do it. The API always accepted the
+  // purpose; only the UI was missing. This is also the switch that makes her
+  // record appear in her hospital's panel, so it is the one place where the
+  // consequence must be stated plainly rather than left implied.
+  async function onToggleProvider() {
+    if (providerSaving || !consent) return;
+    setProviderSaving(true);
+    setConsentError(null);
+    try {
+      const updated = providerActive
+        ? await revokeConsentPurpose("provider_access")
+        : await submitConsent({ provider_access: true });
+      setConsent(updated);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return;
+      setConsentError(
+        err instanceof ApiError ? err.message : "Could not update your sharing preference. Please try again."
+      );
+    } finally {
+      setProviderSaving(false);
+    }
+  }
 
   async function onToggleAi() {
     if (aiSaving || !consent) return;
@@ -281,6 +309,28 @@ export default function PrivacySection() {
                 className={`${styles.switch} ${aiActive ? styles.switchOn : ""}`}
                 onClick={onToggleAi}
                 disabled={aiSaving || consentLoading}
+              >
+                <span className={styles.switchKnob} />
+              </button>
+            </div>
+
+            <div className={styles.consentRow}>
+              <div>
+                <p className={styles.consentLabel}>Share my record with my clinic</p>
+                <p className={styles.consentSub}>
+                  Optional — lets the hospital or clinic you&rsquo;re enrolled with see your
+                  check-ins, trends, and danger-sign alerts. Off by default, and you can turn it
+                  off again anytime.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={providerActive}
+                aria-label="Share my record with my clinic"
+                className={`${styles.switch} ${providerActive ? styles.switchOn : ""}`}
+                onClick={onToggleProvider}
+                disabled={providerSaving || consentLoading}
               >
                 <span className={styles.switchKnob} />
               </button>
