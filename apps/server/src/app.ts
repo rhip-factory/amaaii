@@ -16,6 +16,7 @@ import {
   getTodaysJournal,
   getTodaysJournals,
   getJournalHistory,
+  getLastJournalAt,
   createOrUpdateJournal,
   findJournalByClientEntryId,
   getConversationHistory,
@@ -1623,11 +1624,16 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const pregnancyWeek = user?.pregnancy_week ?? null;
       const riskLevel = computeProviderRiskLevel(trend, escalations);
       const redFlags7d = trend ? trend.redFlagDays : 0;
-      // journals is already ordered by date DESC (getJournalHistory) —
-      // [0] is the most recent day within the window; a mother whose
-      // last check-in predates the window simply reads null here rather
-      // than a stale, potentially-misleading date.
-      const lastCheckInAt = journals[0] ? (journals[0].completed_at ?? journals[0].started_at ?? null) : null;
+      // Unwindowed on purpose. This used to read journals[0] from the
+      // 7-day fetch above, on the reasoning that "a mother whose last
+      // check-in predates the window simply reads null rather than a
+      // stale date" — but null here does not mean "stale", it means
+      // "never checked in" to assessTriage, which is a different and
+      // much less urgent thing. A mother silent for 9 days was therefore
+      // reported as "No check-ins recorded yet" and sorted BELOW a mother
+      // silent for 3, inverting the exact signal this feature exists to
+      // surface. Observed on the live panel with real seeded data.
+      const lastCheckInAt = await getLastJournalAt(phone);
       const ancVisits = user?.anc_visits ?? null;
 
       row.pregnancyWeek = pregnancyWeek;

@@ -96,6 +96,39 @@ async function seedConsentedMotherWithEscalation(
   return phone;
 }
 
+/** Enrolls `rawPhone`, grants provider_access, and records ONE completed
+ *  check-in exactly `daysAgo` days back. Used to exercise the quiet-days
+ *  triage signal across the panel's 7-day clinical window boundary. */
+async function enrolledConsentedMotherWithCheckIn(
+  app: import('express').Express,
+  facilityId: number,
+  providerTok: string,
+  rawPhone: string,
+  daysAgo: number
+): Promise<string> {
+  const { phone } = await motherPhoneAndToken(app, rawPhone);
+  await request(app)
+    .post('/provider/enroll')
+    .set('Authorization', `Bearer ${providerTok}`)
+    .send({ phone: rawPhone });
+  await db.recordConsent(phone, 'provider_access', true, CONSENT_VERSION);
+
+  const at = new Date();
+  at.setDate(at.getDate() - daysAgo);
+  const ymd = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+  await db.createOrUpdateJournal(phone, {
+    date: ymd,
+    journal_stage: 'completed',
+    emotional_state: 7,
+    sleep_hours: 7,
+    physical_symptoms: 'none',
+    completed: 1,
+    started_at: at.toISOString(),
+    completed_at: at.toISOString(),
+  });
+  return phone;
+}
+
 // --- PRIVACY FIX: GET /provider/summary escalations7d -----------------------
 
 describe('GET /provider/summary — escalations7d PRIVACY FIX (P6)', () => {
@@ -482,5 +515,61 @@ describe('GET /provider/cohort', () => {
 
     const res = await request(app).get('/provider/cohort').set('Authorization', `Bearer ${providerTok}`);
     expect(res.body).toEqual({ suppressed: true, minimumN: MIN_COHORT_N, cohortSize: 2 });
+  });
+});
+
+// --- Quiet-days signal must survive a long silence -------------------------
+
+describe('GET /provider/patients — lastCheckInAt is unwindowed (P6 fix)', () => {
+  it('reports a mother silent for 9 days as quiet, NOT as "never checked in", and ranks her above one silent for 3', async () => {
+    const app = createApp();
+    const { provider, password, facility } = await seedFacilityAndProvider();
+    const providerTok = await providerToken(app, provider.email, password);
+
+    // The panel's clinical fields come from a 7-DAY window. Deriving
+    // "last check-in" from that same fetch made anyone quieter than the
+    // window look like she had never checked in at all — which scores as
+    // a different, weaker signal and sorted her BELOW a more recently
+    // active mother. That is backwards: the longest silence is the one a
+    // midwife most needs to chase.
+    const quiet9 = await enrolledConsentedMotherWithCheckIn(app, facility.id, providerTok, freshPhone(), 9);
+    const quiet3 = await enrolledConsentedMotherWithCheckIn(app, facility.id, providerTok, freshPhone(), 3);
+
+    const res = await request(app)
+      .get('/provider/patients')
+      .set('Authorization', `Bearer ${providerTok}`);
+    expect(res.status).toBe(200);
+
+    const rowFor = (phone: string) =>
+      res.body.patients.find((p: { phone: string }) => p.phone === phone);
+
+    const nine = rowFor(quiet9);
+    const three = rowFor(quiet3);
+    expect(nine.lastCheckInAt).toBeTruthy();
+    expect(nine.triage.reasons.join(' ')).toMatch(/No check-in in 9 days/);
+    expect(nine.triage.reasons.join(' ')).not.toMatch(/never|No check-ins recorded yet/i);
+    // Longer silence must outrank shorter silence.
+    expect(nine.triage.score).toBeGreaterThan(three.triage.score);
+  });
+
+  it('still reports a mother with genuinely zero check-ins as never having checked in', async () => {
+    const app = createApp();
+    const { provider, password, facility } = await seedFacilityAndProvider();
+    const providerTok = await providerToken(app, provider.email, password);
+
+    const rawPhone = freshPhone();
+    const { phone } = await motherPhoneAndToken(app, rawPhone);
+    await request(app)
+      .post('/provider/enroll')
+      .set('Authorization', `Bearer ${providerTok}`)
+      .send({ phone: rawPhone });
+    await db.recordConsent(phone, 'provider_access', true, CONSENT_VERSION);
+
+    const res = await request(app)
+      .get('/provider/patients')
+      .set('Authorization', `Bearer ${providerTok}`);
+    const row = res.body.patients.find((p: { phone: string }) => p.phone === phone);
+    expect(row.lastCheckInAt).toBeNull();
+    expect(row.triage.reasons.join(' ')).toMatch(/No check-ins recorded yet/);
   });
 });

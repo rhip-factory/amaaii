@@ -174,6 +174,12 @@ export async function getJournalHistory(userPhone: string, days = 7): Promise<Jo
   return adapter.journals.getJournalHistory(userPhone, days);
 }
 
+/** Unwindowed "when did she last check in" — see the JournalRepository doc
+ *  comment for why a windowed getJournalHistory() cannot answer this. */
+export async function getLastJournalAt(userPhone: string): Promise<string | null> {
+  return adapter.journals.getLastJournalAt(userPhone);
+}
+
 export async function getJournalAnalytics(userPhone: string, days = 7): Promise<JournalAnalytics> {
   return adapter.journals.getJournalAnalytics(userPhone, days);
 }

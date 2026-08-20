@@ -161,6 +161,22 @@ export interface JournalRepository {
   getJournalHistory(userPhone: string, days?: number): Promise<JournalRow[]>;
   getJournalAnalytics(userPhone: string, days?: number): Promise<JournalAnalytics>;
   /**
+   * Timestamp of this user's most recent check-in, with NO date window —
+   * or null if she has genuinely never checked in.
+   *
+   * Exists because "when did she last check in?" cannot be answered from
+   * a windowed getJournalHistory() call: the provider panel derived it
+   * from a 7-day fetch, so a mother silent for 9 days came back with an
+   * empty history and was reported as "No check-ins recorded yet". That
+   * inverts the triage signal — the mother who has been quiet LONGEST,
+   * the one most worth chasing, looked like an unknown and sorted below
+   * someone quiet for three days. The distinction between "never" and
+   * "not for a long time" is exactly what the quiet-days signal is about,
+   * so it needs an unwindowed read. Cheap: a single MAX() on an indexed
+   * column, not a row scan.
+   */
+  getLastJournalAt(userPhone: string): Promise<string | null>;
+  /**
    * Idempotency lookup for the PWA structured check-in form (P2-C):
    * finds the journal row previously written for this (userPhone,
    * clientEntryId) pair, if any — backed by the partial UNIQUE index on
