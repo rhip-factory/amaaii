@@ -7,7 +7,8 @@
 // — matches the existing profile form's min/max). The ribbon itself is
 // scaled to a standard 40-week term per the design brief, independent of
 // that input ceiling.
-export const WEEK_MIN = 1;
+// 0 is a real week: an LMP within the last 6 days dates to week 0.
+export const WEEK_MIN = 0;
 export const WEEK_MAX = 42;
 export const RIBBON_WEEKS = 40;
 
@@ -95,7 +96,7 @@ export function resolveGestationalWeek(source: WeekSource | null | undefined): n
       if (week >= WEEK_MIN && week <= WEEK_MAX) return week;
     }
   }
-  if (typeof source.pregnancy_week === "number" && source.pregnancy_week > 0) {
+  if (typeof source.pregnancy_week === "number" && source.pregnancy_week >= 0) {
     return source.pregnancy_week;
   }
   return null;

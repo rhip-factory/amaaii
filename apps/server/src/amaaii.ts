@@ -167,7 +167,7 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     // Compact USER_CONTEXT block — what the AI should "remember".
     const ctxLines: string[] = [];
     if (firstName) ctxLines.push(`Name: ${firstName}`);
-    if (pregnancyWeek) ctxLines.push(`Pregnancy week: ${pregnancyWeek}`);
+    if (pregnancyWeek != null) ctxLines.push(`Pregnancy week: ${pregnancyWeek}`);
     if (location) ctxLines.push(`Location: ${location}`);
     if (trendLine) ctxLines.push(`Recent 7d: ${trendLine}`);
     if (medicalHistory && Object.keys(medicalHistory).length > 0) {

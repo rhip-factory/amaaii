@@ -148,7 +148,7 @@ class JournalManager {
     const journalData = dbSession.journalData || {};
     const journalId = dbSession.journalId || null;
     const user = await db.getUser(userPhone);
-    const pregnancyWeek = (user && user.pregnancy_week) || 0;
+    const pregnancyWeek = user?.pregnancy_week ?? 0;
     const lang = pickLang(user && user.language);
 
     let nextStage: JournalStage | undefined;
@@ -431,7 +431,7 @@ class JournalManager {
     let report = `**Pregnancy Health Report**\n`;
     report += `Patient: ${user!.name || 'Not provided'}\n`;
     report += `Age: ${user!.age || 'Not provided'}\n`;
-    report += `Current Week: ${user!.pregnancy_week || 'Not provided'}\n`;
+    report += `Current Week: ${user!.pregnancy_week ?? 'Not provided'}\n`;
     report += `Report Period: Last ${days} days\n\n`;
 
     report += `**Summary of Symptoms:**\n`;

@@ -580,7 +580,11 @@ async function handleOnboarding(
     return t(lang, 'age_prompt_again', { name: user.name });
   }
 
-  if (!user.pregnancy_week) {
+  // `== null` rather than `!user.pregnancy_week`: week 0 is a VALID stored
+  // value (an LMP within the last 6 days), and truthiness would treat it as
+  // unset — re-asking this question forever and never reaching the location
+  // step. Same reason for every other pregnancy_week check in this codebase.
+  if (user.pregnancy_week == null) {
     let parsed = parseWeekOrLMP(message);
 
     // 3-strikes LLM fallback: if regex missed AND the bot has already
@@ -600,15 +604,21 @@ async function handleOnboarding(
         if (out && (out.weeks || out.lmp)) {
           if (out.lmp) {
             const wk = userManager.calculatePregnancyWeek(out.lmp);
-            if (wk !== null && wk >= 1 && wk <= 42) parsed = { weeks: wk, lmp: out.lmp };
-          } else if (out.weeks) {
+            if (wk !== null && wk >= 0 && wk <= 42) parsed = { weeks: wk, lmp: out.lmp };
+          } else if (out.weeks != null) {
             parsed = { weeks: out.weeks };
           }
         }
       }
     }
 
-    if (parsed && parsed.weeks && parsed.weeks >= 1 && parsed.weeks <= 42) {
+    // `parsed.weeks != null` rather than truthiness — this is the exact line
+    // that used to silently reject week 0: an LMP six days ago parses
+    // correctly to {weeks: 0}, the falsy 0 short-circuited before the range
+    // check, and the user got the generic "I didn't catch that" re-prompt
+    // blaming their date FORMAT for something the parser had understood
+    // perfectly. Observed in production onboarding.
+    if (parsed && parsed.weeks != null && parsed.weeks >= 0 && parsed.weeks <= 42) {
       const edd = parsed.lmp
         ? userManager.calculateEDD(parsed.lmp)
         : calculateEDDFromWeeks(parsed.weeks);
