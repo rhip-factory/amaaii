@@ -1,14 +1,38 @@
-// Pure consent domain logic (P3-A) — Kenya Data Protection Act
-// compliance foundation. LOCKED product decision: two-tier consent, not
-// three. 'data_processing' is REQUIRED — storing profile/journals/
+// Pure consent domain logic (P3-A, extended P5-A) — Kenya Data Protection
+// Act compliance foundation. LOCKED product decision: two TIERS of
+// consent — REQUIRED and OPTIONAL — not two PURPOSES. "Two-tier" names
+// the tier structure, not a fixed purpose count; the purpose list inside
+// each tier can and does grow (P5-A added a third purpose, still just
+// two tiers). 'data_processing' is REQUIRED — storing profile/journals/
 // conversations is what makes the app function at all, so there is no
 // meaningful "decline but keep using it" state for this purpose.
-// 'ai_responses' is OPTIONAL — sending the user's messages to OpenAI for
-// AI replies; declining it still leaves every deterministic feature
-// (structured journaling, danger detection, canned replies) working.
-// Cross-border transfer (the AI purpose's US-based processor) is
-// DISCLOSED in the privacy notice, not a separate consent purpose —
-// that's what keeps this a two-tier model instead of three.
+// 'ai_responses' and 'provider_access' are both OPTIONAL — declining
+// either turns off exactly the one feature it gates (the LLM chokepoint,
+// or a hospital's read access to this mother's clinical record) and
+// nothing else.
+//
+// PROCESSOR vs. CONTROLLER — why 'provider_access' is a real consent
+// purpose while cross-border AI transfer is only a disclosure (P5-A):
+// OpenAI is a PROCESSOR acting strictly on Amaaii's own instructions,
+// under Amaaii's own lawful basis for data_processing — it never decides
+// its own purposes for the data, so the Kenya DPA treats sending it a
+// message as something Amaaii DISCLOSES in the privacy notice, not
+// something the data subject must separately consent to. A hospital
+// enrolled via the provider portal (P5-A) is the opposite relationship:
+// once a mother consents, the facility receives her clinical data and
+// then decides its OWN purposes for holding it (treatment records, its
+// own retention policy) — that makes it an independent DPA CONTROLLER,
+// not Amaaii's processor. The Act requires the data subject's own
+// consent before an independent controller may receive her data, which
+// is exactly what the 'provider_access' purpose exists to capture.
+//
+// P5-A deliberately did NOT bump CONSENT_VERSION when adding this
+// purpose (see CONSENT_VERSION's own doc comment below) — a version bump
+// forces re-consent on EVERY purpose across the whole user base, which
+// would be a disproportionate way to introduce one new, entirely opt-in
+// purpose that changes nothing for a mother who never interacts with a
+// provider. A brand-new purpose with zero ledger rows is already
+// correctly "not granted" everywhere below without any version bump.
 //
 // Everything here is deterministic given its inputs: no I/O, no
 // Date.now(), no crypto, no randomness — same "pure given its inputs"
@@ -40,8 +64,10 @@
  */
 export const CONSENT_VERSION = 1;
 
-/** The two consent purposes in the locked two-tier model. */
-export type ConsentPurpose = 'data_processing' | 'ai_responses';
+/** The consent purposes in the locked two-tier model (see the file
+ *  header for "two tiers, not two purposes" — this list grew to three
+ *  purposes in P5-A without changing the tier structure). */
+export type ConsentPurpose = 'data_processing' | 'ai_responses' | 'provider_access';
 
 /**
  * Purposes the app cannot function without. Declining/revoking any of
@@ -54,9 +80,12 @@ export const REQUIRED_PURPOSES: ConsentPurpose[] = ['data_processing'];
 
 /**
  * Purposes the app degrades gracefully without. Declining one of these
- * turns off exactly the feature it names and nothing else.
+ * turns off exactly the feature it names and nothing else. 'ai_responses'
+ * turns off the LLM chokepoint; 'provider_access' (P5-A) turns off a
+ * healthcare provider's ability to read this mother's clinical record —
+ * every mother-facing feature keeps working with either declined.
  */
-export const OPTIONAL_PURPOSES: ConsentPurpose[] = ['ai_responses'];
+export const OPTIONAL_PURPOSES: ConsentPurpose[] = ['ai_responses', 'provider_access'];
 
 /**
  * One purpose's current status, already reconstructed from the ledger

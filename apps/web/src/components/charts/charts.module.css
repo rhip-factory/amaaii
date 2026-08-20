@@ -269,12 +269,20 @@
      large standalone number. */
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 24px;
+  /* Scales down a little in narrow tiles so long values keep fitting on one
+     line where they can. */
+  font-size: clamp(19px, 1.1vw + 14px, 24px);
   color: var(--ink);
   line-height: 1.15;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Deliberately NOT `white-space: nowrap` + `text-overflow: ellipsis`.
+     A stat tile exists to show its number, so clipping that number is the
+     one thing it must never do. The old rule rendered the provider panel's
+     revenue tile as "KES 15,0…" (135px of text in a 125px box) — and it got
+     worse, not better, as the figure grew, which is exactly backwards for a
+     tile whose whole job is showing revenue scale. Long values now wrap
+     instead; break-word is a last-resort guard for an unbroken string with
+     nowhere to wrap. */
+  overflow-wrap: break-word;
 }
 
 .tileHint {

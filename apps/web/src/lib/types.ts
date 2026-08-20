@@ -167,7 +167,10 @@ export interface JournalHistoryResponse {
 // consent.ts's ConsentPurpose/buildConsentView). Read directly, not
 // invented — see CLAUDE.md's "Repository pattern" / consent notes.
 
-export type ConsentPurpose = "data_processing" | "ai_responses";
+// provider_access (Stage B) gates whether a healthcare facility the mother
+// is enrolled with may open her clinical record. Optional tier: declining
+// leaves every mother-facing feature working, it only keeps the hospital out.
+export type ConsentPurpose = "data_processing" | "ai_responses" | "provider_access";
 
 export interface ConsentPurposeView {
   purpose: ConsentPurpose;
@@ -191,6 +194,7 @@ export interface ConsentResponse {
 export interface ConsentGrants {
   data_processing?: boolean;
   ai_responses?: boolean;
+  provider_access?: boolean;
 }
 
 // --- Activity / audit log (P3-D) -----------------------------------------

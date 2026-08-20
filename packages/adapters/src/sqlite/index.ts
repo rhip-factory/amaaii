@@ -17,6 +17,9 @@ import { SqliteOtpRepository } from './otpRepository';
 import { SqliteConsentRepository } from './consentRepository';
 import { SqliteAuditRepository } from './auditRepository';
 import { SqliteJobRepository } from './jobRepository';
+import { SqliteFacilityRepository } from './facilityRepository';
+import { SqliteProviderRepository } from './providerRepository';
+import { SqliteEnrollmentRepository } from './enrollmentRepository';
 import { eraseUserData } from './erasure';
 
 export * from './connection';
@@ -31,6 +34,9 @@ export * from './otpRepository';
 export * from './consentRepository';
 export * from './auditRepository';
 export * from './jobRepository';
+export * from './facilityRepository';
+export * from './providerRepository';
+export * from './enrollmentRepository';
 export * from './erasure';
 
 /**
@@ -54,6 +60,9 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
     consents: new SqliteConsentRepository(db),
     audit: new SqliteAuditRepository(db),
     jobs: new SqliteJobRepository(db),
+    facilities: new SqliteFacilityRepository(db),
+    providers: new SqliteProviderRepository(db),
+    enrollments: new SqliteEnrollmentRepository(db),
     initialize: () => initializeSchema(db),
     close: () =>
       new Promise<void>((resolve, reject) => {

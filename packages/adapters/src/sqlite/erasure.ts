@@ -28,6 +28,14 @@ import type sqlite3 from 'sqlite3';
 // payload never carried a phone (none exist today, but a future job
 // type might not) simply has user_phone=NULL and is untouched by this
 // DELETE, same as it would be by any other WHERE-clause-scoped erasure.
+//
+// enrollments (P5-A, provider portal): same jobs-precedent — matched on
+// its own `user_phone` column so a deleted mother stops appearing in a
+// hospital's patient panel. `facilities`/`providers` are deliberately
+// ABSENT from this list — they're the hospital's own staff/organisation
+// records (a separate DPA controller's data, not the mother's; see
+// packages/core/src/consent.ts's header), so a mother's erasure request
+// has nothing to do with them.
 const ERASURE_TARGETS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'conversations', column: 'user_phone' },
   { table: 'symptoms', column: 'user_phone' },
@@ -38,6 +46,7 @@ const ERASURE_TARGETS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'otp_codes', column: 'phone' },
   { table: 'consents', column: 'user_phone' },
   { table: 'jobs', column: 'user_phone' },
+  { table: 'enrollments', column: 'user_phone' },
   { table: 'users', column: 'phone_number' },
 ];
 

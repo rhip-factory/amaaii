@@ -141,6 +141,17 @@ export function SendIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// P5-B: provider portal's "awaiting her consent" / consent-gated states
+// (patient panel rows, the 403 patient-detail panel).
+export function LockIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <rect x="4" y="11" width="16" height="9" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </Base>
+  );
+}
+
 export function WifiOffIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Base {...props}>

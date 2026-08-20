@@ -469,6 +469,106 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_jobs_status_run_at ON jobs(status, run_at)`,
         (err) => {
           if (err) log.error('Error creating jobs status/run_at index', err);
+        }
+      );
+
+      // --- Provider portal (P5-A, Stage B demo slice) -----------------------
+      // See packages/core/src/repositories.ts's "Provider portal" section
+      // for the full rationale. Brand-new tables (no prior schema to
+      // migrate), so — unlike users/journals/jobs above — there's no
+      // PRAGMA-based "does this column already exist" dance here; a
+      // plain CREATE TABLE IF NOT EXISTS is enough.
+
+      // Hospital/facility record. `code` is the short human-readable
+      // identifier staff actually use ('KNH-001'), UNIQUE so it can
+      // double as a lookup key.
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS facilities (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          code TEXT NOT NULL UNIQUE,
+          county TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating facilities table', err);
+        }
+      );
+
+      // Staff/provider login record. password_hash is always
+      // `scrypt$<saltHex>$<hashHex>` (apps/server/src/providerAuth.ts) —
+      // never plaintext. email is UNIQUE — it's also the login identifier.
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS providers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          facility_id INTEGER NOT NULL REFERENCES facilities(id),
+          email TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          role TEXT NOT NULL,
+          license_number TEXT,
+          password_hash TEXT NOT NULL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating providers table', err);
+        }
+      );
+
+      db.run(`CREATE INDEX IF NOT EXISTS idx_providers_facility_id ON providers(facility_id)`, (err) => {
+        if (err) log.error('Error creating providers facility_id index', err);
+      });
+
+      // A facility's enrollment of one mother into its ANC bundle. THE
+      // ONE mother-keyed table in this section — see erasure.ts's
+      // ERASURE_TARGETS, which clears this on DELETE /me/account the
+      // same way it clears `jobs` (P4-B precedent). UNIQUE(facility_id,
+      // user_phone): a facility can enroll a given phone at most once,
+      // ever — see EnrollmentRepository#enroll's doc comment in
+      // packages/core/src/repositories.ts for what that means for a
+      // lapsed ('ended') enrollment.
+      //
+      // price_kes (default 5000) is the ANNUAL per-mother subscription
+      // price, per the shareholder pricing model this whole demo exists
+      // to validate ("Ksh 5,000 for 12 months, ~Ksh 416/month") — NOT a
+      // monthly figure. GET /provider/summary derives monthlyRevenueKes
+      // by DIVIDING this by 12, never by multiplying it — get the
+      // direction backwards and you overstate annual revenue 12x, a bug
+      // that shipped once already (see that route's own comment).
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS enrollments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          facility_id INTEGER NOT NULL REFERENCES facilities(id),
+          user_phone TEXT NOT NULL,
+          enrolled_by INTEGER,
+          status TEXT NOT NULL DEFAULT 'active',
+          plan TEXT NOT NULL DEFAULT 'anc_bundle',
+          price_kes INTEGER NOT NULL DEFAULT 5000,
+          enrolled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          ended_at DATETIME,
+          UNIQUE(facility_id, user_phone)
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating enrollments table', err);
+        }
+      );
+
+      // Backs GET /provider/patients' `WHERE facility_id = ?` panel scan.
+      db.run(`CREATE INDEX IF NOT EXISTS idx_enrollments_facility_id ON enrollments(facility_id)`, (err) => {
+        if (err) log.error('Error creating enrollments facility_id index', err);
+      });
+
+      // Backs erasure.ts's `DELETE FROM enrollments WHERE user_phone = ?`
+      // — same idx_jobs_user_phone precedent from P4-B.
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_enrollments_user_phone ON enrollments(user_phone)`,
+        (err) => {
+          if (err) log.error('Error creating enrollments user_phone index', err);
           else resolve();
         }
       );

@@ -1,0 +1,164 @@
+.toggleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(124, 71, 175, 0.22);
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+.toggleBtn:hover {
+  background: var(--deep-press);
+}
+.toggleBtn:active {
+  transform: translateY(1px);
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cardTitle {
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.cardSub {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.closeBtn {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+}
+.closeBtn:hover {
+  color: var(--deep);
+  background: var(--lavender-soft);
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 520px) {
+  .fieldRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.field input {
+  border: 1.5px solid var(--lavender);
+  background: var(--shell-bg);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.field input:focus {
+  border-color: var(--mid);
+  background: #fff;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 2px;
+}
+
+.submitBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.submitBtn:hover:not(:disabled) {
+  background: var(--deep-press);
+}
+.submitBtn:disabled {
+  background: var(--mid);
+  cursor: progress;
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fee6e6;
+  color: #6e1f1f;
+  font-size: 13px;
+}
+
+/* Success is deliberately calm, not a loud green banner (this brand has
+   no green in its palette — see tokens.css) — and it tells the provider
+   plainly whether consent is already active or still pending, since
+   enrollment never implies consent. */
+.success {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.success strong {
+  color: var(--ink);
+}

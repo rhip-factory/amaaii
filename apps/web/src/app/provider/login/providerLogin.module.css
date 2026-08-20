@@ -1,0 +1,143 @@
+/* Deliberately near-identical to app/login/login.module.css (same card
+   chrome, same lavender-to-white gradient page background) so a
+   provider and a mother recognise this as the same product family —
+   the eyebrow tag + copy are what distinguish the two audiences, not a
+   different visual language. */
+
+.page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px 16px;
+  background: linear-gradient(160deg, #f2ecfa 0%, #fbfafd 60%, #ffffff 100%);
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 20px;
+  padding: 36px 32px 28px;
+  box-shadow: var(--shadow-2);
+  text-align: center;
+  border: 1px solid var(--lavender);
+}
+
+.lockup {
+  height: 34px;
+  width: auto;
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  color: var(--deep);
+  letter-spacing: -0.01em;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.label {
+  display: block;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.inputRow {
+  border: 1.5px solid var(--lavender);
+  border-radius: 12px;
+  background: var(--shell-bg);
+  overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  margin-bottom: 16px;
+}
+.inputRow:focus-within {
+  border-color: var(--mid);
+  background: #fff;
+}
+.inputRow input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  padding: 14px 14px;
+  color: var(--ink);
+}
+
+.error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fee6e6;
+  color: #6e1f1f;
+  font-size: 13px;
+  text-align: left;
+}
+
+.submitBtn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.12s ease;
+  box-shadow: 0 6px 18px rgba(124, 71, 175, 0.22);
+}
+.submitBtn:hover:not(:disabled) {
+  background: var(--deep-press);
+}
+.submitBtn:active {
+  transform: translateY(1px);
+}
+.submitBtn:disabled {
+  background: var(--mid);
+  cursor: progress;
+  box-shadow: none;
+}
+
+.fineprint {
+  margin: 18px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.foot {
+  margin-top: 24px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}

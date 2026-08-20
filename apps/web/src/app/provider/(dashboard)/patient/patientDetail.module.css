@@ -1,0 +1,259 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  align-self: flex-start;
+}
+.backLink:hover {
+  color: var(--deep);
+}
+
+.skeleton {
+  height: 220px;
+  border-radius: 18px;
+  background: linear-gradient(90deg, var(--lavender-soft) 0%, #fff 50%, var(--lavender-soft) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+.errorNote {
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+/* ---- Patient header --------------------------------------------------- */
+
+.headerCard {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: var(--shadow-1);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 26px;
+  color: var(--ink);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.phone {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.metaChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ---- Consent-gated (403) panel — respectful, not scary. Deliberately
+   uses the SAME calm lavender/lock language as the panel's "Awaiting her
+   consent" row (see panel.module.css) rather than the app's coral
+   danger/error vocabulary — this is a policy boundary working exactly
+   as designed, not a fault. ---- */
+
+.consentPanel {
+  background: var(--lavender-soft);
+  border-radius: 20px;
+  padding: 40px 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.consentIcon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--deep);
+  box-shadow: var(--shadow-1);
+}
+
+.consentTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 21px;
+  color: var(--deep);
+}
+
+.consentBody {
+  margin: 0;
+  max-width: 440px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.consentBackBtn {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.consentBackBtn:hover {
+  background: var(--deep-press);
+}
+
+/* ---- Body sections ------------------------------------------------- */
+
+.chartNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.dateChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dateChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #fdeceb;
+  color: var(--critical);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.dateChip::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--coral);
+  transform: rotate(45deg);
+  flex: none;
+}
+
+.escalationList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.escalationItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--lavender-soft);
+}
+.escalationItem:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+
+.urgencyBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.urgencyCritical {
+  background: #fdeceb;
+  color: var(--critical);
+}
+.urgencyHigh {
+  background: #fdf1e6;
+  color: var(--high);
+}
+.urgencyOther {
+  background: var(--lavender-soft);
+  color: var(--deep);
+}
+
+.escalationTime {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}

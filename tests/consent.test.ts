@@ -35,9 +35,11 @@ describe('consent constants', () => {
     expect(Number.isInteger(CONSENT_VERSION)).toBe(true);
   });
 
-  it('two-tier split: data_processing required, ai_responses optional, no overlap', () => {
+  it('two-tier split: data_processing required, ai_responses + provider_access optional, no overlap', () => {
+    // P5-A added 'provider_access' as a third purpose in the OPTIONAL
+    // tier — see consent.ts's header for "two tiers, not two purposes".
     expect(REQUIRED_PURPOSES).toEqual(['data_processing']);
-    expect(OPTIONAL_PURPOSES).toEqual(['ai_responses']);
+    expect(OPTIONAL_PURPOSES).toEqual(['ai_responses', 'provider_access']);
     const overlap = REQUIRED_PURPOSES.filter((p) => (OPTIONAL_PURPOSES as string[]).includes(p));
     expect(overlap).toEqual([]);
   });

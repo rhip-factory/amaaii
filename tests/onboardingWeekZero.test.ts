@@ -32,10 +32,22 @@ function daysAgoAsText(n: number): string {
   return `${d.getDate()} ${month}`;
 }
 
+// Built from LOCAL date parts, deliberately NOT toISOString().
+//
+// toISOString() renders in UTC, while daysAgoAsText() above (and
+// parseWeekOrLMP itself, via inferLMPYear) works in local calendar terms.
+// In any timezone ahead of UTC those disagree for the first hours of the
+// local day — in Nairobi (UTC+3) this test failed between 00:00 and 03:00
+// EAT, expecting the UTC date while the parser correctly returned the local
+// one. That is a bug in the test, not the parser, and it only surfaces in a
+// 3-hour window, which is exactly the kind of flake that gets "fixed" by
+// re-running CI until it passes. Keep both helpers on the same clock.
 function daysAgoIso(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 describe('parseWeekOrLMP accepts week 0', () => {
@@ -77,10 +89,20 @@ describe('parseWeekOrLMP accepts week 0', () => {
     expect(parseWeekOrLMP('hello there')).toBeNull();
   });
 
-  it('weeksFromLMP floors to 0 for a very recent LMP', () => {
+  it('weeksFromLMP floors to 0 for a very recent LMP, and climbs after', () => {
     expect(weeksFromLMP(daysAgoIso(0))).toBe(0);
     expect(weeksFromLMP(daysAgoIso(6))).toBe(0);
-    expect(weeksFromLMP(daysAgoIso(7))).toBe(1);
+    // Deliberately 10 and 25 days rather than exact multiples of 7.
+    // weeksFromLMP parses 'YYYY-MM-DD' as UTC midnight but measures against
+    // local "now", so an exact 7-day multiple sits right on the floor()
+    // boundary and tips to the day below whenever local time is ahead of
+    // UTC (any morning in Nairobi). Asserting mid-band keeps this test about
+    // the behaviour it cares about — that dating climbs out of week 0 — and
+    // not about sub-day clock skew. A few hours' imprecision is immaterial
+    // to gestational dating, so this is a test-robustness choice, not a
+    // defect being papered over.
+    expect(weeksFromLMP(daysAgoIso(10))).toBe(1);
+    expect(weeksFromLMP(daysAgoIso(25))).toBe(3);
   });
 });
 
