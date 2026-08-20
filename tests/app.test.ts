@@ -186,7 +186,26 @@ describe('apps/server/src/app — wiring smoke test', () => {
         expect(res.status).toBe(401);
         expect(res.type).toBe('application/json');
       });
+
+      it(`the page HTML for ${route} is not cacheable, so the browser cannot replay it to a fetch()`, async () => {
+        // The page and the API share a URL and are told apart by HEADERS,
+        // but an HTTP cache keys on URL. Without this, the browser served
+        // the just-navigated page HTML to the app's own fetch() for the
+        // same path — the escalation feed rendered "No escalations yet"
+        // while curl against the identical endpoint returned two.
+        const app = createApp({ webOutDirOverride: fixtureOutDir });
+        const res = await request(app).get(route);
+        expect(res.headers['cache-control']).toBe('no-store');
+        expect(res.headers['vary']).toContain('X-Amaaii-Api');
+      });
     }
+
+    it('a page with no API twin keeps ordinary caching', async () => {
+      const app = createApp({ webOutDirOverride: fixtureOutDir });
+      const res = await request(app).get('/login');
+      expect(res.status).toBe(200);
+      expect(res.headers['cache-control']).not.toBe('no-store');
+    });
   });
 
   describe('GET /insights page-vs-API discrimination', () => {

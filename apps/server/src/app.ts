@@ -398,6 +398,19 @@ export interface CreateAppOptions {
   enableTestErrorRoute?: boolean;
 }
 
+/**
+ * Paths that are BOTH an exported page and a JSON API on GET, told apart by
+ * request headers (X-Amaaii-Api / Authorization) via the `next('route')`
+ * gates on each route. Because an HTTP cache keys on URL and not headers,
+ * the HTML served for these must carry a Vary — see the static fallback at
+ * the bottom of createApp() for the failure this prevents.
+ *
+ * Keep in sync with the gates themselves. CLAUDE.md once called /insights
+ * "the one page-vs-API GET collision in this app"; the provider portal added
+ * two more, so any new one belongs here too.
+ */
+const PAGE_AND_API_PATHS = new Set(['/insights', '/provider/escalations', '/provider/cohort']);
+
 export function createApp(opts: CreateAppOptions = {}): Express {
   const app = express();
 
@@ -2246,6 +2259,26 @@ export function createApp(opts: CreateAppOptions = {}): Express {
     app.get(/.*/, (req: Request, res: Response) => {
       const urlPath = req.path;
       if (path.extname(urlPath) === '') {
+        // A handful of paths are BOTH an exported page and a JSON API
+        // (/insights, /provider/escalations, /provider/cohort — see the
+        // page-vs-API gates above). The two are told apart by request
+        // HEADERS, but an HTTP cache keys on URL, so without a Vary the
+        // browser will happily replay this HTML document to the app's own
+        // fetch() for the same URL — which is exactly what happened: the
+        // escalation feed rendered "No escalations yet" while curl against
+        // the same endpoint returned two, because the page had just been
+        // navigated to and its HTML was sitting in the cache.
+        //
+        // Vary tells the cache these responses are header-dependent;
+        // no-store on top of it means this document can never be handed to
+        // a subsequent fetch at all. These are authenticated app shells
+        // with no meaningful cache value anyway — the hashed
+        // /_next/static/* assets they pull in are where the caching that
+        // matters happens, and those are untouched by this.
+        if (PAGE_AND_API_PATHS.has(urlPath.replace(/\/$/, '') || '/')) {
+          res.setHeader('Vary', 'X-Amaaii-Api, Authorization');
+          res.setHeader('Cache-Control', 'no-store');
+        }
         res.sendFile(relativeExportHtmlPath(urlPath), { root: webOutDir }, (err) => {
           if (err) send404(res);
         });
