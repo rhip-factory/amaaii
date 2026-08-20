@@ -25,7 +25,20 @@ const db = require('../apps/server/src/database');
 // stores a plaintext password (see repositories.ts's note on ProviderRow).
 const { hashPassword } = require('../apps/server/src/providerAuth');
 
+// The default is a DEMO password and this is a public repo, so anyone can
+// read it. That is acceptable for seeding fictional accounts on a throwaway
+// demo service, and unacceptable anywhere near real patients — so refuse the
+// default outright in production rather than trusting whoever runs this to
+// remember. PROVIDER_PASSWORD must be supplied explicitly there.
 const PASSWORD = process.env.PROVIDER_PASSWORD || 'Amaaii#Demo2026';
+if (!process.env.PROVIDER_PASSWORD && process.env.NODE_ENV === 'production') {
+  console.error(
+    'Refusing to seed provider accounts with the public default password in production.\n' +
+      'Set PROVIDER_PASSWORD explicitly, e.g.\n' +
+      "  PROVIDER_PASSWORD=\"$(openssl rand -base64 24)\" DB_PATH=... node scripts/seed-provider-demo.js"
+  );
+  process.exit(1);
+}
 
 const FACILITY = {
   name: "Nairobi Women's Hospital",
