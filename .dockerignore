@@ -1,0 +1,46 @@
+# Keep the build context small AND keep secrets/local state out of the image.
+#
+# .env is the important line here: the Dockerfile does `COPY . .` into the
+# builder stage, so without this entry the real Twilio/OpenAI credentials
+# would be baked into an image layer — readable by anyone who can pull the
+# image, and not removable by a later RUN rm. Production config is injected
+# as Railway environment variables instead; nothing secret belongs in the
+# build context.
+.env
+.env.*
+!.env.example
+
+# Local SQLite databases. ./amaaii.db may back a live local demo server, and
+# in production the database lives on a mounted volume at /data — a copy
+# baked into the image would be shadowed at best, and stale user data
+# shipped into a container at worst.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Regenerated inside the builder; copying host artifacts risks mixing a
+# host-built native binding (wrong ABI/platform) into the image.
+node_modules
+**/node_modules
+dist
+apps/web/out
+apps/web/.next
+
+# Not needed to build or run the server.
+.git
+.gitignore
+.github
+tests
+scripts/smoke
+coverage
+*.log
+.vscode
+.idea
+.DS_Store
+
+# Docs and planning material — excluded so an edit to a markdown file
+# doesn't invalidate the Docker layer cache and force a full rebuild.
+*.md
+!README.md
+graphify-out

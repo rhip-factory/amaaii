@@ -475,9 +475,31 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   });
 
   // --- Auth -----------------------------------------------------------------
-  // Phase A demo auth: phone-only sign-in, no OTP. Real verification lands
-  // in Phase 3. The token is HMAC-signed so the client can't forge a phone.
+  // Phase A demo auth: phone-only sign-in, no OTP. Superseded by the OTP flow
+  // below. The token is HMAC-signed so the client can't forge a phone.
+  //
+  // SECURITY — DISABLED IN PRODUCTION. This endpoint mints a full 30-day
+  // bearer token from a phone number ALONE: no code, no secret, nothing the
+  // caller has to prove. A phone number is public information, so on a
+  // publicly-reachable deployment this is a complete authentication bypass —
+  // anyone could take a token for any mother's number and then read, export,
+  // or erase her health data through /me, /history, /insights, /me/export and
+  // DELETE /me/account, walking straight past both the OTP challenge and
+  // every Phase 3 data-rights protection.
+  //
+  // It stays available OUTSIDE production because ~12 test files and the
+  // local dev flow use it as a convenient token factory (see
+  // tests/postDeleteReadHardening.test.ts, which specifically pins that this
+  // path does NOT create a users row). Gating on NODE_ENV keeps all of that
+  // working while closing the hole on any real deployment.
+  //
+  // Responds 404 rather than 403 so a production deployment doesn't advertise
+  // that the endpoint exists at all. Pinned by tests/legacyLoginGate.test.ts.
   app.post('/auth/login', (req: Request, res: Response) => {
+    if (process.env.NODE_ENV === 'production') {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
     const { phone } = req.body || {};
     const normalized = auth.normalizePhone(phone);
     if (!normalized) {

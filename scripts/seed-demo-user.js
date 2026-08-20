@@ -22,8 +22,19 @@ const sqlite3 = require('sqlite3').verbose();
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'amaaii.db');
 const RESET = process.argv.includes('--reset');
 
-const PHONE = 'whatsapp:+254700000888';
-const NAME = 'Amina';
+// Phone/name are overridable so the same story arc can be seeded onto a
+// SECOND, real number. This matters for any deployment running with
+// NODE_ENV=production and real Twilio credentials: OTP sign-in there does a
+// genuine WhatsApp delivery (the inline `devCode` fallback is disabled
+// outside dev), so the default +254700000888 — a dummy number that has never
+// joined the Twilio sandbox — can receive no code and therefore cannot be
+// signed into. Seeding a sandbox-joined number as well gives the demo an
+// account that is actually reachable.
+//
+//   SEED_PHONE='whatsapp:+2547XXXXXXXX' SEED_NAME='Amina' \
+//     DB_PATH=... node scripts/seed-demo-user.js
+const PHONE = process.env.SEED_PHONE || 'whatsapp:+254700000888';
+const NAME = process.env.SEED_NAME || 'Amina';
 const AGE = 32;
 const LOCATION = 'Nairobi';
 // Span: 60 days. Story arc start week = 14, end week ≈ 22.5.
