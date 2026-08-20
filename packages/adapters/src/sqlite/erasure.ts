@@ -36,6 +36,12 @@ import type sqlite3 from 'sqlite3';
 // records (a separate DPA controller's data, not the mother's; see
 // packages/core/src/consent.ts's header), so a mother's erasure request
 // has nothing to do with them.
+//
+// escalation_acks (P6, provider triage queue): same enrollments/jobs
+// precedent — a facility's "acknowledged" marker against one of a
+// mother's escalations is still her data, so it goes with her on
+// erasure (see EscalationAckRow's doc comment in
+// packages/core/src/repositories.ts).
 const ERASURE_TARGETS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'conversations', column: 'user_phone' },
   { table: 'symptoms', column: 'user_phone' },
@@ -47,6 +53,7 @@ const ERASURE_TARGETS: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'consents', column: 'user_phone' },
   { table: 'jobs', column: 'user_phone' },
   { table: 'enrollments', column: 'user_phone' },
+  { table: 'escalation_acks', column: 'user_phone' },
   { table: 'users', column: 'phone_number' },
 ];
 

@@ -44,9 +44,29 @@ export interface ProviderSummary {
 export type RiskLevel = "high" | "moderate" | "low";
 export type EnrollmentStatus = "active" | "ended";
 
+// Mirrors packages/core/src/triage.ts's TriageResult#band exactly.
+// Priority order per the P6 spec: 'urgent' > 'watch' > 'ok'.
+export type TriageBand = "urgent" | "watch" | "ok";
+
+// Mirrors packages/core/src/triage.ts's TriageResult, and the exact wire
+// shape apps/server/src/app.ts's buildPatientPanelRow attaches as
+// `row.triage` (confirmed by reading that function directly — not a
+// guess). `reasons` are plain clinical phrases from assessTriage(),
+// verbatim (never empty — a mother with nothing flagged still gets
+// "No concerns flagged recently") — render them as-is, never invent new
+// ones here. `score` exists ONLY as a client-side sort key (see
+// sortForTriageQueue in page.tsx) — the UI must NEVER render this number,
+// only `band` (the "Needs attention" grouping/badge) and `reasons`.
+export interface ProviderTriage {
+  score: number;
+  band: TriageBand;
+  reasons: string[];
+}
+
 // Safe to render WITHOUT `provider_access` consent (enrollment metadata
-// only, per the spec). The clinical fields are present ONLY when
-// consentGranted is true — the panel must never assume they exist.
+// only, per the spec). The clinical fields — including `triage` — are
+// present ONLY when consentGranted is true; a non-consenting row's
+// triage is unknowable, not absent-meaning-fine.
 export interface ProviderPanelRow {
   phone: string;
   displayName: string;
@@ -57,6 +77,7 @@ export interface ProviderPanelRow {
   riskLevel?: RiskLevel;
   lastCheckInAt?: string | null;
   redFlags7d?: number;
+  triage?: ProviderTriage;
 }
 
 export interface ProviderPatientsResponse {
@@ -120,3 +141,89 @@ export interface ProviderEnrollResponse {
    *  OR a status string ("granted"/"pending") both render sensibly. */
   consentStatus: boolean | string;
 }
+
+// ---------------------------------------------------------------------
+// P6 — escalation feed (GET /provider/escalations, POST /provider/escalations/ack)
+// ---------------------------------------------------------------------
+
+// Only enrolled AND consented mothers ever appear here (server-enforced),
+// so unlike ProviderPanelRow every field is always present.
+export interface ProviderEscalationFeedItem {
+  phone: string;
+  displayName: string;
+  /** Only 'critical' | 'high' are ever recorded (auditDangerEscalation's
+   *  own funnel), but kept as `string` — same looseness as the existing
+   *  ProviderEscalation#urgency above — so an unexpected value degrades
+   *  to UrgencyBadge's neutral "other" style instead of a type error. */
+  urgency: string;
+  /** The audit row's created_at — also the natural key POSTed back as
+   *  `escalationAt` on acknowledge (see escalation_acks' UNIQUE constraint). */
+  createdAt: string;
+  acknowledged: boolean;
+  /** providers.id per the escalation_acks schema — a raw id, not a name,
+   *  so the UI only ever renders "acknowledged by you" (compares against
+   *  the signed-in provider's own id) rather than inventing a name for
+   *  someone else's id it has no directory to resolve. */
+  acknowledgedBy?: number;
+  acknowledgedAt?: string;
+}
+
+// Confirmed against apps/server/src/app.ts's GET /provider/escalations
+// handler (`res.json({ escalations: items })`) — not a guess.
+// fetchProviderEscalations in providerApi.ts also accepts a bare array
+// defensively, which costs nothing if this ever changes.
+export interface ProviderEscalationsResponse {
+  escalations: ProviderEscalationFeedItem[];
+}
+
+// POST body for /provider/escalations/ack.
+export interface ProviderAckEscalationRequest {
+  phone: string;
+  escalationAt: string;
+}
+
+// Confirmed against the same route's ack handler
+// (`res.json({ acknowledged: true, acknowledgedBy: ack.acknowledgedBy,
+// acknowledgedAt: ack.acknowledgedAt })`) — always present on success.
+// Still merged with an optimistic client-side fallback in the escalations
+// page's handleAck as defense in depth, not because this is uncertain.
+export interface ProviderAckEscalationResponse {
+  acknowledged: boolean;
+  acknowledgedBy: number;
+  acknowledgedAt: string;
+}
+
+// ---------------------------------------------------------------------
+// P6 — cohort analytics (GET /provider/cohort)
+// ---------------------------------------------------------------------
+
+// Small-cell suppression (core's MIN_COHORT_N, currently 5 per the spec —
+// read `minimumN` off the response rather than hard-coding it here, so
+// this UI stays correct if the backend's threshold ever changes).
+export interface ProviderCohortSuppressed {
+  suppressed: true;
+  minimumN: number;
+  cohortSize: number;
+}
+
+export interface ProviderCohortGestationalBuckets {
+  first: number;
+  second: number;
+  third: number;
+}
+
+// Confirmed against packages/core/src/cohort.ts's CohortStats — field for
+// field. NEVER carries per-mother data (no phones, no names, no per-row
+// arrays) — aggregate-only by construction, safe to project.
+export interface ProviderCohortStats {
+  suppressed: false;
+  cohortSize: number;
+  ancAdherencePct: number;
+  avgMood: number | null;
+  avgSleepHours: number | null;
+  checkInRatePct: number;
+  redFlagMothers: number;
+  gestationalBuckets: ProviderCohortGestationalBuckets;
+}
+
+export type ProviderCohortResponse = ProviderCohortSuppressed | ProviderCohortStats;

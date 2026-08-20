@@ -54,6 +54,16 @@ fs.writeFileSync(path.join(fixtureOutDir, 'index.html'), '<!doctype html><body>A
 fs.writeFileSync(path.join(fixtureOutDir, 'login.html'), '<!doctype html><body>AMAAII_TEST_FIXTURE_LOGIN</body>');
 fs.writeFileSync(path.join(fixtureOutDir, 'insights.html'), '<!doctype html><body>AMAAII_TEST_FIXTURE_INSIGHTS_PAGE</body>');
 fs.writeFileSync(path.join(fixtureOutDir, '404.html'), '<!doctype html><body>AMAAII_TEST_FIXTURE_404</body>');
+// P6: the provider portal added two MORE page-vs-API GET collisions.
+fs.mkdirSync(path.join(fixtureOutDir, 'provider'), { recursive: true });
+fs.writeFileSync(
+  path.join(fixtureOutDir, 'provider', 'escalations.html'),
+  '<!doctype html><body>AMAAII_TEST_FIXTURE_PROVIDER_ESCALATIONS_PAGE</body>'
+);
+fs.writeFileSync(
+  path.join(fixtureOutDir, 'provider', 'cohort.html'),
+  '<!doctype html><body>AMAAII_TEST_FIXTURE_PROVIDER_COHORT_PAGE</body>'
+);
 fs.writeFileSync(path.join(fixtureOutDir, 'sw.js'), '// fixture sw.js\n');
 fs.mkdirSync(path.join(fixtureOutDir, '_next', 'static'), { recursive: true });
 fs.writeFileSync(path.join(fixtureOutDir, '_next', 'static', 'chunk-fixture123.js'), '// fixture hashed chunk\n');
@@ -148,6 +158,35 @@ describe('apps/server/src/app — wiring smoke test', () => {
       expect(res.status).toBe(200);
       expect(res.headers['cache-control']).toBe('public, max-age=31536000, immutable');
     });
+  });
+
+  // P6. /insights was described in CLAUDE.md as "the one page-vs-API GET
+  // collision in this app". The provider portal added two more, and they
+  // shipped WITHOUT the gate: a plain click on the portal's Escalations or
+  // Cohort nav link hit requireProviderAuth and rendered raw
+  // `{"error":"unauthorized"}` JSON instead of the page. Caught by driving a
+  // real navigation against the running server, not by review — which is why
+  // these are pinned here rather than trusted to a comment.
+  describe('provider portal page-vs-API discrimination', () => {
+    for (const [route, marker] of [
+      ['/provider/escalations', 'AMAAII_TEST_FIXTURE_PROVIDER_ESCALATIONS_PAGE'],
+      ['/provider/cohort', 'AMAAII_TEST_FIXTURE_PROVIDER_COHORT_PAGE'],
+    ] as const) {
+      it(`a plain navigation to ${route} falls through to the exported page`, async () => {
+        const app = createApp({ webOutDirOverride: fixtureOutDir });
+        const res = await request(app).get(route);
+        expect(res.status).toBe(200);
+        expect(res.type).toBe('text/html');
+        expect(res.text).toContain(marker);
+      });
+
+      it(`an API call to ${route} reaches the JSON handler and is rejected 401`, async () => {
+        const app = createApp({ webOutDirOverride: fixtureOutDir });
+        const res = await request(app).get(route).set('X-Amaaii-Api', '1');
+        expect(res.status).toBe(401);
+        expect(res.type).toBe('application/json');
+      });
+    }
   });
 
   describe('GET /insights page-vs-API discrimination', () => {

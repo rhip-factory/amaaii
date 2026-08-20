@@ -20,6 +20,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import cardStyles from "@/components/Card.module.css";
 import PageContainer from "@/components/PageContainer";
 import RiskBadge from "@/components/RiskBadge";
+import UrgencyBadge from "@/components/UrgencyBadge";
 import BarChart from "@/components/charts/BarChart";
 import ChartTable from "@/components/charts/ChartTable";
 import LineChart from "@/components/charts/LineChart";
@@ -41,17 +42,6 @@ function sleepScale(points: SeriesPoint[]): { domain: [number, number]; ticks: n
   const top = Math.ceil(max / 2) * 2;
   const step = top / 4;
   return { domain: [0, top], ticks: [step, 2 * step, 3 * step, top] };
-}
-
-// CSS module classes type as `string | undefined` under this project's
-// `noUncheckedIndexedAccess` tsconfig option (it treats a CSS module's
-// index-signature type the same for named as for computed access) —
-// the `?? ""` fallbacks are purely to satisfy that, the keys always
-// exist (they're static classes declared right there in the .module.css).
-function urgencyClass(urgency: string): string {
-  if (urgency === "critical") return styles.urgencyCritical ?? "";
-  if (urgency === "high") return styles.urgencyHigh ?? "";
-  return styles.urgencyOther ?? "";
 }
 
 function PatientDetailInner() {
@@ -287,7 +277,7 @@ function PatientDetailInner() {
             <ul className={styles.escalationList}>
               {detail.recentEscalations.map((esc, i) => (
                 <li key={`${esc.createdAt}-${i}`} className={styles.escalationItem}>
-                  <span className={`${styles.urgencyBadge} ${urgencyClass(esc.urgency)}`}>{esc.urgency}</span>
+                  <UrgencyBadge urgency={esc.urgency} />
                   <span className={styles.escalationTime}>{formatDateTime(esc.createdAt)}</span>
                 </li>
               ))}

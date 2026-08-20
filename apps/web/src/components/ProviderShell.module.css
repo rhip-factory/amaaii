@@ -96,6 +96,41 @@
   border-color: var(--mid);
 }
 
+/* P6: primary nav — Patients / Escalations / Cohort. Underline tabs
+   (deliberately not another pill row — the topbar above already carries
+   two pills (portalTag, facilityPill), a third pill style here would
+   blur into that instead of reading as navigation). */
+.nav {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  padding: 0 20px;
+  background: #fff;
+  border-bottom: 1px solid var(--lavender);
+  overflow-x: auto;
+}
+
+.navLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 13px 14px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -1px; /* sits flush over the header's own border-bottom */
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.navLink:hover {
+  color: var(--deep);
+}
+.navLinkActive {
+  color: var(--deep);
+  border-bottom-color: var(--deep);
+}
+
 .content {
   flex: 1;
   max-width: 1180px;
@@ -111,5 +146,8 @@
   .identity {
     justify-content: space-between;
     width: 100%;
+  }
+  .nav {
+    padding: 0 16px;
   }
 }

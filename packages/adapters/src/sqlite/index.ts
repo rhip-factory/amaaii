@@ -20,6 +20,7 @@ import { SqliteJobRepository } from './jobRepository';
 import { SqliteFacilityRepository } from './facilityRepository';
 import { SqliteProviderRepository } from './providerRepository';
 import { SqliteEnrollmentRepository } from './enrollmentRepository';
+import { SqliteEscalationAckRepository } from './escalationAckRepository';
 import { eraseUserData } from './erasure';
 
 export * from './connection';
@@ -37,6 +38,7 @@ export * from './jobRepository';
 export * from './facilityRepository';
 export * from './providerRepository';
 export * from './enrollmentRepository';
+export * from './escalationAckRepository';
 export * from './erasure';
 
 /**
@@ -63,6 +65,7 @@ export function createSqliteDatabaseAdapter(dbPath?: string): DatabaseAdapter {
     facilities: new SqliteFacilityRepository(db),
     providers: new SqliteProviderRepository(db),
     enrollments: new SqliteEnrollmentRepository(db),
+    escalationAcks: new SqliteEscalationAckRepository(db),
     initialize: () => initializeSchema(db),
     close: () =>
       new Promise<void>((resolve, reject) => {

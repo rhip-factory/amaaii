@@ -229,28 +229,8 @@
   padding-top: 2px;
 }
 
-.urgencyBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: capitalize;
-  white-space: nowrap;
-}
-.urgencyCritical {
-  background: #fdeceb;
-  color: var(--critical);
-}
-.urgencyHigh {
-  background: #fdf1e6;
-  color: var(--high);
-}
-.urgencyOther {
-  background: var(--lavender-soft);
-  color: var(--deep);
-}
+/* Urgency badge itself lives in components/UrgencyBadge.module.css (P6 —
+   shared with the /provider/escalations feed). */
 
 .escalationTime {
   font-size: 12.5px;

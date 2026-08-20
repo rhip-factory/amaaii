@@ -569,6 +569,55 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
         `CREATE INDEX IF NOT EXISTS idx_enrollments_user_phone ON enrollments(user_phone)`,
         (err) => {
           if (err) log.error('Error creating enrollments user_phone index', err);
+        }
+      );
+
+      // --- Escalation acknowledgements (P6, provider triage queue) ---------
+      // A provider's "I've seen this and I'm on it" marker against one of
+      // the SAME 'danger_escalation' audit rows auditDangerEscalation()
+      // already writes (see packages/core/src/repositories.ts's
+      // "Escalation acknowledgements" section for the full rationale —
+      // in particular why escalation_at is a plain string natural key,
+      // not a foreign key to an audit_log id). Brand-new table, so — like
+      // facilities/providers/enrollments above — a plain CREATE TABLE IF
+      // NOT EXISTS is enough; no PRAGMA "does this column exist" dance.
+      //
+      // UNIQUE(facility_id, user_phone, escalation_at): a facility can
+      // acknowledge a given mother's given escalation event at most once
+      // — a second POST /provider/escalations/ack for the same triple is
+      // a no-op (see EscalationAckRepository#ack's doc comment), not a
+      // duplicate row.
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS escalation_acks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          facility_id INTEGER NOT NULL REFERENCES facilities(id),
+          user_phone TEXT NOT NULL,
+          escalation_at TEXT NOT NULL,
+          acknowledged_by INTEGER,
+          acknowledged_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(facility_id, user_phone, escalation_at)
+        )
+      `,
+        (err) => {
+          if (err) log.error('Error creating escalation_acks table', err);
+        }
+      );
+
+      // Backs GET /provider/escalations' `WHERE facility_id = ?` feed scan.
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_escalation_acks_facility_id ON escalation_acks(facility_id)`,
+        (err) => {
+          if (err) log.error('Error creating escalation_acks facility_id index', err);
+        }
+      );
+
+      // Backs erasure.ts's `DELETE FROM escalation_acks WHERE user_phone = ?`
+      // — same idx_jobs_user_phone / idx_enrollments_user_phone precedent.
+      db.run(
+        `CREATE INDEX IF NOT EXISTS idx_escalation_acks_user_phone ON escalation_acks(user_phone)`,
+        (err) => {
+          if (err) log.error('Error creating escalation_acks user_phone index', err);
           else resolve();
         }
       );
