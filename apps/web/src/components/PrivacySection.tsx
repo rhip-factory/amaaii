@@ -63,6 +63,10 @@ function formatRelativeTime(iso: string): string {
 function purposeLabel(purpose: unknown): string {
   if (purpose === "ai_responses") return "AI replies";
   if (purpose === "data_processing") return "storing your health data";
+  if (purpose === "provider_access") return "sharing your record with your clinic";
+  // Falls back to the raw purpose name, which reads as jargon ("You agreed to
+  // provider_access") in a screen whose whole point is being legible to the
+  // person it's about. Add a label here whenever a purpose is added.
   return typeof purpose === "string" ? purpose : "a permission";
 }
 
