@@ -1,0 +1,115 @@
+/* P5-B provider portal chrome — same brand tokens as AppShell.module.css
+   but a single-column layout: the portal is two authed pages (panel +
+   patient detail) reached by a table row and a back link, so it doesn't
+   need AppShell's sidebar/bottom-nav primary navigation. */
+
+.shell {
+  min-height: 100dvh;
+  background: var(--shell-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 24px;
+  background: #fff;
+  border-bottom: 1px solid var(--lavender);
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brandRow img {
+  height: 30px;
+  width: auto;
+}
+
+.portalTag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mid);
+  background: var(--lavender-soft);
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.facilityPill {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--deep);
+  background: var(--lavender-soft);
+  padding: 6px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.providerName {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.role {
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.role::before {
+  content: "· ";
+}
+
+.signOutBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--lavender);
+  border-radius: 10px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.signOutBtn:hover {
+  background: var(--lavender-soft);
+  color: var(--deep);
+  border-color: var(--mid);
+}
+
+.content {
+  flex: 1;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 24px 24px 48px;
+}
+
+@media (max-width: 640px) {
+  .content {
+    padding: 18px 16px 40px;
+  }
+  .identity {
+    justify-content: space-between;
+    width: 100%;
+  }
+}

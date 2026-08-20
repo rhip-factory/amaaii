@@ -567,6 +567,138 @@ export interface JobRepository {
   countByStatus(): Promise<Record<JobStatus, number>>;
 }
 
+// --- Provider portal (P5-A, Stage B demo slice) ------------------------------
+//
+// Hospital/facility staff accounts and their patient enrollments. These
+// three tables are NOT peers of everything above them in this file: only
+// `enrollments` is mother-keyed data (via `user_phone`) and therefore
+// covered by the Kenya DPA erasure right — see DatabaseAdapter#eraseUser's
+// doc comment below. `facilities` and `providers` are the hospital's own
+// staff/organisation records, a separate data CONTROLLER's data, not the
+// mother's — see consent.ts's header for why 'provider_access' is a real
+// consent purpose in the first place (controller vs. processor). They are
+// deliberately absent from erasure.ts's ERASURE_TARGETS.
+//
+// Self-registration (a facility or provider signing itself up) is
+// explicitly out of scope for the Friday demo slice — see the P5 spec's
+// "Out of scope" section. FacilityRepository#create / ProviderRepository
+// #create exist only as a seed/test seam (no HTTP route calls them);
+// production facility/provider rows are created by hand today.
+
+/** Row shape of the `facilities` table. */
+export interface FacilityRow {
+  id: number;
+  name: string;
+  code: string;
+  county: string | null;
+  created_at: string;
+}
+
+export interface CreateFacilityInput {
+  name: string;
+  code: string;
+  county?: string | null;
+}
+
+export interface FacilityRepository {
+  getById(id: number): Promise<FacilityRow | undefined>;
+  getByCode(code: string): Promise<FacilityRow | undefined>;
+  /** Seed/test seam only — see this section's header. */
+  create(input: CreateFacilityInput): Promise<FacilityRow>;
+}
+
+/** Row shape of the `providers` table. `password_hash` is always
+ *  `scrypt$<saltHex>$<hashHex>` (apps/server/src/providerAuth.ts) —
+ *  never a plaintext password. */
+export interface ProviderRow {
+  id: number;
+  facility_id: number;
+  email: string;
+  name: string;
+  role: string;
+  license_number: string | null;
+  password_hash: string;
+  created_at: string;
+}
+
+export interface CreateProviderInput {
+  facilityId: number;
+  email: string;
+  name: string;
+  role: string;
+  licenseNumber?: string | null;
+  /** Already-hashed (apps/server/src/providerAuth.ts#hashPassword) —
+   *  this layer never sees or stores a plaintext password. */
+  passwordHash: string;
+}
+
+export interface ProviderRepository {
+  getById(id: number): Promise<ProviderRow | undefined>;
+  getByEmail(email: string): Promise<ProviderRow | undefined>;
+  /** Seed/test seam only — see this section's header. */
+  create(input: CreateProviderInput): Promise<ProviderRow>;
+}
+
+/** Row shape of the `enrollments` table — the one provider-portal table
+ *  that IS mother data (keyed on `user_phone`), and therefore the one
+ *  covered by DPA erasure (see erasure.ts's ERASURE_TARGETS).
+ *
+ *  `price_kes` (default 5000) is the ANNUAL per-mother subscription
+ *  price — Ksh 5,000/year (~Ksh 416/month) per the shareholder pricing
+ *  model this whole demo exists to validate. It is NOT a monthly figure,
+ *  despite the column living on a row that also has a `plan` name —
+ *  GET /provider/summary (apps/server/src/app.ts) sums this directly for
+ *  annualRevenueKes and only DIVIDES by 12 for monthlyRevenueKes. Get
+ *  that direction backwards (treat price_kes as monthly, multiply by 12)
+ *  and annual revenue is overstated 12x — this is not a hypothetical,
+ *  it shipped once and was caught before the Friday demo. */
+export interface EnrollmentRow {
+  id: number;
+  facility_id: number;
+  user_phone: string;
+  enrolled_by: number | null;
+  status: 'active' | 'ended';
+  plan: string;
+  price_kes: number;
+  enrolled_at: string;
+  ended_at: string | null;
+}
+
+export interface EnrollInput {
+  facilityId: number;
+  userPhone: string;
+  enrolledBy?: number | null;
+  plan?: string;
+  /** ANNUAL price in KES, not monthly — see EnrollmentRow#price_kes's
+   *  doc comment above for the 12x trap this note exists to prevent. */
+  priceKes?: number;
+}
+
+export interface EnrollmentRepository {
+  /**
+   * Inserts a new enrollment row, unless (facility_id, user_phone)
+   * already has one — see connection.ts's `UNIQUE(facility_id,
+   * user_phone)` — in which case this resolves the EXISTING row instead
+   * of inserting a duplicate or throwing. Same "pre-check, then let the
+   * UNIQUE index be the real race guard" shape as JobRepository#enqueue's
+   * dedupeKey handling. A facility therefore has at most ONE enrollment
+   * row per mother, ever — reactivating a lapsed (`status: 'ended'`)
+   * enrollment is a Stage-B follow-up, not built for the Friday slice.
+   */
+  enroll(input: EnrollInput): Promise<EnrollmentRow>;
+  /** Every enrollment (active or ended) at one facility — backs the
+   *  provider portal's patient panel (GET /provider/patients). */
+  getByFacility(facilityId: number): Promise<EnrollmentRow[]>;
+  /**
+   * One facility's enrollment of one mother, or undefined if she was
+   * never enrolled there. This is the boundary check GET
+   * /provider/patients/detail uses so a provider can only look up phones
+   * actually in THEIR OWN panel — not any phone in the database, even
+   * one with active provider_access consent.
+   */
+  getByFacilityAndPhone(facilityId: number, userPhone: string): Promise<EnrollmentRow | undefined>;
+}
+
 // --- Aggregate --------------------------------------------------------------
 
 /**
@@ -587,6 +719,9 @@ export interface DatabaseAdapter {
   consents: ConsentRepository;
   audit: AuditRepository;
   jobs: JobRepository;
+  facilities: FacilityRepository;
+  providers: ProviderRepository;
+  enrollments: EnrollmentRepository;
   /** Creates tables/indexes and runs idempotent migrations. Mirrors
    *  services/database.js#initializeDatabase(). */
   initialize(): Promise<void>;
@@ -619,6 +754,14 @@ export interface DatabaseAdapter {
    * bookkeeping it. Documented here rather than treated as a bug: an
    * erasure request racing a live job is a rare edge case, and there is
    * no way to "cancel" a send that may have already left the process.
+   *
+   * enrollments (P5-A, provider portal) is matched on `user_phone` the
+   * same way — a deleted mother must not linger in a hospital's patient
+   * panel. `facilities`/`providers` are the hospital's OWN staff/org
+   * records (a separate DPA controller's data, not the mother's — see
+   * consent.ts's header), and are deliberately NOT in this cascade: an
+   * enrollment existing in the past doesn't give a hospital's own
+   * account rows anything to do with a mother's erasure request.
    *
    * DELIBERATE TENSION, documented here rather than left implicit:
    * this method does NOT touch `audit_log`. The two DPA obligations

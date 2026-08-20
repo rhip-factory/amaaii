@@ -283,6 +283,33 @@ describe('DELETE /me/account', () => {
     expect(after.pending).toBe(before.pending - 1);
   });
 
+  it('P5-A: also clears the caller\'s enrollments (provider portal), leaving other users\' enrollments intact', async () => {
+    const app = createApp();
+    const { token: tokenA, phone: phoneA } = await seedFullUser(app, freshPhone());
+    const { phone: phoneB } = await seedFullUser(app, freshPhone());
+
+    // facilities/providers are the hospital's own staff/org records, NOT
+    // mother data — see erasure.ts's header — so seeding them directly
+    // through the facade (no HTTP route exists for this; provider
+    // self-registration is out of scope) is the normal way to set this
+    // fixture up, same as tests/providerPortal.test.ts does.
+    const facility = await db.createFacility({ name: 'Erasure Test Hospital', code: `ETH-${Date.now()}`, county: 'Nairobi' });
+    await db.enrollPatient({ facilityId: facility.id, userPhone: phoneA });
+    await db.enrollPatient({ facilityId: facility.id, userPhone: phoneB });
+
+    const before = await db.getEnrollmentsByFacility(facility.id);
+    expect(before).toHaveLength(2);
+
+    const res = await request(app).delete('/me/account').set('Authorization', `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+
+    // Exactly A's enrollment is gone; B's (a different mother, same
+    // facility) survives untouched.
+    const after = await db.getEnrollmentsByFacility(facility.id);
+    expect(after).toHaveLength(1);
+    expect(after[0].user_phone).toBe(phoneB);
+  });
+
   it("isolation: deleting user A leaves user B's data fully intact (mandatory)", async () => {
     const app = createApp();
     const { token: tokenA, phone: phoneA } = await seedFullUser(app, freshPhone());

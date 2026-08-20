@@ -60,6 +60,16 @@ const nextConfig: NextConfig = {
         // sub-paths don't collide with it, same reasoning as /history above.
         { source: "/journal/entries", destination: `${API_ORIGIN}/journal/entries` },
         { source: "/journal/today", destination: `${API_ORIGIN}/journal/today` },
+        // P5-B provider portal. No collision with a page route to worry
+        // about here — the pages are /provider, /provider/login, and
+        // /provider/patient, none of which match any of these API
+        // sub-paths — so unlike /chat and /insights above these don't
+        // need the beforeFiles + header gating workaround.
+        { source: "/provider/auth/:path*", destination: `${API_ORIGIN}/provider/auth/:path*` },
+        { source: "/provider/summary", destination: `${API_ORIGIN}/provider/summary` },
+        { source: "/provider/patients", destination: `${API_ORIGIN}/provider/patients` },
+        { source: "/provider/patients/detail", destination: `${API_ORIGIN}/provider/patients/detail` },
+        { source: "/provider/enroll", destination: `${API_ORIGIN}/provider/enroll` },
       ],
       fallback: [],
     };

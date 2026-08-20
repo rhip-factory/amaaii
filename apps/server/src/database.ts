@@ -15,8 +15,13 @@ import type {
   ConsentRecord,
   ConversationAnalysis,
   ConversationRow,
+  CreateFacilityInput,
+  CreateProviderInput,
   CreateUserInput,
   EnqueueJobInput,
+  EnrollInput,
+  EnrollmentRow,
+  FacilityRow,
   JobRecord,
   JobStatus,
   JournalAnalytics,
@@ -28,6 +33,7 @@ import type {
   MedicalHistoryInput,
   MedicalHistoryRecord,
   OtpRecord,
+  ProviderRow,
   SymptomRow,
   UpdateUserInput,
   UserRow,
@@ -274,4 +280,47 @@ export async function reclaimStuckJobs(now: string, staleMs: number): Promise<nu
 
 export async function countJobsByStatus(): Promise<Record<JobStatus, number>> {
   return adapter.jobs.countByStatus();
+}
+
+// --- Provider portal (P5-A) --------------------------------------------
+// See packages/core/src/repositories.ts's "Provider portal" section for
+// the full contract. facilities/providers are seed/test seams only — no
+// HTTP route creates either (self-registration is out of scope for the
+// Friday demo slice); enrollments is the one mother-keyed table here and
+// the one DELETE /me/account's erasure cascade clears (erasure.ts).
+
+export async function createFacility(input: CreateFacilityInput): Promise<FacilityRow> {
+  return adapter.facilities.create(input);
+}
+
+export async function getFacility(id: number): Promise<FacilityRow | undefined> {
+  return adapter.facilities.getById(id);
+}
+
+export async function getFacilityByCode(code: string): Promise<FacilityRow | undefined> {
+  return adapter.facilities.getByCode(code);
+}
+
+export async function createProvider(input: CreateProviderInput): Promise<ProviderRow> {
+  return adapter.providers.create(input);
+}
+
+export async function getProviderByEmail(email: string): Promise<ProviderRow | undefined> {
+  return adapter.providers.getByEmail(email);
+}
+
+export async function getProviderById(id: number): Promise<ProviderRow | undefined> {
+  return adapter.providers.getById(id);
+}
+
+export async function enrollPatient(input: EnrollInput): Promise<EnrollmentRow> {
+  return adapter.enrollments.enroll(input);
+}
+
+export async function getEnrollmentsByFacility(facilityId: number): Promise<EnrollmentRow[]> {
+  return adapter.enrollments.getByFacility(facilityId);
+}
+
+export async function getEnrollment(facilityId: number, userPhone: string): Promise<EnrollmentRow | undefined> {
+  return adapter.enrollments.getByFacilityAndPhone(facilityId, userPhone);
 }

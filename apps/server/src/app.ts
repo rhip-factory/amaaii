@@ -36,6 +36,11 @@ import {
   eraseUser,
   countJobsByStatus,
   pingDatabase,
+  getFacility,
+  getProviderByEmail,
+  getEnrollmentsByFacility,
+  getEnrollment,
+  enrollPatient,
 } from './database';
 import { getRecentTrend } from './trend';
 import * as llmExtract from './llmExtract';
@@ -43,6 +48,7 @@ import { log } from './logger';
 import twilioSignature from './middleware/twilioSignature';
 import { requestObservability } from './middleware/requestObservability';
 import * as auth from './auth';
+import * as providerAuth from './providerAuth';
 import { generateOtpCode, hashOtpCode, hashesMatch } from './otp';
 import { WEB_OUT_DIR, REPO_ROOT } from './paths';
 import { sendWhatsAppMessage } from '@amaaii/adapters';
@@ -95,6 +101,12 @@ declare global {
   namespace Express {
     interface Request {
       userPhone?: string;
+      // P5-A: set by requireProviderAuth (never by requireAuth — see
+      // providerAuth.ts's header for why the two token types can never
+      // populate each other's fields).
+      providerId?: number;
+      facilityId?: number;
+      providerRole?: string;
     }
   }
 }
@@ -696,7 +708,43 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       res.status(401).json({ error: 'invalid_token' });
       return;
     }
+    // P5-A: a provider token (providerAuth.ts#issueProviderToken) is
+    // signed with the SAME AUTH_SECRET, so it verifies fine on the HMAC
+    // check above alone — its namespaced `provider:<id>` sub is the only
+    // thing distinguishing it from a mother token. Reject explicitly
+    // rather than trusting that downstream code never matches a
+    // `provider:...` string against a users row by coincidence. See
+    // providerAuth.ts's header for the full cross-token boundary and
+    // tests/providerPortal.test.ts for both-directions coverage.
+    if (payload.sub.startsWith('provider:')) {
+      res.status(401).json({ error: 'invalid_token' });
+      return;
+    }
     req.userPhone = payload.sub;
+    next();
+  }
+
+  // P5-A: provider-portal counterpart to requireAuth above. See
+  // providerAuth.ts's header for the namespacing that keeps this from
+  // ever accepting a mother token — verifyProviderToken() rejects any
+  // sub that doesn't carry the `provider:` prefix, which covers every
+  // mother token (auth.ts#normalizePhone always produces
+  // `whatsapp:+...`).
+  function requireProviderAuth(req: Request, res: Response, next: NextFunction): void {
+    const header = req.get('authorization') || '';
+    const m = header.match(/^Bearer\s+(.+)$/i);
+    if (!m) {
+      res.status(401).json({ error: 'missing_token' });
+      return;
+    }
+    const payload = providerAuth.verifyProviderToken(m[1]);
+    if (!payload) {
+      res.status(401).json({ error: 'invalid_token' });
+      return;
+    }
+    req.providerId = payload.providerId;
+    req.facilityId = payload.facilityId;
+    req.providerRole = payload.role;
     next();
   }
 
@@ -1434,6 +1482,397 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       });
     } catch (err) {
       log.error('DELETE /me/account failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  // --- Provider portal (P5-A, Stage B demo slice) ------------------------------
+  // Hospital/facility staff login + a read-only patient panel. Entirely
+  // separate auth namespace from the mother-facing token (see
+  // providerAuth.ts's header) — a provider token can never authenticate a
+  // mother route (requireAuth above rejects a `provider:`-prefixed sub)
+  // and a mother token can never authenticate a route below
+  // (requireProviderAuth only accepts a `provider:`-prefixed sub).
+  //
+  // CONSENT IS THE GATE, NOT ENROLLMENT. Enrolling a mother into a
+  // facility's ANC bundle (POST /provider/enroll) never grants that
+  // facility (or any facility) access to her clinical data by itself —
+  // see consent.ts's header for why a hospital is an independent DPA
+  // "controller" that needs her own affirmative 'provider_access'
+  // consent, distinct from the app's own data_processing/ai_responses
+  // purposes. She grants/revokes it through the SAME /me/consent and
+  // /me/consent/revoke endpoints every other purpose already uses
+  // (ALL_PURPOSES above already includes 'provider_access' now that it's
+  // in consent.ts's OPTIONAL_PURPOSES) — no new mother-facing endpoint
+  // was needed for this.
+  //
+  // provider_access is a single, facility-agnostic flag on the MOTHER's
+  // own consent ledger (not scoped per-hospital) — matching the P5 spec's
+  // PatientDetail contract exactly ("provider_access ... Gates a
+  // healthcare provider's ability to see this mother's clinical record",
+  // singular). A provider can only ever reach a mother's record through
+  // GET /provider/patients/detail's enrollment boundary check below
+  // though, so in practice "any provider" always means "any provider at
+  // a facility she's actually enrolled at" — not literally every
+  // provider account in the system.
+
+  // Mother's FIRST name only — matches redaction.ts's FIRST-NAME POLICY
+  // (see that file's header) and the identical split done in
+  // amaaii.ts's USER_CONTEXT block. A provider never sees a mother's
+  // full stored name through this portal.
+  function firstNameOf(name: string | null | undefined): string | null {
+    if (!name) return null;
+    const trimmed = name.trim();
+    return trimmed ? trimmed.split(/\s+/)[0] : null;
+  }
+
+  function dateNDaysAgo(days: number): string {
+    return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString().split('T')[0];
+  }
+
+  function isoWithinLastDays(iso: string, days: number): boolean {
+    return new Date(iso).getTime() >= Date.now() - days * 24 * 3600 * 1000;
+  }
+
+  interface ProviderEscalation {
+    urgency: string;
+    createdAt: string;
+  }
+
+  // Reads the SAME 'danger_escalation' audit rows auditDangerEscalation()
+  // already writes (system actor, CRITICAL/HIGH only) — no new triage or
+  // aggregation logic, just a read-side reshape for the provider view.
+  // `limit` bounds the underlying listAuditForUser scan; recent-enough
+  // for demo scale (a mother with more than `limit` TOTAL audit events
+  // since her last escalation would need a real backfill job, not a
+  // Friday-demo concern).
+  async function fetchRecentEscalations(phone: string, limit = 100): Promise<ProviderEscalation[]> {
+    const events = await listAuditForUser(phone, limit);
+    return events
+      .filter((e) => e.action === 'danger_escalation')
+      .map((e) => {
+        let urgency = 'unknown';
+        try {
+          const meta = e.metadata ? JSON.parse(e.metadata) : null;
+          if (meta && typeof meta.urgencyLevel === 'string') urgency = meta.urgencyLevel;
+        } catch (_) {
+          /* leave 'unknown' rather than fail the whole panel/detail read */
+        }
+        return { urgency, createdAt: e.created_at };
+      });
+  }
+
+  // Derived, not read from users.risk_level — that column exists in the
+  // schema but nothing in this codebase ever writes it (it's always the
+  // 'low' default), so surfacing it verbatim would show "low" for every
+  // mother regardless of her actual recent history. This rolls up the
+  // SAME danger-escalation audit trail and red-flag journal data every
+  // other part of the app already produces — reused, not reinvented.
+  function computeProviderRiskLevel(
+    trend: ReturnType<typeof computeTrend>,
+    recentEscalations: ProviderEscalation[]
+  ): 'high' | 'moderate' | 'low' {
+    if (recentEscalations.some((e) => e.urgency === 'critical')) return 'high';
+    if (recentEscalations.length > 0) return 'moderate';
+    if (trend && trend.redFlagDays > 0) return 'moderate';
+    return 'low';
+  }
+
+  const PANEL_TREND_WINDOW_DAYS = 7;
+  const DETAIL_TREND_WINDOW_DAYS = 14;
+
+  // One PanelRow. Enrollment metadata (phone/displayName/enrolledAt/
+  // status/consentGranted) is ALWAYS included — see the spec's PanelRow
+  // shape: it's safe to show without consent. Clinical fields
+  // (pregnancyWeek/riskLevel/lastCheckInAt/redFlags7d) are added ONLY
+  // when provider_access is actively granted.
+  async function buildPatientPanelRow(
+    enrollment: { user_phone: string; enrolled_at: string; status: string },
+    providerId: number,
+    facilityId: number
+  ): Promise<Record<string, unknown>> {
+    const phone = enrollment.user_phone;
+    const [user, consentRows] = await Promise.all([getUser(phone), getConsents(phone)]);
+    const consentGranted = hasActiveConsent(deriveConsentState(consentRows), 'provider_access');
+
+    const row: Record<string, unknown> = {
+      phone,
+      displayName: firstNameOf(user?.name),
+      enrolledAt: enrollment.enrolled_at,
+      status: enrollment.status,
+      consentGranted,
+    };
+
+    if (consentGranted) {
+      const journals = await getJournalHistory(phone, PANEL_TREND_WINDOW_DAYS);
+      const trend = computeTrend(journals, PANEL_TREND_WINDOW_DAYS);
+      const escalations = (await fetchRecentEscalations(phone)).filter((e) =>
+        isoWithinLastDays(e.createdAt, PANEL_TREND_WINDOW_DAYS)
+      );
+      row.pregnancyWeek = user?.pregnancy_week ?? null;
+      row.riskLevel = computeProviderRiskLevel(trend, escalations);
+      row.redFlags7d = trend ? trend.redFlagDays : 0;
+      // journals is already ordered by date DESC (getJournalHistory) —
+      // [0] is the most recent day within the window; a mother whose
+      // last check-in predates the window simply reads null here rather
+      // than a stale, potentially-misleading date.
+      row.lastCheckInAt = journals[0] ? (journals[0].completed_at ?? journals[0].started_at ?? null) : null;
+    }
+
+    // Every provider read is audited, regardless of consent outcome —
+    // even the metadata-only row (phone + first name) is a read of this
+    // mother's data. resource is 'insights' when clinical fields were
+    // included, 'profile' when only enrollment metadata was — mirrors
+    // GET /provider/patients/detail's own resource choice below.
+    await recordAuditSafe({
+      actor: `provider:${providerId}`,
+      action: 'read',
+      resource: consentGranted ? 'insights' : 'profile',
+      resourceOwner: phone,
+      metadata: { facilityId, consentGranted },
+    });
+
+    return row;
+  }
+
+  app.post('/provider/auth/login', async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body || {};
+      if (typeof email !== 'string' || !email.trim() || typeof password !== 'string' || !password) {
+        res.status(400).json({ error: 'invalid_credentials', message: 'email and password are required.' });
+        return;
+      }
+      const provider = await getProviderByEmail(email.trim().toLowerCase());
+      // Deliberately identical 401 for "no such provider" and "wrong
+      // password" — same anti-enumeration shape as the mother OTP
+      // verify flow's wrong-code response, minus the attempts-remaining
+      // detail (provider login has no rate-limit/lockout policy for the
+      // Friday slice — see the P5 spec's "Out of scope" section).
+      if (!provider || !providerAuth.verifyPassword(password, provider.password_hash)) {
+        res.status(401).json({ error: 'invalid_credentials', message: 'Incorrect email or password.' });
+        return;
+      }
+      const facility = await getFacility(provider.facility_id);
+      if (!facility) {
+        // Data-integrity edge case (a provider row whose facility_id
+        // doesn't resolve), not a caller error.
+        log.error('Provider login: facility_id does not resolve to a facility row', undefined, {
+          providerId: provider.id,
+          facilityId: provider.facility_id,
+        });
+        res.status(500).json({ error: 'internal_error' });
+        return;
+      }
+      const token = providerAuth.issueProviderToken(provider.id, provider.facility_id, provider.role);
+      res.json({
+        token,
+        provider: {
+          id: provider.id,
+          name: provider.name,
+          role: provider.role,
+          facility: { id: facility.id, name: facility.name, code: facility.code },
+        },
+      });
+    } catch (err) {
+      log.error('POST /provider/auth/login failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/provider/summary', requireProviderAuth, async (req: Request, res: Response) => {
+    try {
+      const facilityId = req.facilityId as number;
+      const enrollments = await getEnrollmentsByFacility(facilityId);
+      const active = enrollments.filter((e) => e.status === 'active');
+      // price_kes is the ANNUAL per-mother subscription price (see its
+      // doc comment in packages/core/src/repositories.ts and the
+      // `enrollments` table comment in connection.ts) — Ksh 5,000/year
+      // per the shareholder pricing model this demo exists to validate,
+      // NOT a monthly figure. Sum it directly for the annual total; only
+      // monthlyRevenueKes needs the /12 division. Getting this backwards
+      // (treating price_kes as monthly and multiplying by 12) overstates
+      // annual revenue 12x — exactly the bug this comment exists to
+      // prevent a future reader from reintroducing.
+      const annualRevenueKes = active.reduce((sum, e) => sum + e.price_kes, 0);
+      const monthlyRevenueKes = Math.round(annualRevenueKes / 12);
+
+      // escalations7d: danger_escalation audit events in the last 7 days
+      // across every ACTIVELY enrolled mother. No per-mother identifiable
+      // data is returned in THIS response (just counts/totals), so —
+      // unlike /provider/patients and /provider/patients/detail below —
+      // this route doesn't write a per-mother audit row; nothing
+      // mother-identifiable was actually handed to the provider here.
+      const perPatientCounts = await Promise.all(
+        active.map(async (e) => {
+          const escalations = await fetchRecentEscalations(e.user_phone);
+          return escalations.filter((ev) => isoWithinLastDays(ev.createdAt, 7)).length;
+        })
+      );
+      const escalations7d = perPatientCounts.reduce((a, b) => a + b, 0);
+
+      res.json({
+        enrolledCount: enrollments.length,
+        activeCount: active.length,
+        monthlyRevenueKes,
+        annualRevenueKes,
+        escalations7d,
+      });
+    } catch (err) {
+      log.error('GET /provider/summary failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/provider/patients', requireProviderAuth, async (req: Request, res: Response) => {
+    try {
+      const providerId = req.providerId as number;
+      const facilityId = req.facilityId as number;
+      const enrollments = await getEnrollmentsByFacility(facilityId);
+      const patients = await Promise.all(
+        enrollments.map((e) => buildPatientPanelRow(e, providerId, facilityId))
+      );
+      res.json({ patients });
+    } catch (err) {
+      log.error('GET /provider/patients failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.get('/provider/patients/detail', requireProviderAuth, async (req: Request, res: Response) => {
+    try {
+      const providerId = req.providerId as number;
+      const facilityId = req.facilityId as number;
+      const rawPhone = req.query.phone;
+      if (typeof rawPhone !== 'string' || rawPhone.trim().length === 0) {
+        res.status(400).json({ error: 'invalid_phone', message: 'phone query parameter is required.' });
+        return;
+      }
+      const phone = rawPhone.trim();
+
+      // Boundary check: a provider may only look up phones enrolled at
+      // THEIR OWN facility — enrollment is what puts a mother "in their
+      // panel" at all. Without this, a provider with a phone number in
+      // hand could probe consent status (403 vs 200) for any mother in
+      // the whole database, enrolled or not.
+      const enrollment = await getEnrollment(facilityId, phone);
+      if (!enrollment) {
+        res.status(404).json({ error: 'not_enrolled', message: 'This mother is not enrolled at your facility.' });
+        return;
+      }
+
+      const consentState = deriveConsentState(await getConsents(phone));
+      if (!hasActiveConsent(consentState, 'provider_access')) {
+        // Audited too — a denied access attempt is still something a
+        // mother should be able to see in her own activity log (the
+        // differentiator the demo wants to show). resource stays
+        // 'profile' (not 'insights') since no clinical data was actually
+        // read here.
+        await recordAuditSafe({
+          actor: `provider:${providerId}`,
+          action: 'read',
+          resource: 'profile',
+          resourceOwner: phone,
+          metadata: { facilityId, denied: true, reason: 'no_provider_consent' },
+        });
+        res.status(403).json({
+          error: 'no_provider_consent',
+          message: "This mother hasn't granted your facility access to her record.",
+        });
+        return;
+      }
+
+      const user = await getUser(phone);
+      const journals = await getJournalHistory(phone, DETAIL_TREND_WINDOW_DAYS);
+      const trend = computeTrend(journals, DETAIL_TREND_WINDOW_DAYS);
+      const escalations = await fetchRecentEscalations(phone);
+      const riskEscalations = escalations.filter((e) => isoWithinLastDays(e.createdAt, DETAIL_TREND_WINDOW_DAYS));
+
+      await recordAuditSafe({
+        actor: `provider:${providerId}`,
+        action: 'read',
+        resource: 'insights',
+        resourceOwner: phone,
+        metadata: { facilityId },
+      });
+
+      res.json({
+        phone,
+        displayName: firstNameOf(user?.name),
+        pregnancyWeek: user?.pregnancy_week ?? null,
+        edd: user?.edd ?? null,
+        riskLevel: computeProviderRiskLevel(trend, riskEscalations),
+        trend,
+        // Nested under one `dailySeries` key (rather than two top-level
+        // keys the way GET /insights does) to match the P5 spec's
+        // PatientDetail shape literally — still just two
+        // computeDailySeries() calls, no new aggregation logic.
+        dailySeries: {
+          moodSeries: computeDailySeries(journals, (j) => j.emotional_state),
+          sleepSeries: computeDailySeries(journals, (j) => j.sleep_hours),
+        },
+        symptomCounts: computeSymptomCounts(journals, 6),
+        redFlagDates: computeRedFlagDates(journals),
+        recentEscalations: escalations,
+      });
+    } catch (err) {
+      log.error('GET /provider/patients/detail failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.post('/provider/enroll', requireProviderAuth, async (req: Request, res: Response) => {
+    try {
+      const providerId = req.providerId as number;
+      const facilityId = req.facilityId as number;
+      const { phone: rawPhone, name } = req.body || {};
+      const phone = auth.normalizePhone(rawPhone);
+      if (!phone) {
+        res.status(400).json({ error: 'invalid_phone', message: 'Please provide a valid phone number.' });
+        return;
+      }
+      if (name !== undefined && name !== null && typeof name !== 'string') {
+        res.status(400).json({ error: 'invalid_name', message: 'name must be a string.' });
+        return;
+      }
+
+      // getOrCreate, not a bare getUser — a hospital may enroll a mother
+      // BEFORE she has ever messaged the WhatsApp bot or opened the PWA
+      // (same "the profile row must exist before anything else touches
+      // it" pattern as PUT /me and POST /journal/entries above). If
+      // `name` is supplied and the row doesn't already have one, fill it
+      // in — her own later input (onboarding, PUT /me) always wins over
+      // this, since this only fills a gap, never overwrites.
+      const user = await userManager.getOrCreateUser(phone);
+      if (name && !user.name) {
+        await updateUser(phone, { name: (name as string).trim() });
+      }
+
+      const existingEnrollment = await getEnrollment(facilityId, phone);
+      await enrollPatient({ facilityId, userPhone: phone, enrolledBy: providerId });
+
+      // Enrollment does NOT grant consent — this only reports her
+      // CURRENT status; see this section's header comment.
+      const consentState = deriveConsentState(await getConsents(phone));
+      const consentStatus = {
+        purpose: 'provider_access' as const,
+        granted: hasActiveConsent(consentState, 'provider_access'),
+      };
+
+      await recordAuditSafe({
+        actor: `provider:${providerId}`,
+        action: 'write',
+        resource: 'profile',
+        resourceOwner: phone,
+        metadata: { facilityId, event: 'enrollment' },
+      });
+
+      res.status(existingEnrollment ? 200 : 201).json({
+        enrolled: true,
+        consentStatus,
+        ...(existingEnrollment ? { alreadyEnrolled: true } : {}),
+      });
+    } catch (err) {
+      log.error('POST /provider/enroll failed', err);
       res.status(500).json({ error: 'internal_error' });
     }
   });
