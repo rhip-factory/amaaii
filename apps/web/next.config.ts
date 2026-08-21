@@ -48,6 +48,23 @@ const nextConfig: NextConfig = {
           has: [{ type: "header", key: "x-amaaii-api" }],
           destination: `${API_ORIGIN}/insights`,
         },
+        // P6: same collision — /provider/escalations and /provider/cohort
+        // are now both page routes (app/provider/(dashboard)/escalations,
+        // .../cohort) AND the GET API paths for the escalation feed and
+        // cohort analytics. providerApi.ts's providerFetch sets the same
+        // x-amaaii-api header on every provider call (see its comment),
+        // so ordinary page navigations (no header) still fall through to
+        // the page route below.
+        {
+          source: "/provider/escalations",
+          has: [{ type: "header", key: "x-amaaii-api" }],
+          destination: `${API_ORIGIN}/provider/escalations`,
+        },
+        {
+          source: "/provider/cohort",
+          has: [{ type: "header", key: "x-amaaii-api" }],
+          destination: `${API_ORIGIN}/provider/cohort`,
+        },
       ],
       // These don't collide with any page route, so plain (afterFiles)
       // rewrites are enough.
@@ -70,6 +87,9 @@ const nextConfig: NextConfig = {
         { source: "/provider/patients", destination: `${API_ORIGIN}/provider/patients` },
         { source: "/provider/patients/detail", destination: `${API_ORIGIN}/provider/patients/detail` },
         { source: "/provider/enroll", destination: `${API_ORIGIN}/provider/enroll` },
+        // P6: no collision — no page route matches this exact sub-path
+        // (the page is /provider/escalations, not /provider/escalations/ack).
+        { source: "/provider/escalations/ack", destination: `${API_ORIGIN}/provider/escalations/ack` },
       ],
       fallback: [],
     };

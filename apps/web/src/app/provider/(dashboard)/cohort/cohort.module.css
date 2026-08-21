@@ -1,0 +1,101 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.errorNote {
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+.skeleton {
+  height: 220px;
+  border-radius: 18px;
+  background: linear-gradient(90deg, var(--lavender-soft) 0%, #fff 50%, var(--lavender-soft) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* ---- Stat tiles --------------------------------------------------------
+   Own grid (not charts.module.css's 3-column default) — this page shows
+   six tiles, so 3 columns x 2 rows on desktop, stepping down as the
+   viewport narrows. StatTile itself is reused verbatim. */
+.tileRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+@media (max-width: 760px) {
+  .tileRow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 420px) {
+  .tileRow {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- Small-cell suppression card --------------------------------------
+   Deliberately confident and on-brand, NOT a generic empty state — this
+   suppression is the privacy feature this whole view exists to prove out
+   on the demo projector. Same calm lavender language as the panel's
+   "awaiting her consent" / patient-detail's consent-gate panels (this is
+   the same family of "policy working as designed", just protecting a
+   GROUP instead of one mother — see icons.tsx's ShieldIcon comment for
+   why it gets its own icon rather than reusing LockIcon). */
+.suppressedCard {
+  background: var(--lavender-soft);
+  border-radius: 20px;
+  padding: 40px 32px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.suppressedIcon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--deep);
+  box-shadow: var(--shadow-1);
+}
+
+.suppressedTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 21px;
+  color: var(--deep);
+}
+
+.suppressedBody {
+  margin: 0;
+  max-width: 480px;
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}

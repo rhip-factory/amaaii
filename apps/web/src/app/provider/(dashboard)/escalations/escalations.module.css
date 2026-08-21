@@ -1,0 +1,196 @@
+/* P6: escalation feed. Reuses panel.module.css's skeleton/emptyCard/
+   errorNote keyframes and structure by hand (CSS modules don't share
+   rules across files without a common import, and these blocks are
+   small enough that a second copy here is simpler than introducing a
+   shared stylesheet for three declarations). */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.errorNote {
+  background: #fee6e6;
+  color: #6e1f1f;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+.skeleton {
+  height: 220px;
+  border-radius: 18px;
+  background: linear-gradient(90deg, var(--lavender-soft) 0%, #fff 50%, var(--lavender-soft) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+.emptyCard {
+  background: var(--lavender-soft);
+  border-radius: 16px;
+  padding: 28px 24px;
+  text-align: center;
+}
+.emptyTitle {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--deep);
+}
+.emptyBody {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ---- Feed list -------------------------------------------------------- */
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.item {
+  background: #fff;
+  border: 1px solid var(--lavender);
+  border-radius: 14px;
+  box-shadow: var(--shadow-1);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  transition: opacity 0.15s ease;
+}
+
+/* De-emphasised, NOT hidden — the row stays fully present and readable,
+   it just recedes visually so a midwife's eye goes to what still needs
+   doing. Dropping the shadow (rather than only lowering opacity) is what
+   actually reads as "settled" instead of "the whole card faded oddly". */
+.itemAcked {
+  opacity: 0.62;
+  box-shadow: none;
+  background: var(--shell-bg);
+}
+
+.itemMain {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.motherCell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.motherName {
+  font-weight: 700;
+  color: var(--ink);
+  text-decoration: none;
+}
+.motherName:hover {
+  color: var(--deep);
+  text-decoration: underline;
+}
+.motherPhone {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.when {
+  font-size: 12.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.itemAction {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.ackBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--deep);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+.ackBtn:hover:not(:disabled) {
+  background: var(--deep-press);
+}
+.ackBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ackedNote {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ackedNote svg {
+  color: var(--deep);
+  flex: none;
+}
+
+.ackError {
+  margin: 0;
+  color: var(--critical);
+  font-size: 12px;
+  text-align: right;
+  max-width: 220px;
+}
+
+@media (max-width: 560px) {
+  .item {
+    align-items: flex-start;
+  }
+  .itemAction {
+    align-items: flex-start;
+    width: 100%;
+  }
+  .ackBtn {
+    width: 100%;
+    justify-content: center;
+  }
+}

@@ -8,6 +8,7 @@
 
 import { createSqliteDatabaseAdapter } from '@amaaii/adapters';
 import type {
+  AckEscalationInput,
   AncVisitRow,
   AuditEvent,
   AuditEventInput,
@@ -21,6 +22,7 @@ import type {
   EnqueueJobInput,
   EnrollInput,
   EnrollmentRow,
+  EscalationAckRow,
   FacilityRow,
   JobRecord,
   JobStatus,
@@ -170,6 +172,12 @@ export async function getTodaysJournals(userPhone: string): Promise<JournalRow[]
 
 export async function getJournalHistory(userPhone: string, days = 7): Promise<JournalRow[]> {
   return adapter.journals.getJournalHistory(userPhone, days);
+}
+
+/** Unwindowed "when did she last check in" — see the JournalRepository doc
+ *  comment for why a windowed getJournalHistory() cannot answer this. */
+export async function getLastJournalAt(userPhone: string): Promise<string | null> {
+  return adapter.journals.getLastJournalAt(userPhone);
 }
 
 export async function getJournalAnalytics(userPhone: string, days = 7): Promise<JournalAnalytics> {
@@ -323,4 +331,18 @@ export async function getEnrollmentsByFacility(facilityId: number): Promise<Enro
 
 export async function getEnrollment(facilityId: number, userPhone: string): Promise<EnrollmentRow | undefined> {
   return adapter.enrollments.getByFacilityAndPhone(facilityId, userPhone);
+}
+
+// --- Escalation acknowledgements (P6, provider triage queue) ----------
+// See packages/core/src/repositories.ts's "Escalation acknowledgements"
+// section for the full contract. The one mother-keyed table here (via
+// userPhone) and the one DELETE /me/account's erasure cascade clears
+// (erasure.ts), same enrollments/jobs precedent.
+
+export async function getEscalationAcksByFacility(facilityId: number): Promise<EscalationAckRow[]> {
+  return adapter.escalationAcks.getByFacility(facilityId);
+}
+
+export async function ackEscalation(input: AckEscalationInput): Promise<EscalationAckRow> {
+  return adapter.escalationAcks.ack(input);
 }

@@ -161,6 +161,22 @@ export interface JournalRepository {
   getJournalHistory(userPhone: string, days?: number): Promise<JournalRow[]>;
   getJournalAnalytics(userPhone: string, days?: number): Promise<JournalAnalytics>;
   /**
+   * Timestamp of this user's most recent check-in, with NO date window —
+   * or null if she has genuinely never checked in.
+   *
+   * Exists because "when did she last check in?" cannot be answered from
+   * a windowed getJournalHistory() call: the provider panel derived it
+   * from a 7-day fetch, so a mother silent for 9 days came back with an
+   * empty history and was reported as "No check-ins recorded yet". That
+   * inverts the triage signal — the mother who has been quiet LONGEST,
+   * the one most worth chasing, looked like an unknown and sorted below
+   * someone quiet for three days. The distinction between "never" and
+   * "not for a long time" is exactly what the quiet-days signal is about,
+   * so it needs an unwindowed read. Cheap: a single MAX() on an indexed
+   * column, not a row scan.
+   */
+  getLastJournalAt(userPhone: string): Promise<string | null>;
+  /**
    * Idempotency lookup for the PWA structured check-in form (P2-C):
    * finds the journal row previously written for this (userPhone,
    * clientEntryId) pair, if any — backed by the partial UNIQUE index on
@@ -699,6 +715,62 @@ export interface EnrollmentRepository {
   getByFacilityAndPhone(facilityId: number, userPhone: string): Promise<EnrollmentRow | undefined>;
 }
 
+// --- Escalation acknowledgements (P6, provider triage queue) ----------------
+//
+// A provider's "I've seen this and I'm on it" marker against one of the
+// SAME 'danger_escalation' audit rows auditDangerEscalation() already
+// writes (system actor, CRITICAL/HIGH only — see audit.ts) — this table
+// does not duplicate or replace that store, it only records which of
+// those events a facility has acknowledged. `escalationAt` is that audit
+// row's own `created_at` string, used verbatim as the natural key (see
+// EscalationAckRow#escalationAt below) rather than a foreign key to
+// audit_log's id, since audit_log rows are never exposed to a provider
+// by id — only by their (phone, urgency, createdAt) shape, via
+// fetchRecentEscalations() in app.ts.
+
+/** Row shape of the `escalation_acks` table. The one mother-keyed table
+ *  in this section (via `userPhone`) — see erasure.ts's ERASURE_TARGETS,
+ *  which clears it on DELETE /me/account, same enrollments/jobs
+ *  precedent from P4-B/P5-A. */
+export interface EscalationAckRow {
+  id: number;
+  facilityId: number;
+  userPhone: string;
+  /** The acknowledged audit row's own `created_at` — see this section's
+   *  header for why this is a plain string natural key, not a foreign
+   *  key to an audit_log id. */
+  escalationAt: string;
+  /** providers.id of whoever acknowledged it. */
+  acknowledgedBy: number;
+  acknowledgedAt: string;
+}
+
+export interface AckEscalationInput {
+  facilityId: number;
+  userPhone: string;
+  escalationAt: string;
+  acknowledgedBy: number;
+}
+
+export interface EscalationAckRepository {
+  /** Every ack recorded at one facility — GET /provider/escalations
+   *  reads this once per request and joins it against the live
+   *  danger_escalation audit rows in memory (by (userPhone, escalationAt))
+   *  to mark feed items acknowledged, rather than querying per item. */
+  getByFacility(facilityId: number): Promise<EscalationAckRow[]>;
+  /**
+   * Records an ack, unless (facilityId, userPhone, escalationAt) already
+   * has one — see connection.ts's `UNIQUE(facility_id, user_phone,
+   * escalation_at)` — in which case this resolves the EXISTING row
+   * instead of inserting a duplicate or throwing. Same "pre-check, then
+   * let the UNIQUE index be the real race guard" shape as
+   * EnrollmentRepository#enroll / JobRepository#enqueue's dedupeKey
+   * handling — a provider tapping "Acknowledge" twice (double-tap, retry
+   * after a dropped response) is a no-op the second time, not an error.
+   */
+  ack(input: AckEscalationInput): Promise<EscalationAckRow>;
+}
+
 // --- Aggregate --------------------------------------------------------------
 
 /**
@@ -722,6 +794,7 @@ export interface DatabaseAdapter {
   facilities: FacilityRepository;
   providers: ProviderRepository;
   enrollments: EnrollmentRepository;
+  escalationAcks: EscalationAckRepository;
   /** Creates tables/indexes and runs idempotent migrations. Mirrors
    *  services/database.js#initializeDatabase(). */
   initialize(): Promise<void>;
@@ -762,6 +835,13 @@ export interface DatabaseAdapter {
    * consent.ts's header), and are deliberately NOT in this cascade: an
    * enrollment existing in the past doesn't give a hospital's own
    * account rows anything to do with a mother's erasure request.
+   *
+   * escalation_acks (P6, provider triage queue) is matched on its own
+   * `user_phone` column, same enrollments/jobs precedent — a provider's
+   * "acknowledged" marker against one of a mother's danger escalations
+   * is still HER data (which of her escalations a facility says it has
+   * seen), so it goes with her on erasure, same as everything else
+   * except audit_log.
    *
    * DELIBERATE TENSION, documented here rather than left implicit:
    * this method does NOT touch `audit_log`. The two DPA obligations

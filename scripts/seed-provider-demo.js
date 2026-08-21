@@ -51,14 +51,29 @@ const PROVIDERS = [
   { email: 'doctor@amaaii.health', name: 'Dr. Achieng Otieno', role: 'doctor', license_number: 'KMPDC-11837' },
 ];
 
-// Mothers to enrol. These must already exist as users in the same DB.
-// Mary is enrolled but has deliberately NOT granted provider_access consent —
-// that is the demo's consent-gate beat, not an oversight. Leave her here.
-const MOTHERS = [
-  'whatsapp:+254700000888', // Amina — consented
-  'whatsapp:+254700000889', // Grace — consented
-  'whatsapp:+254700000890', // Mary  — NOT consented to provider access
-];
+// Mothers to enrol: every user already in this database, read at runtime
+// rather than hardcoded, so this stays in sync with whichever seeder ran
+// first (scripts/seed-demo-user.js for a single rich history, or
+// scripts/seed-cohort-demo.js for the varied 14-mother panel).
+//
+// Enrolment is deliberately independent of consent — some of those mothers
+// have NOT granted provider_access, and they SHOULD still appear in the
+// facility's panel with their clinical data withheld. That is the consent
+// gate working, not a seeding oversight. Do not filter them out.
+// Read straight from SQLite rather than through the database facade: this is
+// a seed-time listing with no repository method behind it, and adding one to
+// the app's public surface just for a demo script would be the wrong trade.
+function mothersToEnrol() {
+  const sqlite3 = require('sqlite3').verbose();
+  const conn = new sqlite3.Database(process.env.DB_PATH || './amaaii.db');
+  return new Promise((resolve, reject) => {
+    conn.all('SELECT phone_number FROM users ORDER BY phone_number', (err, rows) => {
+      conn.close();
+      if (err) reject(err);
+      else resolve(rows.map((r) => r.phone_number));
+    });
+  });
+}
 
 async function main() {
   await db.initializeDatabase();
@@ -92,7 +107,9 @@ async function main() {
   }
 
   const enroller = created[0] ? created[0].id : null;
-  for (const phone of MOTHERS) {
+  const mothers = await mothersToEnrol();
+  console.log(`  enrolling ${mothers.length} mothers…`);
+  for (const phone of mothers) {
     try {
       await db.enrollPatient({
         facilityId: facility.id,

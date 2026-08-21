@@ -310,6 +310,50 @@ describe('DELETE /me/account', () => {
     expect(after[0].user_phone).toBe(phoneB);
   });
 
+  it('P6: also clears the caller\'s escalation acknowledgements (provider triage queue), leaving other users\' acks intact', async () => {
+    const app = createApp();
+    const { token: tokenA, phone: phoneA } = await seedFullUser(app, freshPhone());
+    const { phone: phoneB } = await seedFullUser(app, freshPhone());
+
+    // Same seed-through-the-facade pattern as the P5-A enrollments test
+    // above — no HTTP route creates a facility/provider (self-registration
+    // is out of scope), so this goes straight through db.
+    const facility = await db.createFacility({ name: 'Erasure Test Hospital 2', code: `ETH2-${Date.now()}`, county: 'Nairobi' });
+    const provider = await db.createProvider({
+      facilityId: facility.id,
+      email: `erasure-provider-${Date.now()}@test-hospital.example`,
+      name: 'Nurse Erasure',
+      role: 'nurse',
+      passwordHash: 'scrypt$deadbeef$deadbeef', // never verified in this test — no login flow exercised
+    });
+    await db.enrollPatient({ facilityId: facility.id, userPhone: phoneA });
+    await db.enrollPatient({ facilityId: facility.id, userPhone: phoneB });
+    await db.ackEscalation({
+      facilityId: facility.id,
+      userPhone: phoneA,
+      escalationAt: new Date().toISOString(),
+      acknowledgedBy: provider.id,
+    });
+    await db.ackEscalation({
+      facilityId: facility.id,
+      userPhone: phoneB,
+      escalationAt: new Date().toISOString(),
+      acknowledgedBy: provider.id,
+    });
+
+    const before = await db.getEscalationAcksByFacility(facility.id);
+    expect(before).toHaveLength(2);
+
+    const res = await request(app).delete('/me/account').set('Authorization', `Bearer ${tokenA}`);
+    expect(res.status).toBe(200);
+
+    // Exactly A's ack is gone; B's (a different mother, same facility)
+    // survives untouched.
+    const after = await db.getEscalationAcksByFacility(facility.id);
+    expect(after).toHaveLength(1);
+    expect(after[0].userPhone).toBe(phoneB);
+  });
+
   it("isolation: deleting user A leaves user B's data fully intact (mandatory)", async () => {
     const app = createApp();
     const { token: tokenA, phone: phoneA } = await seedFullUser(app, freshPhone());

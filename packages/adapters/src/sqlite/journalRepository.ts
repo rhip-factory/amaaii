@@ -121,6 +121,26 @@ export class SqliteJournalRepository implements JournalRepository {
 
   // P3-C data-portability export — ALL rows regardless of date, oldest
   // first (unlike getJournalHistory's `days`-windowed query).
+  // No date window, deliberately — see the interface doc comment. Takes the
+  // greatest of completed_at/started_at/timestamp rather than assuming one is
+  // set: a check-in interrupted by a danger-sign escalation never gets
+  // completed_at, and silently missing those would report a mother as quieter
+  // than she actually is, which is the opposite of a safe failure here.
+  getLastJournalAt(userPhone: string): Promise<string | null> {
+    return new Promise((resolve, reject) => {
+      this.db.get<{ last_at: string | null }>(
+        `SELECT MAX(COALESCE(completed_at, started_at, timestamp)) AS last_at
+           FROM journals
+          WHERE user_phone = ?`,
+        [userPhone],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row?.last_at ?? null);
+        }
+      );
+    });
+  }
+
   getAllForUser(userPhone: string): Promise<JournalRow[]> {
     return new Promise((resolve, reject) => {
       this.db.all<JournalRow>(

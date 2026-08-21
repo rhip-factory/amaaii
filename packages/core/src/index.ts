@@ -14,3 +14,5 @@ export * from './redaction';
 export * from './otp';
 export * from './consent';
 export * from './jobs';
+export * from './triage';
+export * from './cohort';

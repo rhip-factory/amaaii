@@ -16,8 +16,11 @@
 import { API_BASE } from "./api";
 import { clearProviderSession, getProviderToken } from "./providerStorage";
 import type {
+  ProviderAckEscalationResponse,
+  ProviderCohortResponse,
   ProviderDailyPoint,
   ProviderEnrollResponse,
+  ProviderEscalationFeedItem,
   ProviderLoginResponse,
   ProviderPatientDetail,
   ProviderPatientsResponse,
@@ -52,6 +55,14 @@ async function providerFetch(path: string, init: RequestInit = {}): Promise<Resp
   const token = getProviderToken();
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
+  // P6: /provider/escalations and /provider/cohort are now BOTH page
+  // routes (app/provider/(dashboard)/escalations, .../cohort) AND API
+  // paths — same collision as the mother app's /chat and /insights (see
+  // lib/api.ts#authedFetch and next.config.ts's header-gated beforeFiles
+  // rewrites). Setting this unconditionally on every provider call, not
+  // just the two colliding ones, matches authedFetch's own choice and
+  // costs nothing on the non-colliding paths.
+  headers.set("X-Amaaii-Api", "1");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const controller = new AbortController();
@@ -157,4 +168,39 @@ export async function enrollPatient(phone: string, name?: string): Promise<Provi
     body: JSON.stringify(name ? { phone, name } : { phone }),
   });
   return parseJsonOrThrow<ProviderEnrollResponse>(res);
+}
+
+// P6: escalation feed — enrolled AND consented mothers only (server-
+// enforced), newest first. See providerTypes.ts's ProviderEscalationsResponse
+// doc comment: the envelope key (`escalations`) is a best-faith guess at
+// the spec's unfixed wrapper shape, so a bare array is also accepted here
+// rather than assuming one specific envelope.
+export async function fetchProviderEscalations(): Promise<ProviderEscalationFeedItem[]> {
+  const res = await providerFetch("/provider/escalations");
+  const raw = await parseJsonOrThrow<{ escalations?: unknown } | unknown[]>(res);
+  const list = Array.isArray(raw) ? raw : (raw as { escalations?: unknown }).escalations;
+  return Array.isArray(list) ? (list as ProviderEscalationFeedItem[]) : [];
+}
+
+// A 404 { error: 'not_enrolled' } / 403 { error: 'no_provider_consent' }
+// are designed outcomes on the same rules as patient detail (see the
+// fetchProviderPatientDetail comment above) — callers branch on
+// ProviderApiError#code same as there.
+export async function ackEscalation(phone: string, escalationAt: string): Promise<ProviderAckEscalationResponse> {
+  const res = await providerFetch("/provider/escalations/ack", {
+    method: "POST",
+    body: JSON.stringify({ phone, escalationAt }),
+  });
+  return parseJsonOrThrow<ProviderAckEscalationResponse>(res);
+}
+
+// P6: cohort analytics — aggregate-only over enrolled AND consented
+// mothers. Small-cell suppression (n < minimumN) returns
+// { suppressed: true, minimumN, cohortSize } instead of statistics — see
+// ProviderCohortResponse's doc comment. No normalization needed here: the
+// discriminant (`suppressed`) is the one field the spec's table fixes on
+// both branches.
+export async function fetchProviderCohort(): Promise<ProviderCohortResponse> {
+  const res = await providerFetch("/provider/cohort");
+  return parseJsonOrThrow<ProviderCohortResponse>(res);
 }

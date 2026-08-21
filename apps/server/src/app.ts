@@ -16,6 +16,7 @@ import {
   getTodaysJournal,
   getTodaysJournals,
   getJournalHistory,
+  getLastJournalAt,
   createOrUpdateJournal,
   findJournalByClientEntryId,
   getConversationHistory,
@@ -41,6 +42,8 @@ import {
   getEnrollmentsByFacility,
   getEnrollment,
   enrollPatient,
+  getEscalationAcksByFacility,
+  ackEscalation,
 } from './database';
 import { getRecentTrend } from './trend';
 import * as llmExtract from './llmExtract';
@@ -83,8 +86,17 @@ import {
   needsConsent,
   isStale,
   canUseAi,
+  assessTriage,
+  computeCohortAggregate,
 } from '@amaaii/core';
-import type { JournalPatch, JournalRow, Symptom, ConsentPurpose, ConsentState } from '@amaaii/core';
+import type {
+  JournalPatch,
+  JournalRow,
+  Symptom,
+  ConsentPurpose,
+  ConsentState,
+  CohortMotherInput,
+} from '@amaaii/core';
 import { recordAuditSafe, auditDangerEscalation, wasAccountDeleted } from './audit';
 import userManager, { type UserWithFlag } from './userManager';
 
@@ -385,6 +397,19 @@ export interface CreateAppOptions {
   // exist unless a test explicitly opts in.
   enableTestErrorRoute?: boolean;
 }
+
+/**
+ * Paths that are BOTH an exported page and a JSON API on GET, told apart by
+ * request headers (X-Amaaii-Api / Authorization) via the `next('route')`
+ * gates on each route. Because an HTTP cache keys on URL and not headers,
+ * the HTML served for these must carry a Vary — see the static fallback at
+ * the bottom of createApp() for the failure this prevents.
+ *
+ * Keep in sync with the gates themselves. CLAUDE.md once called /insights
+ * "the one page-vs-API GET collision in this app"; the provider portal added
+ * two more, so any new one belongs here too.
+ */
+const PAGE_AND_API_PATHS = new Set(['/insights', '/provider/escalations', '/provider/cohort']);
 
 export function createApp(opts: CreateAppOptions = {}): Express {
   const app = express();
@@ -1609,14 +1634,34 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const escalations = (await fetchRecentEscalations(phone)).filter((e) =>
         isoWithinLastDays(e.createdAt, PANEL_TREND_WINDOW_DAYS)
       );
-      row.pregnancyWeek = user?.pregnancy_week ?? null;
-      row.riskLevel = computeProviderRiskLevel(trend, escalations);
-      row.redFlags7d = trend ? trend.redFlagDays : 0;
-      // journals is already ordered by date DESC (getJournalHistory) —
-      // [0] is the most recent day within the window; a mother whose
-      // last check-in predates the window simply reads null here rather
-      // than a stale, potentially-misleading date.
-      row.lastCheckInAt = journals[0] ? (journals[0].completed_at ?? journals[0].started_at ?? null) : null;
+      const pregnancyWeek = user?.pregnancy_week ?? null;
+      const riskLevel = computeProviderRiskLevel(trend, escalations);
+      const redFlags7d = trend ? trend.redFlagDays : 0;
+      // Unwindowed on purpose. This used to read journals[0] from the
+      // 7-day fetch above, on the reasoning that "a mother whose last
+      // check-in predates the window simply reads null rather than a
+      // stale date" — but null here does not mean "stale", it means
+      // "never checked in" to assessTriage, which is a different and
+      // much less urgent thing. A mother silent for 9 days was therefore
+      // reported as "No check-ins recorded yet" and sorted BELOW a mother
+      // silent for 3, inverting the exact signal this feature exists to
+      // surface. Observed on the live panel with real seeded data.
+      const lastCheckInAt = await getLastJournalAt(phone);
+      const ancVisits = user?.anc_visits ?? null;
+
+      row.pregnancyWeek = pregnancyWeek;
+      row.riskLevel = riskLevel;
+      row.redFlags7d = redFlags7d;
+      row.lastCheckInAt = lastCheckInAt;
+      row.ancVisits = ancVisits;
+
+      // P6: triage ordering (packages/core/src/triage.ts) — pure, given
+      // exactly the fields already computed above. `new Date()` (not a
+      // stored/reused clock) is fine here: this is a single synchronous
+      // computation inside an already-in-flight request, not a
+      // long-running process where the clock could drift mid-call.
+      const triage = assessTriage({ redFlags7d, riskLevel, lastCheckInAt, pregnancyWeek, ancVisits }, new Date());
+      row.triage = { band: triage.band, score: triage.score, reasons: triage.reasons };
     }
 
     // Every provider read is audited, regardless of consent outcome —
@@ -1696,14 +1741,38 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const annualRevenueKes = active.reduce((sum, e) => sum + e.price_kes, 0);
       const monthlyRevenueKes = Math.round(annualRevenueKes / 12);
 
-      // escalations7d: danger_escalation audit events in the last 7 days
-      // across every ACTIVELY enrolled mother. No per-mother identifiable
-      // data is returned in THIS response (just counts/totals), so —
-      // unlike /provider/patients and /provider/patients/detail below —
-      // this route doesn't write a per-mother audit row; nothing
-      // mother-identifiable was actually handed to the provider here.
+      // escalations7d: danger_escalation audit events in the last 7 days,
+      // counted ONLY across mothers with an ACTIVE provider_access
+      // consent — NOT every actively enrolled mother.
+      //
+      // PRIVACY FIX (P6): the pre-P6 version of this line counted across
+      // every active enrollment regardless of consent, on the argument
+      // that nothing mother-identifiable is returned in this response
+      // (just a total). That argument fails at small N: on a 4-mother
+      // panel where one mother hasn't consented, a count that moves
+      // while every CONSENTING mother shows no flags identifies the
+      // non-consenting one by elimination — exactly the kind of
+      // small-cell re-identification GET /provider/cohort's
+      // MIN_COHORT_N suppression exists to prevent, just via a single
+      // scalar instead of a full aggregate. See CLAUDE.md /
+      // packages/core/src/consent.ts: a mother who has not granted
+      // provider_access contributes NOTHING the facility can see — not
+      // a row, not a statistic, not a count. That rule now applies here
+      // too, same as it already did for /provider/patients and
+      // /provider/patients/detail.
+      //
+      // Still no per-mother audit row: this loop reads each consenting
+      // mother's escalation history only to fold it into ONE aggregate
+      // total, and the response carries no per-mother identifiable data
+      // — same rationale as before the fix, now correctly SCOPED to
+      // consenting mothers only. A non-consenting mother's escalation
+      // history is never read at all here (the consent check below
+      // short-circuits before fetchRecentEscalations is ever called for
+      // her), so there is nothing to audit on her behalf either.
       const perPatientCounts = await Promise.all(
         active.map(async (e) => {
+          const consentState = deriveConsentState(await getConsents(e.user_phone));
+          if (!hasActiveConsent(consentState, 'provider_access')) return 0;
           const escalations = await fetchRecentEscalations(e.user_phone);
           return escalations.filter((ev) => isoWithinLastDays(ev.createdAt, 7)).length;
         })
@@ -1877,6 +1946,241 @@ export function createApp(opts: CreateAppOptions = {}): Express {
     }
   });
 
+  // --- Escalation feed (P6, provider triage queue) ----------------------------
+  // Reads the SAME 'danger_escalation' audit rows fetchRecentEscalations()
+  // already reshapes for the patient panel/detail routes above — this is
+  // not a second escalation store, just a facility-wide read across every
+  // enrolled-AND-consented mother instead of one mother at a time, joined
+  // in memory against this facility's escalation_acks rows.
+
+  interface EscalationFeedItem {
+    phone: string;
+    displayName: string | null;
+    urgency: string;
+    createdAt: string;
+    acknowledged: boolean;
+    acknowledgedBy?: number;
+    acknowledgedAt?: string;
+  }
+
+  app.get(
+    '/provider/escalations',
+  // PAGE-vs-API COLLISION — same shape as /insights above, and the same fix.
+  // `/provider/escalations` is BOTH an exported page (out/provider/escalations.html, the provider
+  // portal's Escalations tab) and this JSON API. Without this gate a plain
+  // browser navigation — which carries no Authorization header — hit
+  // requireProviderAuth and got `401 {"error":"unauthorized"}` rendered as
+  // raw JSON instead of the page. Verified against a real navigation, not
+  // reasoned about: clicking the nav link returned application/json.
+  // An API call always sets X-Amaaii-Api (apps/web/src/lib/providerApi.ts)
+  // and/or carries the bearer token; anything else falls through
+  // (`next('route')`) to the static export further down.
+  (req: Request, res: Response, next: NextFunction) => {
+    const isApiCall = req.get('X-Amaaii-Api') === '1' || !!req.get('authorization');
+    if (isApiCall) {
+      next();
+      return;
+    }
+    next('route');
+  },
+    requireProviderAuth,
+    async (req: Request, res: Response) => {
+    try {
+      const providerId = req.providerId as number;
+      const facilityId = req.facilityId as number;
+      const enrollments = await getEnrollmentsByFacility(facilityId);
+      const acks = await getEscalationAcksByFacility(facilityId);
+      const ackByKey = new Map(acks.map((a) => [`${a.userPhone}::${a.escalationAt}`, a]));
+
+      const items: EscalationFeedItem[] = [];
+      for (const enrollment of enrollments) {
+        const phone = enrollment.user_phone;
+        const consentState = deriveConsentState(await getConsents(phone));
+        if (!hasActiveConsent(consentState, 'provider_access')) {
+          // CONSENT GATES EVERYTHING CLINICAL, including this feed: a
+          // non-consenting mother contributes NOTHING here — not even a
+          // "she has escalations but you can't see them" placeholder.
+          // Still audited (denied, resource 'profile', same shape as GET
+          // /provider/patients/detail's 403 branch) so she can see in
+          // her own activity log that a provider's escalation feed
+          // checked and was blocked — the same transparency guarantee
+          // that route already gives a denied clinical read.
+          await recordAuditSafe({
+            actor: `provider:${providerId}`,
+            action: 'read',
+            resource: 'profile',
+            resourceOwner: phone,
+            metadata: { facilityId, denied: true, reason: 'no_provider_consent', context: 'escalation_feed' },
+          });
+          continue;
+        }
+
+        const user = await getUser(phone);
+        const escalations = await fetchRecentEscalations(phone);
+        for (const escalation of escalations) {
+          const ack = ackByKey.get(`${phone}::${escalation.createdAt}`);
+          items.push({
+            phone,
+            displayName: firstNameOf(user?.name),
+            urgency: escalation.urgency,
+            createdAt: escalation.createdAt,
+            acknowledged: !!ack,
+            ...(ack ? { acknowledgedBy: ack.acknowledgedBy, acknowledgedAt: ack.acknowledgedAt } : {}),
+          });
+        }
+        // One audit row per consented mother whose escalation history was
+        // read (even if she currently has zero escalations — her history
+        // was still queried) — mirrors buildPatientPanelRow's per-row
+        // audit above.
+        await recordAuditSafe({
+          actor: `provider:${providerId}`,
+          action: 'read',
+          resource: 'insights',
+          resourceOwner: phone,
+          metadata: { facilityId, context: 'escalation_feed' },
+        });
+      }
+
+      // Newest first — ISO 8601 timestamps sort lexicographically in
+      // chronological order, so a plain string comparison is enough.
+      items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      res.json({ escalations: items });
+    } catch (err) {
+      log.error('GET /provider/escalations failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  app.post('/provider/escalations/ack', requireProviderAuth, async (req: Request, res: Response) => {
+    try {
+      const providerId = req.providerId as number;
+      const facilityId = req.facilityId as number;
+      const { phone: rawPhone, escalationAt } = req.body || {};
+      if (typeof rawPhone !== 'string' || rawPhone.trim().length === 0) {
+        res.status(400).json({ error: 'invalid_phone', message: 'phone is required.' });
+        return;
+      }
+      if (typeof escalationAt !== 'string' || escalationAt.trim().length === 0) {
+        res.status(400).json({ error: 'invalid_escalationAt', message: 'escalationAt is required.' });
+        return;
+      }
+      const phone = rawPhone.trim();
+
+      // Same two-check boundary as GET /provider/patients/detail: enrollment
+      // FIRST (a provider may only act on phones in their own panel — see
+      // that route's comment for why this order matters), consent SECOND.
+      const enrollment = await getEnrollment(facilityId, phone);
+      if (!enrollment) {
+        res.status(404).json({ error: 'not_enrolled', message: 'This mother is not enrolled at your facility.' });
+        return;
+      }
+
+      const consentState = deriveConsentState(await getConsents(phone));
+      if (!hasActiveConsent(consentState, 'provider_access')) {
+        await recordAuditSafe({
+          actor: `provider:${providerId}`,
+          action: 'read',
+          resource: 'profile',
+          resourceOwner: phone,
+          metadata: { facilityId, denied: true, reason: 'no_provider_consent', context: 'escalation_ack' },
+        });
+        res.status(403).json({
+          error: 'no_provider_consent',
+          message: "This mother hasn't granted your facility access to her record.",
+        });
+        return;
+      }
+
+      const ack = await ackEscalation({ facilityId, userPhone: phone, escalationAt: escalationAt.trim(), acknowledgedBy: providerId });
+      await recordAuditSafe({
+        actor: `provider:${providerId}`,
+        action: 'write',
+        resource: 'insights',
+        resourceOwner: phone,
+        metadata: { facilityId, event: 'escalation_ack', escalationAt: ack.escalationAt },
+      });
+      res.json({ acknowledged: true, acknowledgedBy: ack.acknowledgedBy, acknowledgedAt: ack.acknowledgedAt });
+    } catch (err) {
+      log.error('POST /provider/escalations/ack failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  // --- Cohort analytics (P6, provider triage queue) ---------------------------
+  // Aggregate-only — see packages/core/src/cohort.ts's header for why
+  // CohortStats is structurally incapable of carrying per-mother data.
+  // Same consent scoping as everywhere else in this file: a mother
+  // without active provider_access contributes NOTHING here, not even
+  // toward the cohort SIZE used to decide whether MIN_COHORT_N
+  // suppression kicks in.
+  const COHORT_WINDOW_DAYS = 30;
+
+  app.get(
+    '/provider/cohort',
+  // PAGE-vs-API COLLISION — same shape as /insights above, and the same fix.
+  // `/provider/cohort` is BOTH an exported page (out/provider/cohort.html, the provider
+  // portal's Cohort tab) and this JSON API. Without this gate a plain
+  // browser navigation — which carries no Authorization header — hit
+  // requireProviderAuth and got `401 {"error":"unauthorized"}` rendered as
+  // raw JSON instead of the page. Verified against a real navigation, not
+  // reasoned about: clicking the nav link returned application/json.
+  // An API call always sets X-Amaaii-Api (apps/web/src/lib/providerApi.ts)
+  // and/or carries the bearer token; anything else falls through
+  // (`next('route')`) to the static export further down.
+  (req: Request, res: Response, next: NextFunction) => {
+    const isApiCall = req.get('X-Amaaii-Api') === '1' || !!req.get('authorization');
+    if (isApiCall) {
+      next();
+      return;
+    }
+    next('route');
+  },
+    requireProviderAuth,
+    async (req: Request, res: Response) => {
+    try {
+      const facilityId = req.facilityId as number;
+      const enrollments = await getEnrollmentsByFacility(facilityId);
+      const active = enrollments.filter((e) => e.status === 'active');
+
+      const motherInputs: CohortMotherInput[] = [];
+      for (const enrollment of active) {
+        const phone = enrollment.user_phone;
+        const consentState = deriveConsentState(await getConsents(phone));
+        if (!hasActiveConsent(consentState, 'provider_access')) continue;
+
+        const [user, journals] = await Promise.all([
+          getUser(phone),
+          getJournalHistory(phone, COHORT_WINDOW_DAYS),
+        ]);
+        const trend = computeTrend(journals, COHORT_WINDOW_DAYS);
+        // journals is DESC-ordered (getJournalHistory) — [0] is the most
+        // recent entry within the window, same idiom buildPatientPanelRow
+        // uses above for lastCheckInAt.
+        const lastCheckInAt = journals[0] ? (journals[0].completed_at ?? journals[0].started_at ?? null) : null;
+
+        motherInputs.push({
+          pregnancyWeek: user?.pregnancy_week ?? null,
+          ancVisits: user?.anc_visits ?? null,
+          avgMood: trend?.avgMood ?? null,
+          avgSleepHours: trend?.avgSleepHours ?? null,
+          lastCheckInAt,
+          hadRedFlag: !!(trend && trend.redFlagDays > 0),
+        });
+      }
+
+      const result = computeCohortAggregate(motherInputs, new Date());
+      // No per-mother audit row: this route never reads or returns a
+      // single identifiable field (no phone, no name, no per-row array —
+      // see CohortStats/CohortSuppressed in packages/core/src/cohort.ts),
+      // same "aggregate-only, nothing to log against one mother"
+      // rationale as GET /provider/summary's escalations7d above.
+      res.json(result);
+    } catch (err) {
+      log.error('GET /provider/cohort failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
   // --- Static: the Next.js PWA (apps/web/out) ---------------------------------
   // `public/` (the older vanilla-JS PWA) is retired — this serves the
   // static export in its place. `out/` is a build artifact (gitignored,
@@ -1955,6 +2259,26 @@ export function createApp(opts: CreateAppOptions = {}): Express {
     app.get(/.*/, (req: Request, res: Response) => {
       const urlPath = req.path;
       if (path.extname(urlPath) === '') {
+        // A handful of paths are BOTH an exported page and a JSON API
+        // (/insights, /provider/escalations, /provider/cohort — see the
+        // page-vs-API gates above). The two are told apart by request
+        // HEADERS, but an HTTP cache keys on URL, so without a Vary the
+        // browser will happily replay this HTML document to the app's own
+        // fetch() for the same URL — which is exactly what happened: the
+        // escalation feed rendered "No escalations yet" while curl against
+        // the same endpoint returned two, because the page had just been
+        // navigated to and its HTML was sitting in the cache.
+        //
+        // Vary tells the cache these responses are header-dependent;
+        // no-store on top of it means this document can never be handed to
+        // a subsequent fetch at all. These are authenticated app shells
+        // with no meaningful cache value anyway — the hashed
+        // /_next/static/* assets they pull in are where the caching that
+        // matters happens, and those are untouched by this.
+        if (PAGE_AND_API_PATHS.has(urlPath.replace(/\/$/, '') || '/')) {
+          res.setHeader('Vary', 'X-Amaaii-Api, Authorization');
+          res.setHeader('Cache-Control', 'no-store');
+        }
         res.sendFile(relativeExportHtmlPath(urlPath), { root: webOutDir }, (err) => {
           if (err) send404(res);
         });

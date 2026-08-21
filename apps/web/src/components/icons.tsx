@@ -152,6 +152,32 @@ export function LockIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+// P6: provider portal nav — "Patients" tab (ProviderShell).
+export function UsersIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </Base>
+  );
+}
+
+// P6: cohort view's small-cell-suppression card — a distinct privacy
+// concept from the panel/patient-detail "awaiting her consent" LockIcon
+// (that's ONE mother's own choice; this is an aggregate-safety floor
+// protecting several mothers at once), so it gets its own icon rather
+// than reusing LockIcon and blurring the two ideas together.
+export function ShieldIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M12 2 4 5v6c0 5.05 3.4 9.77 8 11 4.6-1.23 8-5.95 8-11V5z" />
+      <path d="M9.5 12l2 2 3.5-4" />
+    </Base>
+  );
+}
+
 export function WifiOffIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <Base {...props}>
