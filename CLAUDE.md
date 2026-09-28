@@ -127,7 +127,7 @@ New table: `jobs` (`packages/adapters/src/sqlite/connection.ts`) — `type`, `st
 
 ## Hosted deployment — red-bridge (migration target, replacing Railway)
 
-A shared Debian 13 box (`ssh amaaii@151.115.89.219`, hostname `red-bridge`) that also runs another product (aureo). The server owner holds root; the `amaaii` user owns only `/srv/amaaii` and may run exactly `sudo systemctl restart amaaii-api|amaaii-web`. Files in `deploy/red-bridge/`: the systemd unit and nginx site (the owner installs these), `env.example` (production `.env` template) and `deploy.sh` (run on the server; deploys `origin/main` only).
+A shared Debian 13 box (`ssh amaaii@151.115.89.219`, hostname `red-bridge`; public URL `https://amaaii.com`, `www.` redirects to the apex) that also runs another product (aureo). The server owner holds root; the `amaaii` user owns only `/srv/amaaii` and may run exactly `sudo systemctl restart amaaii-api|amaaii-web`; root-level changes (units, nginx, certbot) go through the `rbridge` sudo account. Files in `deploy/red-bridge/`: the systemd unit and nginx site (the owner installs these), `env.example` (production `.env` template) and `deploy.sh` (run on the server; deploys `origin/main` only).
 
 - **Allocated ports: 8002 (backend), 3002 (frontend).** Amaaii is single-process, so only 8002 is used and the `amaaii-web`/3002 slot stays empty. Aureo owns 8001/3001. Bind `HOST=127.0.0.1`; nginx is the sole public entrance.
 - **Node 22 lives in `/srv/amaaii/.local/opt/node`** (system node is v20); pnpm via corepack. Non-interactive SSH doesn't read `~/.profile`, so scripts `export PATH` themselves.
