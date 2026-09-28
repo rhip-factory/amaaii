@@ -8,8 +8,9 @@ else follows from that.
 - **Never commit or push directly to `main`.** Every change lands through a
   pull request, including one-line fixes, docs, and release commits.
 - **A PR merges only when CI is green** (`.github/workflows/ci.yml`: typecheck,
-  web typecheck, tests, server build, web static export). Branch protection
-  enforces this on GitHub.
+  web typecheck, tests, server build, web static export). GitHub branch
+  protection is deliberately *not* enabled, so this depends on each of us
+  following it. Check the PR's checks before you press merge.
 - **Only deploy `main`.** Never deploy a feature branch, an unmerged change, or
   a dirty working tree to production. Once the new host is wired up, merging
   to `main` *is* the deploy, and manual deploys go away.
@@ -83,14 +84,9 @@ for fixes.
 
 Only tag commits that are on `main`.
 
-## Repository settings (admin, one-time)
+## Repository settings
 
-A repo admin sets up branch protection under **Settings → Rules → Rulesets**
-(or **Settings → Branches**), targeting `main`:
-
-- Require a pull request before merging
-- Require status checks to pass: `verify`
-- Require branches to be up to date before merging
-- Block force pushes and deletions
-
-Also under **Settings → General**: enable *Automatically delete head branches*.
+GitHub branch protection is not enabled (team decision), so nothing technically
+stops a direct push to `main`. These rules are enforced by convention. One
+setting is still worth turning on under **Settings → General**: *Automatically
+delete head branches*.
