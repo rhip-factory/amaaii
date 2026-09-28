@@ -30,6 +30,10 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ### Added
 
+- **`HOST` environment variable.** Chooses the network interface the server
+  binds to. Unset keeps the old behavior (all interfaces). Set
+  `HOST=127.0.0.1` behind a reverse proxy on a shared machine so the app is
+  reachable only through the proxy.
 - **CI and branch discipline.** `.github/workflows/ci.yml` runs typecheck
   (server and web), the full test suite, and both production builds on
   every PR and every push to `main`. `CONTRIBUTING.md` sets out the rules:

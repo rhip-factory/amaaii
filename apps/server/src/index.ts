@@ -27,6 +27,10 @@ import {
 } from './messageHandler';
 
 const PORT = process.env.PORT || 3000;
+// Interface to bind. Unset = every interface (Node's default, what a container
+// host like Railway needs). Set HOST=127.0.0.1 behind a reverse proxy on a
+// shared box so the app is reachable only through nginx, never directly.
+const HOST = process.env.HOST || undefined;
 
 // P4-B: process-level safety net, installed BEFORE any async boot work
 // starts so nothing that happens during startServer() itself can slip
@@ -90,8 +94,8 @@ async function startServer(): Promise<void> {
     const stopWorker = startJobWorker();
 
     const app = createApp();
-    app.listen(Number(PORT), () => {
-      log.info(`Amaaii server started on port ${PORT}`);
+    app.listen(Number(PORT), HOST as string, () => {
+      log.info(`Amaaii server started on ${HOST ?? '*'}:${PORT}`);
       log.info(`WhatsApp webhook: http://localhost:${PORT}/webhook`);
       log.info(`PWA: http://localhost:${PORT}/`);
       log.info('Features Enabled', {

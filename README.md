@@ -54,6 +54,7 @@ All optional — the server boots without any of them.
 | `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_WHATSAPP_NUMBER` | WhatsApp sending + OTP delivery. Absent → OTP dev mode (code shown in the login UI). |
 | `OPENAI_API_KEY` | AI replies. Absent → canned fallback; triage/journaling unaffected. |
 | `PORT` | Express port (default 3000). |
+| `HOST` | Interface to bind (default: all). Set `127.0.0.1` when a reverse proxy on the same machine is the only public entrance. |
 | `AUTH_SECRET` | HMAC secret for bearer tokens + OTP hashes. **Set before any real deployment** — insecure dev default otherwise. |
 | `DB_PATH` | SQLite file (default `./amaaii.db`, auto-created). |
 | `TWILIO_SIGNATURE_ENFORCE` | `true`/`false`/unset — unset enforces webhook signatures only in production. |

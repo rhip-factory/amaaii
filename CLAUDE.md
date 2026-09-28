@@ -47,6 +47,7 @@ Full rules in `CONTRIBUTING.md`; the parts that bind Claude:
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER` — **optional**: both the Twilio and OpenAI clients are lazy, so the server boots without any credentials. With Twilio creds absent, `/auth/otp/request` switches to dev mode (code logged + returned inline as `devCode`, only when `NODE_ENV !== 'production'`).
 - `OPENAI_API_KEY` — lazy too; AI replies fail at call time (with a canned fallback), not at boot.
 - `PORT` — default 3000.
+- `HOST` — interface to bind. Unset = all interfaces (what Railway/containers need). Set `127.0.0.1` behind a reverse proxy on a shared box (red-bridge) so the app is reachable only through nginx.
 - `AUTH_SECRET` — HMAC secret for PWA bearer tokens and OTP code hashes (insecure dev default if unset).
 - `DB_PATH` — SQLite path, default `./amaaii.db`. Read at module load: set it before anything imports `apps/server/src/database.ts` (tests set `:memory:` first).
 - `TWILIO_SIGNATURE_ENFORCE` — `true`/`false`/unset; unset enforces webhook signatures only when `NODE_ENV=production`.
