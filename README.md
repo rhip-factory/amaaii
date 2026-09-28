@@ -106,6 +106,8 @@ Pilot-hardening work (Phase 4) made the parts of the system a real pilot deploym
 
 The repo ships a `Dockerfile` + `railway.json` for a single-process, single-origin deploy (Express serves the API *and* the Next.js static export on one port). `railway up` builds and ships it; the notes below are the parts that are easy to get wrong.
 
+- **Deploy only from a clean, up-to-date `main`.** `main` is production (see `CONTRIBUTING.md`). `railway up` uploads your local working directory, not what's on GitHub, so running it from a feature branch or a dirty tree ships code that never passed review or CI.
+
 - **A volume is mandatory, not optional.** The database is SQLite on disk, and a container filesystem is ephemeral — without a mounted volume, every redeploy silently discards all user data. Attach one (`railway volume add -m /data`) and point `DB_PATH` inside it (`/data/amaaii.db`). `GET /health/ready` is wired as the healthcheck precisely because it pings the DB, so a missing or unwritable volume fails the deploy loudly instead of quietly starting an amnesiac server.
 - **Volume mounts are root-owned; the app runs as `node`.** `docker-entrypoint.sh` starts as root, chowns the mount, then drops privileges via `gosu` before exec'ing node. Without it the first boot dies on `SQLITE_CANTOPEN: unable to open database file` and crash-loops. Don't add a `USER node` line to the Dockerfile — that reintroduces exactly this failure.
 - **`AUTH_SECRET` must be set.** It falls back to a hardcoded string that is published in this repo, and it keys both the bearer-token HMAC and the OTP code hashes — unset in production means anyone can forge a token for any phone number.
