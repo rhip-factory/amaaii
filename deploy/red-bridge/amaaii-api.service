@@ -1,0 +1,30 @@
+# /etc/systemd/system/amaaii-api.service — installed by the server owner (root).
+# After editing: sudo systemctl daemon-reload && sudo systemctl restart amaaii-api
+#
+# Amaaii is ONE process: Express serves the API and the built PWA on 8002.
+# There is no separate frontend, so the allocated amaaii-web/3002 slot is unused.
+[Unit]
+Description=amaaii API + PWA (Express, single process)
+After=network.target
+
+[Service]
+Type=simple
+User=amaaii
+Group=amaaii
+WorkingDirectory=/srv/amaaii/app
+# Node 22 lives in the amaaii user's own prefix (the system node is v20).
+# Config (PORT=8002, HOST=127.0.0.1, DB_PATH, secrets) is read from
+# /srv/amaaii/app/.env by dotenv at boot. Restart after changing it.
+ExecStart=/srv/amaaii/.local/opt/node/bin/node dist/apps/server/src/index.js
+Restart=always
+RestartSec=5
+# The app handles SIGTERM itself (stops the job poller, then exits 0).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
