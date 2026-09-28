@@ -33,6 +33,15 @@ pnpm only (`packageManager: pnpm@10.33.0`; `sqlite3` is in `pnpm.onlyBuiltDepend
 
 There is no linter. Do not add one unless asked.
 
+## Branch discipline — `main` is production
+
+Full rules in `CONTRIBUTING.md`; the parts that bind Claude:
+
+- **Never commit to or push `main` directly.** Before the first commit of any task, branch off an up-to-date `main` with a type prefix (`feat/`, `fix/`, `chore/`, `docs/`, `release/`, `hotfix/`) and land the work via PR. If a session starts with uncommitted work on `main`, move it to a branch before committing.
+- **CI (`.github/workflows/ci.yml`, job `verify`) must be green before merge** — it runs `pnpm typecheck`, `pnpm --filter web typecheck`, `pnpm test`, `pnpm build`, `pnpm build:web`. Run those locally before pushing; don't open a PR you know is red.
+- **Only `main` is ever deployed to production.** Never deploy a feature branch or a dirty tree (e.g. `railway up` from a branch uploads the local working directory, not what's on GitHub). The app is migrating off Railway; auto-deploy-on-merge to the new host will be added to the CI workflow.
+- **No long-lived branches** (no `develop`/`staging`). Don't merge PRs or push tags unless the user asks; release tags go only on `main` commits (process in `CONTRIBUTING.md`).
+
 ## Environment (`.env`)
 
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER` — **optional**: both the Twilio and OpenAI clients are lazy, so the server boots without any credentials. With Twilio creds absent, `/auth/otp/request` switches to dev mode (code logged + returned inline as `devCode`, only when `NODE_ENV !== 'production'`).

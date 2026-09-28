@@ -1,0 +1,56 @@
+# CI — the gate every change must pass before it can land on `main`.
+#
+# `main` is production (see CONTRIBUTING.md): nothing reaches it except through
+# a PR, and branch protection requires this workflow's `verify` job to pass.
+# The deploy step is deliberately absent for now — the app is moving off
+# Railway, and auto-deploy-on-merge gets wired here once the new host is chosen.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # Version comes from package.json's `packageManager` field.
+      - uses: pnpm/action-setup@v6
+
+      # Node 22 matches the Dockerfile's base image.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --frozen-lockfile: a PR that changes dependencies must commit the lockfile.
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (server + packages)
+        run: pnpm typecheck
+
+      - name: Typecheck (web)
+        run: pnpm --filter web typecheck
+
+      - name: Tests
+        run: pnpm test
+
+      # Build both production artifacts so a change that typechecks but can't
+      # build (tsconfig.build.json drift, a static-export-incompatible page)
+      # fails here rather than on the production host.
+      - name: Build server
+        run: pnpm build
+
+      - name: Build web (static export)
+        run: pnpm build:web

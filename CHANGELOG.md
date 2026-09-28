@@ -30,6 +30,12 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ### Added
 
+- **CI and branch discipline.** `.github/workflows/ci.yml` runs typecheck
+  (server and web), the full test suite, and both production builds on
+  every PR and every push to `main`. `CONTRIBUTING.md` sets out the rules:
+  `main` is production, changes land only through PRs with green CI, there
+  are no long-lived branches, and only `main` gets deployed. It also covers
+  the release/tagging process and the one-time branch-protection settings.
 - **Hosted deployment (Railway).** `Dockerfile`, `.dockerignore`,
   `railway.json`, and `docker-entrypoint.sh` for a single-process,
   single-origin container (Express serves the API and the Next.js static
