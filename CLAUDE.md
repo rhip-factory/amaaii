@@ -125,6 +125,15 @@ New tables (`packages/adapters/src/sqlite/connection.ts`): `consents` (append-on
 
 New table: `jobs` (`packages/adapters/src/sqlite/connection.ts`) — `type`, `status`, `payload` (JSON text), `run_at`, `attempts`, `dedupe_key`, `user_phone`, `locked_by`.
 
+## Hosted deployment — red-bridge (migration target, replacing Railway)
+
+A shared Debian 13 box (`ssh amaaii@151.115.89.219`, hostname `red-bridge`) that also runs another product (aureo). The server owner holds root; the `amaaii` user owns only `/srv/amaaii` and may run exactly `sudo systemctl restart amaaii-api|amaaii-web`. Files in `deploy/red-bridge/`: the systemd unit and nginx site (the owner installs these), `env.example` (production `.env` template) and `deploy.sh` (run on the server; deploys `origin/main` only).
+
+- **Allocated ports: 8002 (backend), 3002 (frontend).** Amaaii is single-process, so only 8002 is used and the `amaaii-web`/3002 slot stays empty. Aureo owns 8001/3001. Bind `HOST=127.0.0.1`; nginx is the sole public entrance.
+- **Node 22 lives in `/srv/amaaii/.local/opt/node`** (system node is v20); pnpm via corepack. Non-interactive SSH doesn't read `~/.profile`, so scripts `export PATH` themselves.
+- **SQLite lives at `/srv/amaaii/data/amaaii.db`**, outside the checkout, so `deploy.sh`'s `git reset --hard` can never touch it. The owner-provisioned Postgres database and Redis DB 2 are unused (a future Postgres port could use them).
+- **Box quirks (from the owner's handover):** outbound IPv6 doesn't route (IPv4 preferred in `/etc/gai.conf`; keep timeouts on outbound calls); outbound SMTP 25/465/587 is blocked; nginx's logs are the only ones that see hung requests.
+
 ## Hosted deployment (Railway, Docker)
 
 The first hosted deploy lives on Railway: project `amaaii`, service `amaaii-server`, public URL `https://amaaii-server-production.up.railway.app`, a 5 GB volume mounted at `/data`. Built from the repo's own `Dockerfile` (`railway.json` pins `builder: DOCKERFILE`), NOT Nixpacks — Nixpacks doesn't reliably infer pinned-pnpm + a native `sqlite3` that must actually compile + a two-step build where `build:web` has to finish before `build`. `railway up` deploys; `railway logs -d` is the runtime log, `railway logs --build` the build log.
