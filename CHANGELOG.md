@@ -30,6 +30,14 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ### Added
 
+- **Twilio sandbox join instructions on the login page (testing phase).**
+  OTP codes are sent from the Twilio WhatsApp sandbox, which only delivers to
+  numbers that have sent it the join phrase. Twilio accepts a send to a number
+  that hasn't joined and then drops it silently, so testers saw no error and
+  no code. The phone step now has a WhatsApp link pre-filled with
+  `join ride-call` for +1 415 523 8886, and the code step has a "No code?"
+  reminder. Set `SANDBOX_JOIN` in `apps/web/src/app/login/page.tsx` to `null`
+  to remove both once there's a real WhatsApp Business sender.
 - **`HOST` environment variable.** Chooses the network interface the server
   binds to. Unset keeps the old behavior (all interfaces). Set
   `HOST=127.0.0.1` behind a reverse proxy on a shared machine so the app is

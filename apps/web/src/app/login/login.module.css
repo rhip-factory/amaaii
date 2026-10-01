@@ -63,6 +63,55 @@
   line-height: 1.5;
 }
 
+/* Testing phase: Twilio sandbox join instructions (see SANDBOX_JOIN in
+   page.tsx). Informational, same chrome as .deletedNotice. */
+.sandboxNotice {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--lavender-soft);
+  color: var(--deep);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+.sandboxNotice p {
+  margin: 0 0 10px;
+}
+.waLink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  /* WhatsApp green with dark text: white on #25D366 fails contrast. */
+  background: #25d366;
+  color: #0b3d20;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  text-align: center;
+}
+.waLink:hover {
+  background: #1fbe5b;
+}
+.waLink:focus-visible {
+  outline: 2px solid var(--deep);
+  outline-offset: 2px;
+}
+.sandboxReminder {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  text-align: left;
+}
+.sandboxReminder a {
+  color: var(--deep);
+  font-weight: 600;
+}
+
 .phoneRow {
   border: 1.5px solid var(--lavender);
   border-radius: 12px;
