@@ -16,6 +16,17 @@ type Step = "phone" | "code";
 // — see the retryAfterSeconds handling below.
 const RESEND_COOLDOWN_SECONDS = 60;
 
+// Testing phase: OTP codes go out from the Twilio WhatsApp sandbox, which
+// only delivers to numbers that have first sent it the join phrase. Twilio
+// accepts a send to a number that hasn't joined and then drops it silently,
+// so the user sees no error, just a code that never arrives. Set to null
+// once we're on a real WhatsApp Business sender.
+const SANDBOX_JOIN: { phrase: string; display: string; waLink: string } | null = {
+  phrase: "join ride-call",
+  display: "+1 415 523 8886",
+  waLink: `https://wa.me/14155238886?text=${encodeURIComponent("join ride-call")}`,
+};
+
 export default function LoginPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("phone");
@@ -156,6 +167,23 @@ export default function LoginPage() {
           </p>
         )}
 
+        {step === "phone" && SANDBOX_JOIN && (
+          <div className={styles.sandboxNotice}>
+            <p>
+              <strong>Testing phase:</strong> first, send <strong>{SANDBOX_JOIN.phrase}</strong> on
+              WhatsApp to <strong>{SANDBOX_JOIN.display}</strong>. Then we can send you your code.
+            </p>
+            <a
+              href={SANDBOX_JOIN.waLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.waLink}
+            >
+              Open WhatsApp to join
+            </a>
+          </div>
+        )}
+
         {step === "phone" && (
           <form onSubmit={onPhoneSubmit} noValidate>
             <label htmlFor="phone" className={styles.label}>
@@ -235,6 +263,16 @@ export default function LoginPage() {
             >
               {submitting ? "Verifying…" : "Verify"}
             </button>
+
+            {SANDBOX_JOIN && (
+              <p className={styles.sandboxReminder}>
+                No code? Make sure you&rsquo;ve sent{" "}
+                <a href={SANDBOX_JOIN.waLink} target="_blank" rel="noopener noreferrer">
+                  {SANDBOX_JOIN.phrase}
+                </a>{" "}
+                to {SANDBOX_JOIN.display} on WhatsApp, then resend.
+              </p>
+            )}
 
             <p className={styles.resendRow}>
               {secondsLeft > 0 ? (
