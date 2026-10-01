@@ -11,9 +11,12 @@ else follows from that.
   web typecheck, tests, server build, web static export). GitHub branch
   protection is deliberately *not* enabled, so this depends on each of us
   following it. Check the PR's checks before you press merge.
-- **Only deploy `main`.** Never deploy a feature branch, an unmerged change, or
-  a dirty working tree to production. Once the new host is wired up, merging
-  to `main` *is* the deploy, and manual deploys go away.
+- **Merging to `main` is the deploy.** After `verify` passes on `main`, CI's
+  `deploy` job ships it to https://amaaii.com (red-bridge). Never deploy a
+  feature branch, an unmerged change, or a dirty working tree. If a deploy
+  has to be re-run by hand, use
+  `ssh amaaii@151.115.89.219 /srv/amaaii/app/deploy/red-bridge/deploy.sh`,
+  which deploys `origin/main` and nothing else.
 - **No long-lived branches.** There is no `develop` or `staging`. Branch off
   the latest `main`, keep the branch small, merge it, delete it.
 
@@ -90,3 +93,16 @@ GitHub branch protection is not enabled (team decision), so nothing technically
 stops a direct push to `main`. These rules are enforced by convention. One
 setting is still worth turning on under **Settings → General**: *Automatically
 delete head branches*.
+
+### Deploy key (admin, one-time)
+
+CI's `deploy` job needs a repository secret named `DEPLOY_SSH_KEY`, holding
+the private half of a deploy key. On the server, that key's `authorized_keys`
+entry is `command="/srv/amaaii/app/deploy/red-bridge/deploy.sh",restrict`. So
+whatever is sent with the key, the server runs `deploy.sh` and nothing else:
+no shell, no port forwarding. Until the secret is set, merges still pass CI,
+but the `deploy` job only warns that nothing was deployed.
+
+To rotate the key: generate a new ed25519 key, replace that line in
+`/srv/amaaii/.ssh/authorized_keys` (keep the `command=…,restrict` prefix),
+and update the secret.

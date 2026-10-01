@@ -1,9 +1,9 @@
 # CI — the gate every change must pass before it can land on `main`.
 #
 # `main` is production (see CONTRIBUTING.md): nothing reaches it except through
-# a PR, and branch protection requires this workflow's `verify` job to pass.
-# The deploy step is deliberately absent for now — the app is moving off
-# Railway, and auto-deploy-on-merge gets wired here once the new host is chosen.
+# a PR, and a PR merges only when this workflow's `verify` job passes. A push
+# to `main` (i.e. a merge) then runs `deploy`, which ships it to red-bridge
+# (https://amaaii.com).
 name: CI
 
 on:
@@ -11,9 +11,11 @@ on:
   push:
     branches: [main]
 
+# A newer push to a PR cancels the older run. On `main` it never does: a
+# cancelled run there could kill a deploy mid-build or mid-restart.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -54,3 +56,45 @@ jobs:
 
       - name: Build web (static export)
         run: pnpm build:web
+
+  # Ships `main` to red-bridge once `verify` passes on it.
+  #
+  # DEPLOY_SSH_KEY is a key that can do exactly one thing: the server's
+  # authorized_keys entry for it is `command="…/deploy.sh",restrict`, so
+  # whatever this job sends, the server runs deploy.sh and nothing else (no
+  # shell, no port forwarding). deploy.sh then deploys origin/main, so this
+  # job ships nothing GitHub hasn't already got.
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # One deploy at a time, and never cancel one already running.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to red-bridge
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          # red-bridge's ed25519 host key (public), read from
+          # /etc/ssh/ssh_host_ed25519_key.pub over an authenticated session.
+          # Pinned so the job refuses to talk to anything impersonating the box.
+          KNOWN_HOST: "151.115.89.219 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPDRui+ldZIVubSGLjkR5zkfrgRL0xOtpkXq1hCqV8Je"
+        run: |
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
+            echo "::warning::DEPLOY_SSH_KEY secret is not set, so this merge was NOT deployed. Deploy by hand: ssh amaaii@151.115.89.219 /srv/amaaii/app/deploy/red-bridge/deploy.sh"
+            exit 0
+          fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOST" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 amaaii@151.115.89.219
+
+      - name: Check https://amaaii.com
+        run: |
+          code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' https://amaaii.com/health/ready)
+          echo "https://amaaii.com/health/ready -> $code"
+          test "$code" = 200

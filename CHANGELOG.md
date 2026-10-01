@@ -30,6 +30,13 @@ All notable changes to Amaaii are documented here. This project adheres to
 
 ### Added
 
+- **Auto-deploy on merge.** A `deploy` job in `.github/workflows/ci.yml` ships
+  `main` to red-bridge (https://amaaii.com) once `verify` passes. It
+  authenticates with a deploy key forced to `deploy.sh` on the server (no
+  shell, no forwarding) and pins the server's host key. CI runs on `main` are
+  no longer cancelled by a newer push, so a deploy can't be killed halfway.
+  `deploy.sh` now takes a lock, so a CI deploy and a manual one can't overlap,
+  and it is safe to run even when the deploy replaces `deploy.sh` itself.
 - **Twilio sandbox join instructions on the login page (testing phase).**
   OTP codes are sent from the Twilio WhatsApp sandbox, which only delivers to
   numbers that have sent it the join phrase. Twilio accepts a send to a number
