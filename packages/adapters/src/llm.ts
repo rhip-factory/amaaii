@@ -165,9 +165,17 @@ export async function chat(
     ...(response_format ? { response_format } : {}),
   };
 
+  // On OpenRouter, only route to providers that neither store nor train on
+  // prompts — these are pregnancy health conversations. Enforced per
+  // request so it can't silently depend on account settings. (`zdr: true`
+  // is stricter but currently matches no OpenAI endpoint.)
+  const body = usingOpenRouter()
+    ? ({ ...params, provider: { data_collection: 'deny' } } as typeof params)
+    : params;
+
   incrementLlmCall();
   try {
-    return await getOpenAIClient().chat.completions.create(params);
+    return await getOpenAIClient().chat.completions.create(body);
   } catch (err) {
     incrementLlmFailure();
     throw err;

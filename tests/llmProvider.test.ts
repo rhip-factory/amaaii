@@ -41,6 +41,16 @@ describe('LLM provider selection', () => {
     expect(resolveModel('anthropic/claude-haiku-4.5')).toBe('anthropic/claude-haiku-4.5');
   });
 
+  it('sends no OpenRouter-only fields to OpenAI', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', '');
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test-openai');
+    const create = vi
+      .spyOn(getOpenAIClient().chat.completions, 'create')
+      .mockResolvedValue(fakeCompletion() as never);
+    await chat([{ role: 'user', content: 'hello' }], { model: 'gpt-3.5-turbo' });
+    expect(create.mock.calls[0][0]).not.toHaveProperty('provider');
+  });
+
   it('LLM_MODEL overrides every caller', () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test');
     vi.stubEnv('LLM_MODEL', 'openai/gpt-4o-mini');
@@ -54,7 +64,10 @@ describe('LLM provider selection', () => {
       .spyOn(getOpenAIClient().chat.completions, 'create')
       .mockResolvedValue(fakeCompletion() as never);
     await chat([{ role: 'user', content: 'hello' }], { model: 'gpt-3.5-turbo' });
-    expect(create.mock.calls[0][0]).toMatchObject({ model: 'openai/gpt-3.5-turbo' });
+    expect(create.mock.calls[0][0]).toMatchObject({
+      model: 'openai/gpt-3.5-turbo',
+      provider: { data_collection: 'deny' },
+    });
   });
 
   it('isLlmConfigured is true with either key and false with neither', () => {
