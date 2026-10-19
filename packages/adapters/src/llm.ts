@@ -26,8 +26,15 @@
 // boot without OPENAI_API_KEY set. Constructing lazily, on the first
 // real chat() call, defers that failure to the point an actual
 // completion is attempted, where callers already have a try/catch
-// (services/amaaii.js) or an existing `if (!OPENAI_API_KEY) return null`
+// (services/amaaii.js) or an existing `if (!isLlmConfigured()) return null`
 // short-circuit (services/llmExtract.js).
+//
+// PROVIDER: OpenAI directly, or OpenRouter (an OpenAI-compatible gateway
+// that routes to OpenAI and other model vendors). OPENROUTER_API_KEY set
+// wins; otherwise OPENAI_API_KEY. The same `openai` SDK speaks to both —
+// only the baseURL and the model id format (`openai/gpt-3.5-turbo` vs
+// `gpt-3.5-turbo`) differ, and resolveModel() below handles the latter so
+// callers keep passing plain OpenAI model names.
 
 import OpenAI from 'openai';
 import { redactForLLM } from '@amaaii/core';
@@ -69,12 +76,44 @@ export interface ChatOptions {
 }
 
 const DEFAULT_MODEL = 'gpt-3.5-turbo';
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 let cachedClient: OpenAI | null = null;
 
+function usingOpenRouter(): boolean {
+  return !!process.env.OPENROUTER_API_KEY;
+}
+
+/** True when either provider has a key — callers short-circuit on false. */
+export function isLlmConfigured(): boolean {
+  return !!(process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY);
+}
+
+/**
+ * LLM_MODEL, when set, overrides every caller's model (one switch for the
+ * whole app, e.g. `openai/gpt-4o-mini`). Otherwise the caller's plain
+ * OpenAI name is used, prefixed with `openai/` on OpenRouter so it hits
+ * the same model there.
+ */
+export function resolveModel(requested: string): string {
+  if (process.env.LLM_MODEL) return process.env.LLM_MODEL;
+  if (usingOpenRouter() && !requested.includes('/')) return `openai/${requested}`;
+  return requested;
+}
+
 export function getOpenAIClient(): OpenAI {
   if (cachedClient) return cachedClient;
-  cachedClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  cachedClient = usingOpenRouter()
+    ? new OpenAI({
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseURL: OPENROUTER_BASE_URL,
+        // Optional attribution headers OpenRouter shows on its dashboard.
+        defaultHeaders: {
+          'HTTP-Referer': process.env.PUBLIC_BASE_URL || 'https://amaaii.com',
+          'X-Title': 'Amaaii',
+        },
+      })
+    : new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return cachedClient;
 }
 
@@ -119,16 +158,24 @@ export async function chat(
   const redactedMessages = messages.map((m) => redactMessage(m, user));
 
   const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-    model,
+    model: resolveModel(model),
     messages: redactedMessages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     ...(max_tokens != null ? { max_tokens } : {}),
     ...(temperature != null ? { temperature } : {}),
     ...(response_format ? { response_format } : {}),
   };
 
+  // On OpenRouter, only route to providers that neither store nor train on
+  // prompts — these are pregnancy health conversations. Enforced per
+  // request so it can't silently depend on account settings. (`zdr: true`
+  // is stricter but currently matches no OpenAI endpoint.)
+  const body = usingOpenRouter()
+    ? ({ ...params, provider: { data_collection: 'deny' } } as typeof params)
+    : params;
+
   incrementLlmCall();
   try {
-    return await getOpenAIClient().chat.completions.create(params);
+    return await getOpenAIClient().chat.completions.create(body);
   } catch (err) {
     incrementLlmFailure();
     throw err;

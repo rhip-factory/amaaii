@@ -4,7 +4,7 @@
 // packages/adapters/src/llm.ts (P1-D's "LLM redaction layer"), which
 // redacts user/assistant message content before it reaches OpenAI. That
 // chokepoint also owns the lazy client init, so this file doesn't need
-// OPENAI_API_KEY to be set just to load.
+// an LLM API key (OPENAI_API_KEY or OPENROUTER_API_KEY) to be set just to load.
 //
 // The three prompt constants below are byte-identical to the JS
 // original — this is load-bearing product copy (see
