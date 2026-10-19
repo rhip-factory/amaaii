@@ -1,7 +1,7 @@
 // apps/server/src/jobWorker.ts (P4-A poller) + the migrated check-in
 // follow-up in apps/server/src/messageHandler.ts. Follows
 // tests/messageHandler.test.js's pattern (tsx/cjs require, in-memory DB,
-// dummy +2547000000xx phones, twilio __setSendImpl seam) since jobWorker
+// dummy +2547000000xx phones, whatsapp __setSendImpl seam) since jobWorker
 // and messageHandler both pull in the apps/server/src/database.ts
 // process-wide singleton.
 //
@@ -28,7 +28,7 @@ process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
 
 const db = require('../apps/server/src/database');
-const tw = require('../packages/adapters/src/twilio');
+const tw = require('../packages/adapters/src/whatsapp');
 const worker = require('../apps/server/src/jobWorker');
 const mh = require('../apps/server/src/messageHandler');
 

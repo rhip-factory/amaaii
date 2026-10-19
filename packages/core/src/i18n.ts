@@ -116,6 +116,10 @@ const STRINGS: Record<Lang, StringDict> = {
     rec_appetite_poor: "Try small, frequent meals if appetite is low",
     rec_movement: "Monitor baby movements closely today",
 
+    // Voice notes, photos, etc. — the bot can only triage text, so this
+    // must still point at a facility for anything urgent.
+    unsupported_message_type: "Sorry, I can only read text messages for now — please type your message. 💚\n\n⚠️ If you have heavy bleeding, a severe headache, blurred vision, fits, severe abdominal pain, or your baby has stopped moving, go to the nearest health facility immediately.",
+
     // Generic error
     error_generic: "I apologize, but I'm having trouble processing your message. Please try again or type 'help' for assistance. If this is urgent, please contact your healthcare provider immediately.",
   },
@@ -204,6 +208,8 @@ const STRINGS: Record<Lang, StringDict> = {
     rec_water: "Ongeza unywaji wa maji hadi glasi 8-10 kila siku",
     rec_appetite_poor: "Jaribu chakula kidogo, mara nyingi ikiwa hamu ni ndogo",
     rec_movement: "Fuatilia mwendo wa mtoto kwa makini leo",
+
+    unsupported_message_type: "Samahani, kwa sasa ninaweza kusoma ujumbe wa maandishi tu — tafadhali andika ujumbe wako. 💚\n\n⚠️ Ikiwa unatokwa na damu nyingi, una maumivu makali ya kichwa, unaona ukungu, una degedege, maumivu makali ya tumbo, au mtoto ameacha kucheza tumboni, nenda kwenye kituo cha afya kilicho karibu mara moja.",
 
     error_generic: "Samahani, nina shida kuchakata ujumbe wako. Tafadhali jaribu tena au andika 'help' kwa msaada. Ikiwa ni ya dharura, tafadhali wasiliana na mtoa huduma wako wa afya mara moja.",
   },

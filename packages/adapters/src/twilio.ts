@@ -13,8 +13,6 @@ import twilio from 'twilio';
 // shortcut, carried over unchanged from P1-C).
 import { log } from '../../../apps/server/src/logger';
 
-export type SendImpl = (to: string, message: string) => Promise<unknown>;
-
 let cachedClient: ReturnType<typeof twilio> | null = null;
 
 export function getClient(): ReturnType<typeof twilio> {
@@ -25,7 +23,7 @@ export function getClient(): ReturnType<typeof twilio> {
   return cachedClient;
 }
 
-async function defaultSend(to: string, message: string): Promise<unknown> {
+export async function sendViaTwilio(to: string, message: string): Promise<unknown> {
   try {
     const response = await getClient().messages.create({
       body: message,
@@ -39,22 +37,4 @@ async function defaultSend(to: string, message: string): Promise<unknown> {
     log.error('Error sending WhatsApp message', error);
     throw error;
   }
-}
-
-// Test seam: callers (e.g. utils/messageHandler.js) destructure
-// `sendWhatsAppMessage` at require time, so we wrap a swappable impl
-// behind a stable function reference. Tests call __setSendImpl to inject
-// a no-op recorder; reset to defaultSend afterwards.
-let _impl: SendImpl = defaultSend;
-
-export async function sendWhatsAppMessage(to: string, message: string): Promise<unknown> {
-  return _impl(to, message);
-}
-
-export function __setSendImpl(fn?: SendImpl): void {
-  _impl = fn || defaultSend;
-}
-
-export function __resetSendImpl(): void {
-  _impl = defaultSend;
 }

@@ -117,7 +117,7 @@ export function getOpenAIClient(): OpenAI {
   return cachedClient;
 }
 
-// Test seam mirroring packages/adapters/src/twilio.ts's
+// Test seam mirroring packages/adapters/src/whatsapp.ts's
 // __setSendImpl/__resetSendImpl: lets tests inject a mock client (e.g. a
 // stub with a spied `chat.completions.create`) without a network call or
 // a real OPENAI_API_KEY, and lets them reset the singleton afterwards.

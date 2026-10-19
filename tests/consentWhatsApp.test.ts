@@ -1,6 +1,6 @@
 // P3-B: WhatsApp-channel consent-gate tests, mirroring
 // tests/messageHandler.test.js's style (handleIncomingMessage +
-// twilio.__setSendImpl seam). Covers the stateless consent-gate flow
+// whatsapp.__setSendImpl seam). Covers the stateless consent-gate flow
 // (packages/core/src/i18n.ts's consent_request/consent_reprompt/
 // consent_thanks + messageHandler.ts's handleConsentGate): a brand-new
 // phone is asked for consent BEFORE profile onboarding, "I AGREE"
@@ -18,7 +18,7 @@ process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
 
 const db = require('../apps/server/src/database');
-const tw = require('../packages/adapters/src/twilio');
+const tw = require('../packages/adapters/src/whatsapp');
 const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
 const { CONSENT_VERSION, deriveConsentState, hasActiveConsent } = require('@amaaii/core');
 

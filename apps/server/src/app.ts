@@ -54,7 +54,8 @@ import * as auth from './auth';
 import * as providerAuth from './providerAuth';
 import { generateOtpCode, hashOtpCode, hashesMatch } from './otp';
 import { WEB_OUT_DIR, REPO_ROOT } from './paths';
-import { sendWhatsAppMessage } from '@amaaii/adapters';
+import { isWhatsAppConfigured, sendWhatsAppOtp } from '@amaaii/adapters';
+import { cloudWebhookReceive, cloudWebhookVerify } from './whatsappCloudWebhook';
 import {
   renderMetrics,
   incrementOtpRequest,
@@ -381,7 +382,7 @@ function isUniqueConstraintError(err: unknown): boolean {
 }
 
 export interface CreateAppOptions {
-  // Test seam only (mirrors @amaaii/adapters' twilio.ts __setSendImpl
+  // Test seam only (mirrors @amaaii/adapters' whatsapp.ts __setSendImpl
   // pattern): lets tests point the static-export serving at a small
   // fixture directory, or at a path that deliberately doesn't exist,
   // without depending on whether the real apps/web/out happens to be
@@ -420,6 +421,13 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   // the global error handler (registered LAST, below) ends up doing.
   // See middleware/requestObservability.ts's header for the full design.
   app.use(requestObservability);
+
+  // Meta WhatsApp Cloud API webhook. Registered BEFORE the global body
+  // parsers: its signature is an HMAC over the raw request bytes, so it
+  // needs express.raw() rather than an already-parsed JSON body. See
+  // whatsappCloudWebhook.ts.
+  app.get('/webhook/meta', cloudWebhookVerify);
+  app.post('/webhook/meta', express.raw({ type: '*/*', limit: '1mb' }), cloudWebhookReceive);
 
   app.use(bodyParser.urlencoded({ extended: false }));
   app.use(bodyParser.json());
@@ -585,17 +593,12 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       }
 
       const code = generateOtpCode();
-      const twilioConfigured = !!(
-        process.env.TWILIO_ACCOUNT_SID &&
-        process.env.TWILIO_AUTH_TOKEN &&
-        process.env.TWILIO_WHATSAPP_NUMBER
-      );
-
       let devCode: string | undefined;
-      if (twilioConfigured) {
+      if (isWhatsAppConfigured()) {
         try {
-          await sendWhatsAppMessage(
+          await sendWhatsAppOtp(
             normalized,
+            code,
             `Your Amaaii sign-in code is ${code}. It expires in 10 minutes.`
           );
         } catch (err) {
@@ -609,7 +612,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         }
         incrementOtpRequest('sent');
       } else {
-        log.info('OTP dev-mode code generated (no Twilio creds configured)', {
+        log.info('OTP dev-mode code generated (no WhatsApp creds configured)', {
           phone: normalized,
           code,
         });
@@ -620,7 +623,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       }
 
       // Only persist (and count against the rate limit) once delivery
-      // actually happened — a failed Twilio send above returns before this,
+      // actually happened — a failed WhatsApp send above returns before this,
       // so it doesn't burn a rate-limit slot or invalidate a still-good code.
       const sentTimestamps = [...pruneSentTimestamps(priorSends, now), now.toISOString()];
       await createOrReplaceOtp(
