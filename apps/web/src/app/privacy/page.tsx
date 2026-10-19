@@ -112,15 +112,16 @@ export default function PrivacyPage() {
         <section className={`${styles.section} ${styles.crossBorder}`}>
           <h2 className={styles.h2}>Who processes your data — including outside Kenya</h2>
           <p className={styles.body}>
-            We use two outside providers to run Amaaii, and both process data on servers{" "}
+            We use three outside providers to run Amaaii, and all three process data on servers{" "}
             <strong>outside Kenya, in the United States:</strong>
           </p>
           <ul className={styles.list}>
             <li>
-              <strong>OpenAI</strong> — powers the optional AI replies described above. Before anything
-              reaches OpenAI, we strip out identifying details like your phone number, email, and full
-              name from your message text; only your first name (if you&rsquo;ve shared one) may appear,
-              so a reply can still feel personal.
+              <strong>OpenRouter</strong> and <strong>OpenAI</strong> — power the optional AI replies
+              described above: OpenRouter passes the request on to the AI model, which is currently run by
+              OpenAI. Before anything leaves Amaaii, we strip out identifying details like your phone
+              number, email, and full name from your message text; only your first name (if you&rsquo;ve
+              shared one) may appear, so a reply can still feel personal.
             </li>
             <li>
               <strong>Twilio</strong> — delivers and receives your WhatsApp messages, and sends the
@@ -185,7 +186,7 @@ export default function PrivacyPage() {
           <p className={styles.body}>
             Amaaii huhifadhi taarifa zako za afya ili kukusaidia — hii ni lazima ili programu ifanye kazi.
             Matumizi ya AI kwa majibu ya kibinafsi ni hiari; ukikataa, bado utapata ukaguzi wa kila siku na
-            arifa za dharura. Taarifa zako zinaweza kuchakatwa na washirika wetu (OpenAI, Twilio) nje ya
+            arifa za dharura. Taarifa zako zinaweza kuchakatwa na washirika wetu (OpenRouter, OpenAI, Twilio) nje ya
             Kenya, Marekani. Unaweza kupakua, kubadilisha idhini yako, au kufuta akaunti yako wakati wowote
             kupitia Profaili.
           </p>

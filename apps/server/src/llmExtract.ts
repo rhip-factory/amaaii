@@ -12,7 +12,7 @@
 // "LLM redaction layer"), which redacts message content before it
 // reaches OpenAI and owns the lazy client init itself.
 
-import { chat } from '@amaaii/adapters';
+import { chat, isLlmConfigured } from '@amaaii/adapters';
 import { log } from './logger';
 
 const TIMEOUT_MS = 3000;
@@ -41,7 +41,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 // on the result before trusting a field — exactly mirroring the
 // original JS, which never had a static shape here either.
 export async function extract(instructions: string, userText: string): Promise<any> {
-  if (!process.env.OPENAI_API_KEY) return null;
+  if (!isLlmConfigured()) return null;
   try {
     const completion = await withTimeout(
       chat(
@@ -165,7 +165,7 @@ Examples:
 
 // Medical history (Phase D). Larger payload, longer timeout.
 export async function extractMedicalHistory(text: string): Promise<Record<string, unknown> | null> {
-  if (!process.env.OPENAI_API_KEY) return null;
+  if (!isLlmConfigured()) return null;
   const instructions = `You convert a free-text obstetric/medical narrative from a pregnant or postpartum mother into a structured profile.
 
 Return STRICT JSON with this exact shape (omit fields the user didn't mention; never invent):
