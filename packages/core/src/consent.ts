@@ -217,28 +217,54 @@ export function deriveConsentState(events: ConsentLedgerEvent[]): ConsentState {
 
 // ---------------------------------------------------------------------------
 // WhatsApp consent replies. The old check was a bare
-// /\b(agree|yes|nakubali|ndiyo)\b/, which granted consent on "I don't
-// agree", "before I agree, where can I read it?" and "WHAT IS AGREE I DONT
-// UNDERSTAND". Consent must be an unambiguous yes: only a short, anchored
-// affirmative grants; any negation or question never does.
+// /\b(agree|yes|nakubali|ndiyo)\b/, which granted consent on "before I
+// agree, where can I read it?" and "WHAT IS AGREE I DONT UNDERSTAND".
+//
+// Real mothers also write the yes INSIDE a longer message ("I AGREE. But
+// who will see my messages?", "Sawa, I agree. Ila hii ni ya siri?"), so
+// the reply is read clause by clause: a clause with an un-negated
+// agree/nakubali grants, unless that clause is conditional ("before I
+// agree", "I will agree after…") or is itself a question about agreeing
+// ("what is AGREE", "hii AGREE ni nini"). A bare yes/ndiyo also grants.
 // ---------------------------------------------------------------------------
 export type ConsentReply = 'grant' | 'decline' | 'question' | 'unclear';
 
-const CONSENT_GRANT =
-  /^(?:(?:ok(?:ay)?|sawa|yes|ndiyo|ndio|yeah|yap)[\s,]+)?(?:i\s+)?(?:agree|accept|nakubali|nimekubali|kubali)(?:[\s,]+(?:to\s+(?:this|that|it|the\s+(?:terms|privacy\s+notice))|na\s+(?:hii|masharti)))?$|^(?:yes|ndiyo|ndio)$/;
-const CONSENT_DECLINE = /^(?:stop|sitaki|unsubscribe|i\s+do\s+not\s+agree|i\s+don'?t\s+agree|sikubali|no\s+i\s+don'?t\s+agree)$/;
-const CONSENT_NEGATION = /\b(?:not|don'?t|do\s+not|never|no|sikubali|hapana|sitaki|si)\b/;
-const CONSENT_QUESTION = /\?|\b(?:what|why|how|who|where|when|which|before|explain|understand|nini|kwa\s*nini|vipi|nani|wapi|lini|sielewi|sijaelewa|eleza)\b/;
+const CONSENT_AFFIRM = /\b(?:agree|agreed|accept|nakubali|nimekubali|nimeshakubali|ninakubali|kubali)\b/;
+const CONSENT_BARE_YES = /^(?:(?:ok(?:ay)?|sawa)[\s,]+)?(?:yes|ndiyo|ndio|yeah)(?:[\s,]+(?:please|tafadhali))?$/;
+const CONSENT_DECLINE = /^(?:stop|sitaki|unsubscribe|no|hapana|i\s+do\s+not\s+agree|i\s+don'?t\s+agree|sikubali|no[\s,]+i\s+don'?t\s+agree)$/;
+// Anything before the agree word in the same clause that negates it or
+// makes it conditional/hypothetical.
+const CONSENT_NOT_YET = /\b(?:not|don'?t|do\s+not|never|no|sikubali|sitaki|before|if|after|once|when|will|would|should|could|can|do|does|kabla|kama|nikiandika|nikisema|nitakuwa)\b/;
+const CONSENT_QUESTION_WORDS = /\b(?:what|why|how|who|where|which|explain|understand|nini|kwa\s*nini|vipi|nani|wapi|lini|sielewi|sijaelewa|eleza|maana)\b/;
+
+function consentClauses(text: string): string[] {
+  return text
+    .split(/[.!?\n;:,]+|\s+(?:but|lakini|ila|however)\s+/)
+    .map((c) => c.trim())
+    .filter(Boolean);
+}
 
 export function classifyConsentReply(message: string): ConsentReply {
-  const text = message
-    .toLowerCase()
-    .replace(/[‘’]/g, "'")
-    .replace(/[*_~"!.\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}️]/gu, ' ')
-    .replace(/\s+/g, ' ')
+  const raw = message.toLowerCase().replace(/[‘’]/g, "'");
+  const hasQuestionMark = raw.includes('?');
+  const text = raw
+    .replace(/[*_~"\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}️]/gu, ' ')
+    .replace(/<\/?br\s*\/?>/g, ' ')
+    .replace(/[ \t]+/g, ' ')
     .trim();
-  if (CONSENT_DECLINE.test(text)) return 'decline';
-  if (CONSENT_QUESTION.test(text)) return 'question';
-  if (!CONSENT_NEGATION.test(text) && CONSENT_GRANT.test(text)) return 'grant';
+  const flat = text.replace(/[.!,]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  if (CONSENT_DECLINE.test(flat)) return 'decline';
+  if (CONSENT_BARE_YES.test(flat)) return 'grant';
+
+  for (const clause of consentClauses(text)) {
+    const m = clause.match(CONSENT_AFFIRM);
+    if (!m || m.index == null) continue;
+    const before = clause.slice(0, m.index);
+    if (CONSENT_NOT_YET.test(before)) continue;
+    if (CONSENT_QUESTION_WORDS.test(clause)) continue;
+    return 'grant';
+  }
+  if (hasQuestionMark || CONSENT_QUESTION_WORDS.test(text)) return 'question';
   return 'unclear';
 }
