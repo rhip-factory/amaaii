@@ -3,9 +3,14 @@
 // ONLY when regex fails to extract the expected shape — never for
 // triage (danger signs stay rule-based per spec §6.2).
 //
-// Calls GPT-3.5 with response_format json_object, a 3-second timeout,
-// and returns null on any failure so callers can fall back to "ask the
-// user to rephrase".
+// Calls the extraction model (LLM_EXTRACT_MODEL, else the app model) with
+// response_format json_object, a 6-second timeout, and returns null on any
+// failure so callers can fall back to "ask the user to rephrase".
+//
+// json_object is only a request: OpenAI honors it, but Claude models via
+// OpenRouter were seen wrapping the JSON in prose or a ```json fence, or
+// appending text after it — hence parseJsonReply() instead of a bare
+// JSON.parse().
 //
 // The OpenAI SDK is not imported here — every completion request goes
 // through the single chokepoint in packages/adapters/src/llm.ts (P1-D's
@@ -15,7 +20,52 @@
 import { chat, isLlmConfigured } from '@amaaii/adapters';
 import { log } from './logger';
 
-const TIMEOUT_MS = 3000;
+// The mother is waiting on this, so it stays tight — but 3s was clipping
+// healthy OpenRouter calls that finish in 1–3s.
+const TIMEOUT_MS = 6000;
+const MEDICAL_HISTORY_TIMEOUT_MS = 12000; // bigger payload, bigger reply
+
+/**
+ * Pulls the JSON object out of a model reply: the whole reply if it parses,
+ * else a ```json fenced block, else the first balanced `{...}` that parses.
+ * Throws when there's none, so callers' existing catch-and-log path runs.
+ */
+export function parseJsonReply(raw: string): any {
+  const text = raw.trim();
+  try {
+    return JSON.parse(text);
+  } catch {
+    // fall through to the lenient paths
+  }
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1]);
+    } catch {
+      // fall through
+    }
+  }
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (ch === '\\') i++;
+        else if (ch === '"') inString = false;
+      } else if (ch === '"') inString = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          break; // try the next '{'
+        }
+      }
+    }
+  }
+  throw new Error('no JSON object in LLM reply');
+}
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -54,13 +104,14 @@ export async function extract(instructions: string, userText: string): Promise<a
           max_tokens: 80,
           temperature: 0,
           response_format: { type: 'json_object' },
+          purpose: 'extract',
         }
       ),
       TIMEOUT_MS
     );
     const raw = completion.choices?.[0]?.message?.content;
     if (!raw) return null;
-    return JSON.parse(raw);
+    return parseJsonReply(raw);
   } catch (err) {
     log.warn('LLM extraction failed', { error: err instanceof Error ? err.message : String(err) });
     return null;
@@ -222,13 +273,14 @@ Output: {"gravida":3,"parity":2,"previous_deliveries":[{"mode":"cesarean","compl
           max_tokens: 500,
           temperature: 0,
           response_format: { type: 'json_object' },
+          purpose: 'extract',
         }
       ),
-      8000 // longer budget for the bigger payload
+      MEDICAL_HISTORY_TIMEOUT_MS
     );
     const raw = completion.choices?.[0]?.message?.content;
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parsed = parseJsonReply(raw) as Record<string, unknown>;
     // Soft normalization: strip empty arrays / nulls so callers get a tidy object.
     for (const key of Object.keys(parsed)) {
       const v = parsed[key];
