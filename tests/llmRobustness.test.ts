@@ -108,6 +108,13 @@ describe('empty AI replies', () => {
     expect(reply).toMatch(/having trouble processing your message/);
   });
 
+  it('gives replies room for Claude-length Swahili answers (cap ≥ 800)', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test');
+    const create = stubCreate('Pole sana, Wanjiru.');
+    await getAmaaiiResponse('hi', { userName: 'Wanjiru' });
+    expect((create.mock.calls[0][0] as { max_tokens: number }).max_tokens).toBeGreaterThanOrEqual(800);
+  });
+
   it('returns a real reply trimmed', async () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test');
     stubCreate('  Pole sana, Wanjiru. 💚 \n');

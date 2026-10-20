@@ -238,7 +238,12 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     // above.
     const completion = await chat(messages, {
       model: 'gpt-3.5-turbo',
-      max_tokens: 320,
+      // A safety cap, not a length target — the prompt keeps replies short.
+      // gpt-3.5 tops out ~125 tokens, but Claude 5.5 Swahili replies run
+      // 250–465, and an occasional thinking burst (seen even at 'minimal')
+      // reached 606. 320 cut those off mid-sentence. Only generated tokens
+      // are billed, so headroom costs nothing.
+      max_tokens: 800,
       temperature: 0.55, // tighter than before; warmer + less rambly
       user: { name: userName },
     });
