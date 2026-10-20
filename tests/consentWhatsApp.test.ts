@@ -230,7 +230,7 @@ describe('WhatsApp consent gate — questions and refusals never grant', () => {
     const phone = nextPhone();
     await deliver(phone, 'Hi');
     const reply = await deliver(phone, 'what is this and who sees my messages?');
-    expect(reply).toMatch(/pregnancy helper/i);
+    expect(reply).toMatch(/automated assistant/i);
     expect(reply).toMatch(/please reply with the word \*agree\*/i);
   });
 
@@ -256,5 +256,17 @@ describe('WhatsApp consent gate — a yes inside a longer message', () => {
     await deliver(phone, 'I AGREE. But who will see my messages?');
     const state = deriveConsentState(await db.getConsents(phone));
     expect(hasActiveConsent(state, 'data_processing')).toBe(true);
+  });
+});
+
+describe('WhatsApp consent gate — repeated questions get new answers', () => {
+  it('a second question gets more detail instead of the same text', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const first = await deliver(phone, 'is this a person or a bot?');
+    const second = await deliver(phone, 'ok but who runs it and who sees my messages?');
+    expect(first).toMatch(/automated assistant/i);
+    expect(second).toMatch(/More detail/);
+    expect(second).not.toBe(first);
   });
 });

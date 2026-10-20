@@ -131,6 +131,28 @@ describe('LLM-first onboarding', () => {
     expect(r.response).toMatch(/How far along/);
   });
 
+  it('"Baby was born 2 weeks ago, 16th Feb" records the birth, not a last period', async () => {
+    const p = phone();
+    await consented(p);
+    await db.updateUser(p, { name: 'Purity', age: 26 });
+    await say(p, 'hi');
+    slots = '{}';
+    await say(p, 'Baby was born 2 weeks ago, 16th Feb. Boy');
+    const user = await db.getUser(p);
+    expect(user.delivery_date).toBe(new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10));
+    expect(user.pregnancy_week).toBeNull();
+    expect(user.lmp).toBeNull();
+  });
+
+  it('"I\'m 11 weeks, due around 14 October" is week 11', async () => {
+    const p = phone();
+    await consented(p);
+    await db.updateUser(p, { name: 'Grace', age: 38 });
+    await say(p, 'hi');
+    await say(p, "I'm 11 weeks, IVF pregnancy, due date around 14 October");
+    expect((await db.getUser(p)).pregnancy_week).toBe(11);
+  });
+
   it('a mother who joins after the birth goes straight to postpartum', async () => {
     const p = phone();
     await consented(p);

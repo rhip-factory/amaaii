@@ -49,7 +49,7 @@ const TIRED_INTENSIFIER = '(?:so\\s+|very\\s+|extremely\\s+|really\\s+)?';
 //     moving" ARE danger signs.
 // When in doubt, leave the symptom in — a false alarm is cheaper than a miss.
 // ---------------------------------------------------------------------------
-const NEG_SYMPTOM = '(?:(?:heavy|severe|vaginal|bad|terrible|any)\\s+)?(?:bleeding|spotting|blood|fever|headaches?|pain|cramps?|cramping|swelling|discharge|vomiting|seizures?|convulsions?|dizziness|blurr(?:ed|y)\\s+vision|vision\\s+(?:problems?|changes?)|hot\\s+(?:or\\s+hard\\s+)?breasts?|contractions?|damu(?:\\s+(?:nyingi|chini))?|homa|maumivu(?:\\s+(?:makali|ya\\s+\\w+))?|kichwa|kifua|uvimbe|kizunguzungu)\\b(?:\\s+(?:at\\s+all|whatsoever|either|anymore|tena|today|leo|sasa))?';
+const NEG_SYMPTOM = '(?:(?:heavy|severe|vaginal|bad|terrible|any)\\s+)?(?:bleeding|spotting|blood|fever|headaches?|pain|cramps?|cramping|swelling|discharge|vomiting|seizures?|convulsions?|dizziness|blurr(?:ed|y)\\s+vision|vision\\s+(?:problems?|changes?)|hot\\s+(?:or\\s+hard\\s+)?breasts?|contractions?|damu(?:\\s+(?:nyingi|chini))?|homa|maumivu(?:\\s+(?:makali|ya\\s+\\w+))?|kichwa|kifua|uvimbe|kizunguzungu|cracks?|discomfort)\\b(?:\\s+(?:at\\s+all|whatsoever|either|anymore|tena|today|leo|sasa))?';
 const NEGATOR = '(?:no|never(?:\\s+had)?|without|hakuna|sina|bila|sijapata|sijaona|sijatokwa(?:\\s+na)?|(?:don\'?t|do\\s+not|didn\'?t|did\\s+not|haven\'?t|have\\s+not|hasn\'?t|has\\s+not|not)(?:\\s+(?:actually|really))?(?:\\s+(?:have|had|seen|see|got|noticed|felt|experienced))?)';
 const NEG_FILL = '(?:\\s+(?:any|a|an|more|much|real))*\\s+';
 const NEG_LIST_TAIL = `(?:(?:\\s*[,/]?\\s*(?:or|nor|wala|au)\\s+|\\s*(?:[,;/&]|\\band\\b|\\bna\\b)?\\s*\\b${NEGATOR}${NEG_FILL})${NEG_SYMPTOM})*`;
@@ -67,11 +67,20 @@ export const TRIAGE_NEUTRALIZERS: TriageNeutralizer[] = [
   { pattern: /\bhoma\s*bay\b/gi, replacement: 'homabay' },
   // Bleeding that is not vaginal: cracked nipples, gums, nose.
   { pattern: /\b(nipples?|gums?|nose)\b([^.?!]{0,30}?)\bbleed(?:ing|s)?\b/gi, replacement: '$1$2sore' },
-  // Resolved: "homa imeisha", "the bleeding stopped", "fever is gone".
-  { pattern: /\b(?:homa|damu|bleeding|fever|spotting|pain|maumivu)\s+(?:imeisha|imekwisha|haipo|imepungua|imeacha|ikirudi|has\s+stopped|stopped|is\s+gone|has\s+gone|went\s+away)\b/gi, replacement: ' none ' },
+  // Resolved: "homa imeisha", "the bleeding stopped", "fever is gone",
+  // "the spotting is nothing serious" (a clinician's reassurance).
+  { pattern: /\b(?:homa|damu|bleeding|fever|spotting|pain|maumivu)\s+(?:imeisha|imekwisha|haipo|imepungua|imeacha|ikirudi|has\s+stopped|stopped|is\s+gone|has\s+gone|went\s+away|(?:is|was)\s+nothing\s+serious)\b/gi, replacement: ' none ' },
+  // Normal postpartum lochia: "normal/light/lochia bleeding", "the bleeding
+  // is the normal one". "heavy bleeding" is deliberately not covered.
+  { pattern: /\b(?:normal|light|lochia|after-?birth)\s+(?:lochia\s+)?bleeding\b|\bthe\s+bleeding\s+is\s+(?:still\s+)?(?:the\s+normal|normal|light)\b/gi, replacement: ' none ' },
+  // Someone else's symptom: "dada yangu alipata spotting", "my sister had
+  // spotting".
+  { pattern: new RegExp(`\\b(?:my\\s+(?:sister|friend|mum|mother|cousin|neighbou?r)|dada\\s+yangu|rafiki\\s+yangu|mama\\s+yangu)\\b(?:\\s+\\w+){0,2}?\\s+(?:had|got|has|alipata|alikuwa\\s+na|ana)\\s+(?:a\\s+|some\\s+|kidogo\\s+)?${NEG_SYMPTOM}`, 'gi'), replacement: ' none ' },
+  // "I haven't fainted" (sijazimia).
+  { pattern: /\bsijazimia\b/gi, replacement: ' none ' },
   // A question about a medicine, not a thought of harm: "dawa ya malaria
   // inaweza kumdhuru mtoto?" ("can the malaria drug harm the baby?").
-  { pattern: /\b(?:dawa|medicine|medication|drug|tablets?|pills?|ultrasound|x-?ray|scan)\b(?:\s+\w+){0,4}?\s+(?:inaweza|itaweza|can|could|will|might)\s+(?:kumdhuru|kudhuru|harm|hurt)\s+(?:the\s+|my\s+)?(?:mtoto|baby)\b|\b(?:can|could|will|might|does|is)\s+(?:this|that|the|my)\s+(?:\w+\s+){0,2}?(?:medicine|medication|drug|tablets?|pills?|ultrasound|x-?ray|scan|injection|vaccine)\s+(?:harm|hurt)\s+(?:the\s+|my\s+)?baby\b/gi, replacement: ' none ' },
+  { pattern: /\b(?:dawa|medicine|medication|drug|tablets?|pills?|ultrasound|x-?ray|scan)\b(?:\s+\w+){0,4}?\s+(?:inaweza|itaweza|can|could|will|might)\s+(?:kumdhuru|kudhuru|harm|hurt)\s+(?:the\s+|my\s+)?(?:mtoto|baby)\b|\b(?:can|could|will|might|does|is)\s+(?:this|that|the|my)\s+(?:\w+\s+){0,2}?(?:medicine|medication|drug|tablets?|pills?|ultrasound|x-?ray|scan|injection|vaccine)\s+(?:harm|hurt)\s+(?:the\s+|my\s+)?baby\b|\b(?:can|could|will|might|does|would)\s+(?:it|this|that|the\s+\w+)\s+(?:also\s+)?(?:hurt|harm)\s+(?:the\s+|my\s+)?baby\b|\b(?:the|this|that)\s+\w+\s+(?:can|could|will|might)\s+(?:also\s+)?(?:hurt|harm)\s+(?:the\s+|my\s+)?baby\b/gi, replacement: ' none ' },
   // Negated self-harm: "sijafikiria kujiumiza wala kumdhuru mtoto".
   { pattern: new RegExp(`\\b${SELF_HARM_NEGATOR}\\s+${SELF_HARM_ITEM}(?:\\s*(?:,|or|nor|wala|au)\\s+${SELF_HARM_ITEM})*`, 'gi'), replacement: ' none ' },
   // Hypothetical: "nikipata homa au damu nyingi nitaenda", "if I get bleeding".
@@ -165,7 +174,7 @@ This cannot wait. Please go now and let me know once you're there. 💚`,
       // Severe pain. SW: "maumivu makali" (severe pain).
       { pattern: /\bsevere\s+pain\b|\bterrible\s+pain\b|\bunbearable\s+pain\b|\bmaumivu\s+makali\b/i, sign: 'Severe pain' },
       // Regular contractions / labour pains. SW: "maumivu kila dakika 10".
-      { pattern: /\b(?:pains?|contractions?|cramps?)\s+(?:coming\s+)?every\s+\d+\s*(?:-\s*\d+\s*)?(?:min|mins|minutes)\b|\bmaumivu\s+kila\s+dakika\b|\bmaumivu\s+(?:ya\s+)?uchungu\b/i, sign: 'Regular contractions' },
+      { pattern: /\b(?:pains?|contractions?|cramps?)\s+(?:coming\s+)?every\s+\d+\s*(?:-\s*\d+\s*)?(?:min|mins|minutes)\b|\bmaumivu\s+(?:\w+\s+){0,2}kila\s+dakika\b|\bmaumivu\s+(?:ya\s+)?uchungu\b/i, sign: 'Regular contractions' },
       // Persistent vomiting. SW: "kutapika sana", "kutapika kila saa",
       // "siwezi hata kunywa maji" (I can't even drink water).
       { pattern: /\bpersistent\s+vomiting\b|\bcan'?t\s+keep\b[^.]{0,20}\bdown\b|\bthrowing\s+up\s+constantly\b|\bvomiting\s+every\s+(?:hour|time)\b|\bkutapika\s+(?:sana|mfululizo|mara\s+nyingi)\b|\b(?:nina|me|na)tapika\s+(?:sana|mfululizo)\b|\b\w*tapika\s+kila\s+(?:saa|wakati|mara)\b|\b(?:siwezi|sijaweza)\s+(?:hata\s+)?kunywa\s+(?:hata\s+)?maji\b/i, sign: 'Persistent vomiting' },
@@ -179,7 +188,7 @@ This cannot wait. Please go now and let me know once you're there. 💚`,
       // hasn't/haven't been" between "baby" and "moving". SW: "mtoto
       // hatembei", "sijahisi mtoto", "mtoto hajatembea", "hasongi",
       // "anacheza/anasonga kidogo" (moving only a little).
-      { pattern: /\bbaby\s+(?:has|have|hasn'?t|haven'?t|is|isn'?t)?(?:\s+been)?\s+not\s+(?:been\s+)?moving\b|\bbaby\s+(?:hasn'?t|haven'?t|isn'?t)\s+(?:been\s+)?moving\b|\bbaby\s+not\s+moving\b|\bno\s+(?:fetal\s+)?movement\b|\bhaven'?t\s+felt\b[^.]{0,30}\bbaby\b|\b(?:haven'?t|hasn'?t|isn'?t|not)\s+(?:been\s+)?(?:feeling|felt|feel)\s+(?:the\s+)?baby\s+(?:move|moving)\b|\bdecreased\s+movement\b|\bbaby\s+(?:moved|moving)\s+less\b|\bless\s+(?:fetal\s+)?movement\b|\bmoving\s+(?:much\s+|a\s+lot\s+|way\s+|really\s+)?less\b|\b(?:baby|she|he)\s+(?:has\s+not|hasn'?t|did\s+not|didn'?t|has\s+stopped|stopped)\s+(?:moved|moving|kicking|kicked)\b|\b(?:only\s+)?(?:a\s+)?few\s+kicks\b|\bfewer\s+kicks\b|\bnot\s+kicking\b|\bmtoto\s+ha(?:tembei|jatembea)\b|\bsijahisi\s+mtoto\b|\bmtoto\s+hatembei\s+sana\b|\bhasongi\b|\bhachezi\b|\bhapigi\s+teke\b|\b(?:ana)?(?:songa|cheza)\s+kidogo\b/i, sign: 'Reduced fetal movement' },
+      { pattern: /\bbaby\s+(?:has|have|hasn'?t|haven'?t|is|isn'?t)?(?:\s+been)?\s+not\s+(?:been\s+)?moving\b|\bbaby\s+(?:hasn'?t|haven'?t|isn'?t)\s+(?:been\s+)?moving\b|\bbaby\s+not\s+moving\b|\bno\s+(?:fetal\s+)?movement\b|\bhaven'?t\s+felt\b[^.]{0,30}\bbaby\b|\b(?:haven'?t|hasn'?t|isn'?t|not)\s+(?:been\s+)?(?:feeling|felt|feel)\s+(?:the\s+)?baby\s+(?:move|moving)\b|\bdecreased\s+movement\b|\bbaby\s+(?:moved|moving)\s+less\b|\bless\s+(?:fetal\s+)?movement\b|\bmoving\s+(?:much\s+|a\s+lot\s+|way\s+|really\s+)?less\b|\b(?:baby|she|he)\s+(?:has\s+not|hasn'?t|did\s+not|didn'?t|has\s+stopped|stopped)\s+(?:moved|moving|kicking|kicked)\b|\b(?:only\s+)?(?:a\s+)?few\s+kicks\b|\bfewer\s+kicks\b|\bnot\s+kicking\b|\bmtoto\s+ha(?:tembei|jatembea)\b|\bsijahisi\s+mtoto\b|\bmtoto\s+hatembei\s+sana\b|\bhasongi\b|\bhachezi\b|\bhaja(?:cheza|songa)\b|\bhapigi\s+teke\b|\b(?:ana)?(?:songa|cheza)\s+kidogo\b/i, sign: 'Reduced fetal movement' },
       { pattern: /\bsudden\s+weight\s+gain\b|\bgained\b[^.]{0,15}\b(?:pounds|kg|kilos)\b[^.]{0,15}\bweek\b/i, sign: 'Sudden weight gain' },
       // Violence or a fall in pregnancy. SW: "alinipiga/amenipiga" (he hit
       // me), "nimeanguka" (I fell).

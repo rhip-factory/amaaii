@@ -102,10 +102,12 @@ export async function extract(instructions: string, userText: string): Promise<a
         ],
         {
           model: 'gpt-3.5-turbo',
-          // 80 was enough for gpt-3.5, but Claude models spend ~70 tokens
-          // reasoning even at minimal effort and then return nothing (194
-          // of 227 extractions came back empty in the 2026-10 simulation).
-          max_tokens: 300,
+          // 80 was enough for gpt-3.5, but Claude models spend tokens
+          // reasoning even at minimal effort and then return nothing: 194
+          // of 227 extractions came back empty at 80, and 117 of 870 still
+          // did at 300 (the longer triage/onboarding prompts). Only
+          // generated tokens are billed, so the headroom is nearly free.
+          max_tokens: 600,
           temperature: 0,
           response_format: { type: 'json_object' },
           purpose: 'extract',
