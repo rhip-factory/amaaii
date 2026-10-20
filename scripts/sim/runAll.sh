@@ -5,7 +5,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 # OPENROUTER_API_KEY (or SIM_OPENROUTER_API_KEY) comes from SIM_ENV_FILE (default ./.env).
 export SIM_ENV_FILE=${SIM_ENV_FILE:-.env}
-RUN=${1:?runName}; ARMS=${2:-"H S"}; CONC=${3:-6}; MAXB=${4:-999}; shift 4 || true
+RUN=${1:?runName}; ARMS=${2:-"H S"}; CONC=${3:-6}; MAXB=${4:-999}
+# Anything after the 4th argument is a persona filter.
+if [ $# -gt 4 ]; then shift 4; else set --; fi
 PERSONAS=${*:-$(node_modules/.bin/tsx -e "import {PERSONAS} from './scripts/sim/personas'; console.log(PERSONAS.map(p=>p.id).join(' '))")}
 OUT="sim-runs/$RUN"; mkdir -p "$OUT"
 export SIM_BASELINE_USAGE=${SIM_BASELINE_USAGE:-$(node -e 'require("dotenv").config({path:process.env.SIM_ENV_FILE||".env",quiet:true});const k=process.env.SIM_OPENROUTER_API_KEY||process.env.OPENROUTER_API_KEY;fetch("https://openrouter.ai/api/v1/key",{headers:{Authorization:"Bearer "+k}}).then(r=>r.json()).then(j=>console.log(j.data.usage))')}

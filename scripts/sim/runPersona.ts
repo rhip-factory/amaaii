@@ -62,7 +62,8 @@ setSimTime(JOIN_DATE);
 
 // --- app modules (after env + clock) ----------------------------------------
 const db = require('../../apps/server/src/database');
-const tw = require('../../packages/adapters/src/twilio');
+// Transport-neutral send seam (whatsapp.ts picks Twilio or Meta); stubbed below.
+const tw = require('../../packages/adapters/src/whatsapp');
 const llm = require('../../packages/adapters/src/llm');
 const mh = require('../../apps/server/src/messageHandler');
 const jw = require('../../apps/server/src/jobWorker');
