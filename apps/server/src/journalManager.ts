@@ -187,11 +187,19 @@ class JournalManager {
     await db.deleteJournalSession(userPhone);
   }
 
+  /**
+   * `opts.canAi` (default true, for direct callers/tests): with the optional
+   * ai_responses consent declined, the llm.extract* fallbacks below are
+   * skipped and only the deterministic parsers run — declining AI must
+   * mean the model never sees her words.
+   */
   async processJournalResponse(
     userPhone: string,
     message: string,
-    currentStage?: string
+    currentStage?: string,
+    opts: { canAi?: boolean } = {}
   ): Promise<JournalResponseResult> {
+    const canAi = opts.canAi !== false;
     const dbSession = await db.getJournalSession(userPhone);
     if (!dbSession) {
       return { error: true, message: 'No active journal session' };
@@ -253,7 +261,7 @@ class JournalManager {
         let moodScore = coreExtractNumber(message);
         if (!(moodScore && moodScore >= 1 && moodScore <= 10)) {
           // Regex missed → ask the LLM to interpret.
-          const out = await llm.extractMood(message);
+          const out = canAi ? await llm.extractMood(message) : null;
           if (out && out.mood) moodScore = out.mood;
         }
         const moodValid = !!(moodScore && moodScore >= 1 && moodScore <= 10);
@@ -308,7 +316,7 @@ class JournalManager {
         // LLM fallback if either signal is missing — covers phrasings
         // like "really bad, only 3 hours" or Kiswahili input.
         if (journalUpdate.sleep_quality == null || journalUpdate.sleep_hours == null) {
-          const out = await llm.extractSleep(message);
+          const out = canAi ? await llm.extractSleep(message) : null;
           if (out) {
             if (journalUpdate.sleep_quality == null && out.quality != null) {
               journalUpdate.sleep_quality = out.quality;
@@ -333,7 +341,7 @@ class JournalManager {
       case 'baby_movement': {
         let movementCount = coreExtractNumber(message);
         if (movementCount === null) {
-          const out = await llm.extractMovement(message);
+          const out = canAi ? await llm.extractMovement(message) : null;
           if (out && out.count != null) movementCount = out.count;
         }
         if (movementCount === null && looksLikeOffTopic(message)) {
@@ -362,7 +370,7 @@ class JournalManager {
       case 'water': {
         let waterCount = coreExtractNumber(message);
         if (waterCount === null) {
-          const out = await llm.extractWater(message);
+          const out = canAi ? await llm.extractWater(message) : null;
           if (out && out.glasses != null) waterCount = out.glasses;
         }
         if (waterCount !== null) {
@@ -391,7 +399,7 @@ class JournalManager {
       case 'appetite': {
         let appetiteLevel: string | null = parseAppetiteAnswer(message);
         if (appetiteLevel === null) {
-          const out = await llm.extractAppetite(message);
+          const out = canAi ? await llm.extractAppetite(message) : null;
           if (out && out.appetite) appetiteLevel = out.appetite;
         }
         if (appetiteLevel === null && looksLikeOffTopic(message)) {

@@ -107,6 +107,8 @@ export interface ConversationRow {
   danger_signs_detected: string | null;
   urgency_level: string | null;
   context: string | null;
+  /** 'whatsapp' | 'web' (column added 2026-10; older rows default to 'whatsapp'). */
+  channel?: string | null;
   timestamp: string;
 }
 
@@ -114,6 +116,8 @@ export interface ConversationAnalysis {
   dangerSigns?: unknown[];
   urgencyLevel?: string;
   context?: string;
+  /** Which surface the turn came from (default 'whatsapp'). */
+  channel?: 'whatsapp' | 'web';
 }
 
 export interface LastBotMessageRow {

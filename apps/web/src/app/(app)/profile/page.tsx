@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { whatsappDisplay, whatsappLink } from "@/lib/whatsapp";
 import PageContainer from "@/components/PageContainer";
 import PrivacySection from "@/components/PrivacySection";
 import { ApiError, updateMe } from "@/lib/api";
@@ -154,8 +155,16 @@ export default function ProfilePage() {
           <span className={styles.phoneValue}>{me?.user.phone?.replace(/^whatsapp:/, "") || "—"}</span>
         </div>
         <p className={styles.fineprint}>
-          Your phone is your account. Conversations on WhatsApp and the web stay in sync because they
-          share this number.
+          Your phone is your account. Your chat with Amaaii is the same on WhatsApp and here — messages
+          from either show up in both.
+          {whatsappLink() && (
+            <>
+              {" "}
+              <a href={whatsappLink("Hi Amaaii")!} target="_blank" rel="noopener noreferrer">
+                Open Amaaii on WhatsApp ({whatsappDisplay()})
+              </a>
+            </>
+          )}
         </p>
       </div>
 

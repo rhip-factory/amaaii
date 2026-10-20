@@ -10,6 +10,7 @@ export * from './trend';
 export * from './onboarding';
 export * from './journal';
 export * from './commands';
+export * from './text';
 export * from './repositories';
 export * from './redaction';
 export * from './otp';

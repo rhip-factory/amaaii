@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import bodyParser from 'body-parser';
-import { handleIncomingMessage, processMessage } from './messageHandler';
+import { handleIncomingMessage, handleUnsupportedMedia, processMessage, scheduleEscalationFollowup } from './messageHandler';
 import {
   getUser,
   updateUser,
@@ -518,9 +518,15 @@ export function createApp(opts: CreateAppOptions = {}): Express {
   // Twilio WhatsApp webhook
   app.post('/webhook', twilioSignature, async (req: Request, res: Response) => {
     try {
-      const { From, Body, ProfileName } = req.body;
-      log.info('Received message', { From, ProfileName, Body });
-      await handleIncomingMessage(From, Body, ProfileName);
+      const { From, Body, ProfileName, NumMedia } = req.body;
+      log.info('Received message', { From, ProfileName, Body, NumMedia });
+      if (Number(NumMedia) > 0 && !String(Body ?? '').trim()) {
+        // A voice note or photo with no caption: it used to arrive as an
+        // empty message and be parsed as an onboarding/journal answer.
+        await handleUnsupportedMedia(From);
+      } else {
+        await handleIncomingMessage(From, String(Body ?? ''), ProfileName);
+      }
       res.status(200).send('Message received');
     } catch (error) {
       log.error('Error processing message', error);
@@ -981,6 +987,18 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       log.info('PWA message received', { phone: req.userPhone, message });
       const userPhone = req.userPhone as string;
       const result = await processMessage(userPhone, message, null, { channel: 'web' });
+      // An escalation in the app gets the same 1-hour WhatsApp follow-up —
+      // but only when she messaged on WhatsApp in the last ~day, since
+      // WhatsApp only delivers free-form text inside that window.
+      if (result.urgencyLevel === 'high' || result.urgencyLevel === 'critical') {
+        const recent = await getConversationHistory(userPhone, 50).catch(() => []);
+        const dayAgo = Date.now() - 23 * 60 * 60 * 1000;
+        const onWhatsApp = recent.some((c) =>
+          (c.channel ?? 'whatsapp') === 'whatsapp'
+          && Date.parse(`${c.timestamp.replace(' ', 'T')}Z`) > dayAgo
+        );
+        if (onWhatsApp) await scheduleEscalationFollowup(userPhone, result.urgencyLevel);
+      }
       // No audit row when consentRequired — nothing was actually
       // processed/stored for this turn (see processMessage's "minimum
       // storage" note), so there is no data-access event to log yet.
@@ -1210,6 +1228,39 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       res.json({ days });
     } catch (err) {
       log.error('GET /history failed', err);
+      res.status(500).json({ error: 'internal_error' });
+    }
+  });
+
+  // The chat both surfaces share (2026-10): the PWA chat used to open
+  // empty even though Profile promised WhatsApp and the app "stay in
+  // sync". Oldest first; consent-gate turns (pre-consent) are left out.
+  app.get('/conversations', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userPhone = req.userPhone as string;
+      const user = await userManager.getUserForRead(userPhone);
+      if (!user) {
+        res.status(401).json({ error: 'no_account', message: 'This account no longer exists.' });
+        return;
+      }
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const rows = await getConversationHistory(userPhone, limit);
+      const turns = rows
+        .filter((r) => r.context !== 'consent_gate')
+        .reverse()
+        .map((r) => ({
+          id: r.id,
+          at: r.timestamp,
+          channel: r.channel ?? 'whatsapp',
+          // System-initiated turns (the 1-hour follow-up) have no message.
+          message: r.message && !/^\[(?:System Follow-up|media)\]$/.test(r.message) ? r.message : null,
+          response: r.response,
+          urgencyLevel: r.urgency_level,
+        }));
+      await recordAuditSafe({ actor: userPhone, action: 'read', resource: 'conversation', resourceOwner: userPhone });
+      res.json({ turns });
+    } catch (err) {
+      log.error('GET /conversations failed', err);
       res.status(500).json({ error: 'internal_error' });
     }
   });

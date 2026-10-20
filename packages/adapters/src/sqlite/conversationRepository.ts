@@ -19,12 +19,12 @@ export class SqliteConversationRepository implements ConversationRepository {
     analysis: ConversationAnalysis = {}
   ): Promise<number> {
     return new Promise((resolve, reject) => {
-      const { dangerSigns, urgencyLevel, context } = analysis;
+      const { dangerSigns, urgencyLevel, context, channel } = analysis;
 
       this.db.run(
         `INSERT INTO conversations
-         (user_phone, message, response, danger_signs_detected, urgency_level, context)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         (user_phone, message, response, danger_signs_detected, urgency_level, context, channel)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           userPhone,
           message,
@@ -32,6 +32,7 @@ export class SqliteConversationRepository implements ConversationRepository {
           JSON.stringify(dangerSigns || []),
           urgencyLevel,
           context,
+          channel ?? 'whatsapp',
         ],
         function (err) {
           if (err) reject(err);

@@ -12,7 +12,7 @@
 // porting.
 
 import { chat } from '@amaaii/adapters';
-import { t } from '@amaaii/core';
+import { t, trimToLastSentence } from '@amaaii/core';
 import type { ConversationRow, MedicalHistoryRecord } from '@amaaii/core';
 import { log } from './logger';
 
@@ -141,6 +141,10 @@ export interface AmaaiiContext {
   trendLine?: string;
   /** optional structured medical history (Phase D) */
   medicalHistory?: MedicalHistoryRecord | null;
+  /** The PWA's public URL (PUBLIC_BASE_URL), so the AI can point her to it. */
+  appUrl?: string | null;
+  /** Which surface she is writing from. */
+  channel?: 'whatsapp' | 'web';
 }
 
 // Turns that carry no conversational memory: consent, onboarding and
@@ -204,6 +208,8 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
       language,
       trendLine,
       medicalHistory,
+      appUrl,
+      channel,
     } = context;
 
     const systemPrompt = BASE_SYSTEM_PROMPT;
@@ -260,6 +266,12 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     }
     const memory = memoryLines(conversationHistory, new Date());
     ctxLines.push(...memory);
+    // WhatsApp and the app are one Amaaii: same number, same history.
+    if (channel === 'web') {
+      ctxLines.push('She is writing in the Amaaii app; the same chat continues on WhatsApp.');
+    } else if (appUrl) {
+      ctxLines.push(`There is an Amaaii app at ${appUrl} (sign in with this WhatsApp number) with her check-ins, charts and profile — mention it only when it helps (she asks about charts, progress, or changing settings). "help" lists the WhatsApp commands.`);
+    }
     const userContextBlock = ctxLines.length
       ? `\n\nUSER_CONTEXT:\n- ${ctxLines.join('\n- ')}\n(Use this naturally — like a friend who remembers. Do not list it back.)`
       : '';
@@ -324,9 +336,13 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     // returns finish_reason 'length' and no text. Passing that through
     // sent the mother the literal word "null", so treat it as a failure
     // and fall back to the canned apology below.
-    const raw = completion.choices[0]?.message?.content?.trim();
+    let raw = completion.choices[0]?.message?.content?.trim();
     if (!raw) {
       throw new Error(`empty completion (finish_reason: ${completion.choices[0]?.finish_reason})`);
+    }
+    if (completion.choices[0]?.finish_reason === 'length') {
+      log.warn('AI reply hit the token cap; trimming to the last sentence', { length: raw.length });
+      raw = trimToLastSentence(raw);
     }
     // The model sometimes copies the "[NAME]" mask it sees in history;
     // she should never see a placeholder.

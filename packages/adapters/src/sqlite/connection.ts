@@ -72,6 +72,7 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
           lmp DATE,
           anc_visits INTEGER DEFAULT 0,
           language TEXT DEFAULT 'en',
+          delivery_date DATE,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -122,6 +123,7 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
           danger_signs_detected TEXT,
           urgency_level TEXT,
           context TEXT,
+          channel TEXT DEFAULT 'whatsapp',
           timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (user_phone) REFERENCES users(phone_number)
         )
@@ -130,6 +132,17 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
           if (err) log.error('Error creating conversations table', err);
         }
       );
+
+      // conversations.channel: which surface a turn came from, so the PWA
+      // chat can show WhatsApp history (and mark it) — 2026-10.
+      db.all<{ name: string }>(`PRAGMA table_info(conversations)`, (err, rows) => {
+        if (err) return;
+        if (!(rows || []).some((r) => r.name === 'channel')) {
+          db.run(`ALTER TABLE conversations ADD COLUMN channel TEXT DEFAULT 'whatsapp'`, (e) => {
+            if (e) log.error('Error adding conversations.channel column', e);
+          });
+        }
+      });
 
       db.run(
         `

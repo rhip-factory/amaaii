@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import styles from "./ChatView.module.css";
 import { SendIcon } from "./icons";
-import { ApiError, sendChatMessage } from "@/lib/api";
-import type { ChatMessage } from "@/lib/types";
+import { ApiError, fetchConversations, sendChatMessage } from "@/lib/api";
+import type { ChatMessage, ConversationTurn } from "@/lib/types";
+import { whatsappLink } from "@/lib/whatsapp";
 
 const SUGGESTIONS = [
   { label: "Say hi", msg: "Hi" },
@@ -14,6 +15,26 @@ const SUGGESTIONS = [
 
 function makeId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// GET /conversations rows -> bubbles. SQLite timestamps are UTC without a zone.
+function turnsToMessages(turns: ConversationTurn[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const t of turns) {
+    const timestamp = `${t.at.replace(" ", "T")}Z`;
+    if (t.message) out.push({ id: `h${t.id}u`, role: "user", text: t.message, timestamp, channel: t.channel });
+    if (t.response) {
+      out.push({
+        id: `h${t.id}b`,
+        role: "bot",
+        text: t.response,
+        urgency: t.urgencyLevel ?? undefined,
+        timestamp,
+        channel: t.channel,
+      });
+    }
+  }
+  return out;
 }
 
 function formatTime(iso: string): string {
@@ -35,6 +56,22 @@ export default function ChatView({ initialPrefill }: ChatViewProps) {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // One conversation across WhatsApp and the app: load what came before.
+  useEffect(() => {
+    let cancelled = false;
+    fetchConversations(50)
+      .then(({ turns }) => {
+        if (cancelled) return;
+        setMessages((prev) => [...turnsToMessages(turns), ...prev]);
+      })
+      .catch(() => {
+        /* offline or signed out: start with an empty chat, as before */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -92,6 +129,11 @@ export default function ChatView({ initialPrefill }: ChatViewProps) {
                   {s.label}
                 </button>
               ))}
+              {whatsappLink("Hi Amaaii") && (
+                <a className={styles.suggest} href={whatsappLink("Hi Amaaii")!} target="_blank" rel="noopener noreferrer">
+                  Chat on WhatsApp instead
+                </a>
+              )}
             </div>
           </div>
         )}
@@ -105,7 +147,10 @@ export default function ChatView({ initialPrefill }: ChatViewProps) {
             >
               {m.text}
             </div>
-            <span className={styles.timestamp}>{formatTime(m.timestamp)}</span>
+            <span className={styles.timestamp}>
+              {formatTime(m.timestamp)}
+              {m.channel === "whatsapp" ? " · on WhatsApp" : ""}
+            </span>
           </div>
         ))}
 
