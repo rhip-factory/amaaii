@@ -360,3 +360,54 @@ Messages may be in English, Kiswahili or Sheng.`,
   if (!['low', 'moderate', 'high', 'critical'].includes(urgency)) return null;
   return { urgency: urgency as LlmUrgency, reason: typeof out.reason === 'string' ? out.reason.slice(0, 120) : '' };
 }
+
+// LLM-first onboarding: one call reads every profile fact a mother put in
+// a free-text message ("Mimi ni Wanjiru, nina miaka 19, mimba ya miezi
+// mitano, niko Kisumu"), in any language. The caller validates every field
+// in plain code before saving anything — the model only proposes.
+export interface OnboardingSlots {
+  name?: string;
+  age?: number;
+  weeks?: number;
+  months?: number;
+  lmp?: string;
+  edd?: string;
+  location?: string;
+  language?: 'en' | 'sw';
+  babyBorn?: boolean;
+  deliveryDate?: string;
+  babyAgeDays?: number;
+}
+
+export async function extractOnboardingSlots(text: string, missing: string[]): Promise<OnboardingSlots | null> {
+  const today = new Date().toISOString().split('T')[0];
+  const out = await extract(
+    `You read a Kenyan mother's WhatsApp message to a pregnancy helper and pull out profile facts she CLEARLY states about herself. Today is ${today}. Still needed: ${missing.join(', ')}.
+Return STRICT JSON with only the keys you are sure of (omit the rest):
+{"name": string, "age": int, "weeks": int, "months": number, "lmp": "YYYY-MM-DD", "edd": "YYYY-MM-DD", "location": string, "language": "en"|"sw", "babyBorn": bool, "deliveryDate": "YYYY-MM-DD", "babyAgeDays": int}
+Rules:
+- name: only if she introduces herself ("I'm Faith", "naitwa Wanjiru", "ni mimi Akinyi"). Never a word like "pregnant" or "fine".
+- age: her age in years only. Never a medicine dose, a week count or a month count.
+- weeks/months: how far along the pregnancy is ("5 months" -> months 5, "wiki 20" -> weeks 20, "mwezi wa nne" -> months 3.5). lmp = last period date; edd = due date.
+- babyBorn: true if the baby has already been born ("nimejifungua", "I gave birth", "my baby is 2 weeks old"); then deliveryDate or babyAgeDays.
+- location: town/area she lives in ("Kisumu", "Kibera, Nairobi", "Homa Bay"). Not a hospital she is visiting.
+- language: "sw" if she writes mainly in Kiswahili or asks for Kiswahili; "en" if mainly English.
+- Kiswahili numbers: moja 1, mbili 2, tatu 3, nne 4, tano 5, sita 6, saba 7, nane 8, tisa 9, kumi 10, ishirini 20, thelathini 30, arobaini 40; "kumi na tisa" = 19.`,
+    text
+  );
+  if (!out || typeof out !== 'object') return null;
+  const r: OnboardingSlots = {};
+  const isDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (typeof out.name === 'string' && out.name.trim()) r.name = out.name.trim();
+  if (Number.isInteger(out.age)) r.age = out.age;
+  if (Number.isInteger(out.weeks)) r.weeks = out.weeks;
+  if (typeof out.months === 'number' && Number.isFinite(out.months)) r.months = out.months;
+  if (isDate(out.lmp)) r.lmp = out.lmp;
+  if (isDate(out.edd)) r.edd = out.edd;
+  if (typeof out.location === 'string' && out.location.trim()) r.location = out.location.trim();
+  if (out.language === 'sw' || out.language === 'en') r.language = out.language;
+  if (out.babyBorn === true) r.babyBorn = true;
+  if (isDate(out.deliveryDate)) r.deliveryDate = out.deliveryDate;
+  if (Number.isInteger(out.babyAgeDays)) r.babyAgeDays = out.babyAgeDays;
+  return Object.keys(r).length ? r : null;
+}

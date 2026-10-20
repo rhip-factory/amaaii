@@ -4,6 +4,8 @@
 // and "journal summary" (which the bot itself tells users to type)
 // started a new journal instead of showing the summary. Pure, no I/O.
 
+import { parseMonthsAsWeeks } from './onboarding';
+
 export type ChatCommand =
   | 'journal'
   | 'summary'
@@ -99,4 +101,54 @@ export function looksLikeOffTopic(message: string): boolean {
   const text = message.trim();
   if (text.includes('?')) return true;
   return text.split(/\s+/).filter(Boolean).length >= 6;
+}
+
+// ---------------------------------------------------------------------------
+// Conversational profile updates. In the simulation, mothers asked to fix
+// their week, name and language and to say the baby had arrived, and the AI
+// answered "I've updated that" while nothing changed. These are matched
+// deterministically; the caller applies them and confirms.
+// ---------------------------------------------------------------------------
+export type ProfileUpdate =
+  | { kind: 'name'; name: string; whole: true }
+  | { kind: 'week'; weeks: number; whole: true }
+  | { kind: 'language'; lang: 'en' | 'sw'; whole: boolean }
+  | { kind: 'birth'; whole: boolean };
+
+const NAME_UPDATE = /^(?:(?:please|pls|tafadhali)\s+)?(?:my\s+name\s+is|call\s+me|i'?m\s+called|you\s+can\s+call\s+me|jina\s+langu\s+ni|niite|naitwa|ninaitwa)\s+([a-zÀ-ɏ][a-zÀ-ɏ' -]{1,38})$/i;
+const WEEK_UPDATE = /^(?:(?:no|actually|sorry|hapana|kumbe)[\s,]+)?(?:i'?m|im|i\s+am|niko|nina|my\s+(?:pregnancy|week)\s+is|it'?s|its|we\s+are)\s+(?:now\s+|at\s+|kwa\s+|na\s+)?(?:wiki\s+(\d{1,2})|(\d{1,2})\s*(?:weeks?|wks?|wiki))(?:\s+(?:now|today|pregnant|sasa|leo))?(?:[\s,]+not\s+\d{1,2}(?:\s*weeks?)?)?$/i;
+const MONTH_UPDATE = /^(?:(?:no|actually|sorry|hapana|kumbe)[\s,]+)?(?:i'?m|im|i\s+am|niko|nina|my\s+pregnancy\s+is|it'?s|its)\s+(?:now\s+|at\s+|na\s+)?(?:mimba\s+ya\s+)?((?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine)\s+months?|miezi\s+\w+|mwezi\s+wa\s+\w+)(?:\s+(?:now|today|pregnant|sasa|leo))?$/i;
+const LANGUAGE_WHOLE = /^(?:(?:please|pls|tafadhali|naomba|can\s+we|let'?s)\s+)?(?:(?:speak|talk|reply|write|answer|tuongee|ongea|nijibu|unijibu|niandikie|jibu|use)\s+(?:(?:to\s+me|with\s+me|na\s+mimi|kwa|in)\s+)*)?(kiswahili|swahili|english|kiingereza)(?:\s+(?:please|pls|tafadhali|tu|only|pekee|language))*$/i;
+const LANGUAGE_EMBEDDED = /\b(?:u?nijibu|niandikie|tuongee|ongea|reply|answer|speak|talk|write|respond)\s+(?:(?:to\s+me|with\s+me|na\s+mimi|kwa|in)\s+)*(kiswahili|swahili|english|kiingereza)\b|\b(kiswahili|swahili|english|kiingereza)\s+(?:tu|only|pekee|please|tafadhali)\b/i;
+const BIRTH = /\b(?:i\s+(?:just\s+|have\s+|finally\s+)?(?:gave\s+birth|delivered|had\s+(?:my|the|a)\s+baby)|(?:my\s+|the\s+)?baby\s+(?:is\s+|was\s+|has\s+)?(?:born|arrived|here|come)|nimejifungua|nilijifungua|nimezaa|mtoto\s+(?:amezaliwa|alizaliwa|amefika))\b/i;
+// "when I gave birth to my first child…" is history, not news.
+const BIRTH_HISTORY = /\b(?:first|last|previous|other|older|before|ago\s+\d|zamani|kwanza|mwisho|mwingine|years?\s+ago|miaka)\b/i;
+
+export function parseProfileUpdate(message: string): ProfileUpdate | null {
+  const text = message.trim().replace(/[.!🙏💚😊]+$/u, '').trim();
+  const lang = (s: string): 'en' | 'sw' => (/^(?:kiswahili|swahili)$/i.test(s) ? 'sw' : 'en');
+
+  let m = text.match(LANGUAGE_WHOLE);
+  if (m) return { kind: 'language', lang: lang(m[1]), whole: true };
+  m = text.match(NAME_UPDATE);
+  if (m) {
+    const name = m[1].trim().replace(/\s+/g, ' ');
+    if (name.split(' ').length <= 4) return { kind: 'name', name, whole: true };
+  }
+  m = text.match(WEEK_UPDATE);
+  if (m) {
+    const weeks = parseInt(m[1] ?? m[2], 10);
+    if (weeks >= 1 && weeks <= 42) return { kind: 'week', weeks, whole: true };
+  }
+  m = text.match(MONTH_UPDATE);
+  if (m) {
+    const weeks = parseMonthsAsWeeks(m[1]);
+    if (weeks != null) return { kind: 'week', weeks, whole: true };
+  }
+  if (BIRTH.test(text) && !BIRTH_HISTORY.test(text)) {
+    return { kind: 'birth', whole: text.split(/\s+/).length <= 8 };
+  }
+  m = text.match(LANGUAGE_EMBEDDED);
+  if (m) return { kind: 'language', lang: lang(m[1] || m[2]), whole: false };
+  return null;
 }

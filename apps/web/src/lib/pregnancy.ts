@@ -76,6 +76,7 @@ export function produceForWeek(week: number): ProduceEntry | null {
 export interface WeekSource {
   pregnancy_week?: number | null;
   edd?: string | null;
+  delivery_date?: string | null;
 }
 
 /**
@@ -87,12 +88,16 @@ export interface WeekSource {
  */
 export function resolveGestationalWeek(source: WeekSource | null | undefined): number | null {
   if (!source) return null;
+  // After the birth there is no gestational week.
+  if (source.delivery_date) return null;
   if (source.edd) {
     const due = new Date(source.edd);
     if (!Number.isNaN(due.getTime())) {
       const msPerWeek = 7 * 24 * 60 * 60 * 1000;
       const weeksRemaining = (due.getTime() - Date.now()) / msPerWeek;
-      const week = Math.round(40 - weeksRemaining);
+      // floor, matching the server (packages/core pregnancyStatus), so the
+      // app and WhatsApp never disagree by a week.
+      const week = Math.floor(40 - weeksRemaining);
       if (week >= WEEK_MIN && week <= WEEK_MAX) return week;
     }
   }

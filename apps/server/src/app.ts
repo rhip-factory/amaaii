@@ -89,6 +89,8 @@ import {
   canUseAi,
   assessTriage,
   computeCohortAggregate,
+  pregnancyStatus,
+  calculateEDDFromWeeks,
 } from '@amaaii/core';
 import type {
   JournalPatch,
@@ -124,7 +126,18 @@ declare global {
   }
 }
 
-const PROFILE_FIELDS = ['name', 'age', 'pregnancy_week', 'location', 'language'] as const;
+// The provider views read user rows directly; derive the week from edd the
+// same way the mother-facing paths do (core pregnancyStatus), and report no
+// week once she is postpartum.
+function currentPregnancyWeek(
+  user: { pregnancy_week?: number | null; edd?: string | null; lmp?: string | null; delivery_date?: string | null } | null | undefined
+): number | null {
+  if (!user) return null;
+  const status = pregnancyStatus(user, new Date());
+  return status.phase === 'pregnant' ? status.week : null;
+}
+
+const PROFILE_FIELDS = ['name', 'age', 'pregnancy_week', 'edd', 'delivery_date', 'location', 'language'] as const;
 
 // P4-B: read once at module load (not per-request — GET /health must
 // return fast) from the repo's own package.json via paths.ts's REPO_ROOT,
@@ -1017,6 +1030,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         res.status(401).json({ error: 'no_account', message: 'This account no longer exists.' });
         return;
       }
+      const status = pregnancyStatus(user, new Date());
       const todaysJournals = await getTodaysJournals(userPhone);
       const completedToday = todaysJournals.filter((j) => j.completed);
       const lastJournal = todaysJournals[todaysJournals.length - 1] || null;
@@ -1028,6 +1042,10 @@ export function createApp(opts: CreateAppOptions = {}): Express {
           age: user.age,
           pregnancy_week: user.pregnancy_week,
           edd: user.edd,
+          delivery_date: user.delivery_date ?? null,
+          // 'pregnant' | 'postpartum' | 'unknown' — see core pregnancyStatus.
+          phase: status.phase,
+          postpartum_days: status.phase === 'postpartum' ? status.days : null,
           location: user.location,
           language: user.language || 'en',
           trimester: trimesterFromWeek(user.pregnancy_week),
@@ -1072,6 +1090,33 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         }
         updates[key] = v;
       }
+      if (updates.language !== undefined) {
+        updates.language = pickLang(String(updates.language));
+      }
+      // Dates feed pregnancyStatus on every read (GET /me, provider views),
+      // so only plausible ISO dates are stored.
+      for (const [key, minDays, maxDays] of [['edd', -300, 14], ['delivery_date', 0, 365]] as const) {
+        if (updates[key] === undefined) continue;
+        const v = updates[key];
+        const ms = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? Date.parse(`${v}T00:00:00Z`) : NaN;
+        const daysAgo = Math.floor((Date.now() - ms) / 86400000);
+        if (Number.isNaN(ms) || daysAgo < minDays || daysAgo > maxDays) {
+          res.status(400).json({ error: `${key} must be a YYYY-MM-DD date in a plausible range` });
+          return;
+        }
+      }
+      // The week is derived from edd on every read (core pregnancyStatus),
+      // so a week typed on the Profile screen must move the edd too — or
+      // the next read would silently put the old week back.
+      if (updates.pregnancy_week !== undefined && updates.edd === undefined) {
+        const wk = Number(updates.pregnancy_week);
+        if (!Number.isInteger(wk) || wk < 0 || wk > 42) {
+          res.status(400).json({ error: 'pregnancy_week must be a whole number from 0 to 42' });
+          return;
+        }
+        updates.pregnancy_week = wk;
+        updates.edd = calculateEDDFromWeeks(wk);
+      }
       if (Object.keys(updates).length === 0) {
         const user = await getUser(userPhone);
         res.json({ user });
@@ -1081,7 +1126,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       // updateUser's whitelist — this cast documents that runtime
       // filtering rather than re-deriving it in the type system.
       await updateUser(userPhone, updates as Parameters<typeof updateUser>[1]);
-      const user = await getUser(userPhone);
+      const user = await userManager.getUserForRead(userPhone);
       await recordAuditSafe({ actor: userPhone, action: 'write', resource: 'profile', resourceOwner: userPhone, metadata: { fields: Object.keys(updates) } });
       res.json({ user });
     } catch (err) {
@@ -1637,7 +1682,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       const escalations = (await fetchRecentEscalations(phone)).filter((e) =>
         isoWithinLastDays(e.createdAt, PANEL_TREND_WINDOW_DAYS)
       );
-      const pregnancyWeek = user?.pregnancy_week ?? null;
+      const pregnancyWeek = currentPregnancyWeek(user);
       const riskLevel = computeProviderRiskLevel(trend, escalations);
       const redFlags7d = trend ? trend.redFlagDays : 0;
       // Unwindowed on purpose. This used to read journals[0] from the
@@ -1870,7 +1915,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       res.json({
         phone,
         displayName: firstNameOf(user?.name),
-        pregnancyWeek: user?.pregnancy_week ?? null,
+        pregnancyWeek: currentPregnancyWeek(user),
         edd: user?.edd ?? null,
         riskLevel: computeProviderRiskLevel(trend, riskEscalations),
         trend,
@@ -2162,7 +2207,7 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         const lastCheckInAt = journals[0] ? (journals[0].completed_at ?? journals[0].started_at ?? null) : null;
 
         motherInputs.push({
-          pregnancyWeek: user?.pregnancy_week ?? null,
+          pregnancyWeek: currentPregnancyWeek(user),
           ancVisits: user?.anc_visits ?? null,
           avgMood: trend?.avgMood ?? null,
           avgSleepHours: trend?.avgSleepHours ?? null,

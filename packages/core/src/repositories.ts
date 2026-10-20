@@ -33,6 +33,8 @@ export interface UserRow {
   lmp: string | null;
   anc_visits: number;
   language: string;
+  /** Set when she reports the birth; null while pregnant. */
+  delivery_date?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +55,7 @@ export interface CreateUserInput {
   risk_level?: string;
   anc_visits?: number;
   language?: string;
+  delivery_date?: string | null;
 }
 
 /**
@@ -71,6 +74,7 @@ export interface UpdateUserInput {
   risk_level?: string;
   anc_visits?: number;
   language?: string;
+  delivery_date?: string | null;
 }
 
 export interface UserRepository {

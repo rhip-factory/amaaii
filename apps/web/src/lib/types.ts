@@ -24,6 +24,11 @@ export interface MeUser {
   age: number | null;
   pregnancy_week: number | null;
   edd: string | null;
+  /** Set once she reports the birth (server: users.delivery_date). */
+  delivery_date?: string | null;
+  /** Server-derived (core pregnancyStatus). */
+  phase?: "pregnant" | "postpartum" | "unknown";
+  postpartum_days?: number | null;
   location: string | null;
   language: Language;
   trimester: string | null;

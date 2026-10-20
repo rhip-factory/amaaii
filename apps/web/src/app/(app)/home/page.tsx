@@ -41,7 +41,13 @@ export default function HomePage() {
               {isSw ? `Habari, ${name} 💚` : `Hello, ${name} 💚`}
             </h1>
             <p className={styles.subgreeting}>
-              {week ? `Week ${week} of your journey.` : "Tell me about your pregnancy to personalize this page."}
+              {me?.user.phase === "postpartum" && me.user.postpartum_days != null
+                ? isSw
+                  ? `Siku ${me.user.postpartum_days} tangu mtoto azaliwe. 💚`
+                  : `Day ${me.user.postpartum_days} with your baby. 💚`
+                : week
+                  ? `Week ${week} of your journey.`
+                  : "Tell me about your pregnancy to personalize this page."}
               {stale && (
                 <span className={styles.staleNote}>
                   {" "}

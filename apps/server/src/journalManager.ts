@@ -26,6 +26,7 @@ import {
   scanFreeText,
   parseCommand,
   looksLikeOffTopic,
+  pregnancyStatus,
   generateJournalSummary as coreGenerateJournalSummary,
   generateRecommendations as coreGenerateRecommendations,
   extractWeeklySymptoms as coreExtractWeeklySymptoms,
@@ -206,7 +207,10 @@ class JournalManager {
     const tries = (key: string): number => attempts[key] ?? 0;
     let passThrough = false;
     const user = await db.getUser(userPhone);
-    const pregnancyWeek = user?.pregnancy_week ?? 0;
+    // Derived from edd (not the onboarding snapshot); postpartum mothers
+    // count as week 0 here so the fetal-movement stage is skipped.
+    const status = user ? pregnancyStatus(user, new Date()) : null;
+    const pregnancyWeek = status?.phase === 'pregnant' ? status.week : 0;
     const lang = pickLang(user && user.language);
 
     let nextStage: JournalStage | undefined;
