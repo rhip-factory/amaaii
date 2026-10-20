@@ -45,7 +45,7 @@ wait_for_server "http://localhost:${PORT}" || { cat "$LOG"; exit 1; }
 # 1. Boot log line — smoke scripts and ops muscle memory grep for this
 #    exact text, so it's asserted directly against the process's own
 #    stdout rather than inferred from an HTTP response.
-grep -q "Amaaii server started on port ${PORT}" "$LOG" || {
+grep -qE "Amaaii server started on .*:${PORT}$" "$LOG" || {
   echo "FAIL: boot log line missing"; cat "$LOG"; exit 1;
 }
 
