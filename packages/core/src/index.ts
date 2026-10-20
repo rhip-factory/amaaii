@@ -9,6 +9,7 @@ export * from './i18n';
 export * from './trend';
 export * from './onboarding';
 export * from './journal';
+export * from './journalClarify';
 export * from './commands';
 export * from './text';
 export * from './repositories';

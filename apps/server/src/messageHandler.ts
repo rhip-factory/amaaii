@@ -5,7 +5,7 @@
 // 3-strikes LLM fallback stays here, since it's orchestration (reads
 // conversation history from the DB, calls ./llmExtract).
 
-import { sendWhatsAppMessage } from '@amaaii/adapters';
+import { sendWhatsAppButtons, sendWhatsAppMessage } from '@amaaii/adapters';
 import { getAmaaiiResponse } from './amaaii';
 import {
   detectDangerSigns,
@@ -30,6 +30,8 @@ import {
   needsConsent,
   canUseAi,
   classifyConsentReply,
+  withOptionList,
+  JOURNAL_SCORE_STAGES,
 } from '@amaaii/core';
 import type { UpdateUserInput, ConsentState, DangerSignResult } from '@amaaii/core';
 import userManager, { type UserWithFlag } from './userManager';
@@ -105,14 +107,20 @@ function llmTriageEnabled(): boolean {
 export async function llmTriageRaise(
   message: string,
   rulesUrgency: string,
-  pregnancyWeek: number | null | undefined
+  pregnancyWeek: number | null | undefined,
+  phone?: string,
+  opts: { force?: boolean } = {}
 ): Promise<DangerSignResult | null> {
   if (!llmTriageEnabled()) return null;
   if ((URGENCY_RANK[rulesUrgency] ?? 0) >= URGENCY_RANK.high) return null;
-  // Greetings, numbers and one-word journal answers carry nothing to triage.
-  if (message.trim().split(/\s+/).filter(Boolean).length < 4) return null;
+  // Greetings, numbers and one-word journal answers carry nothing to triage
+  // — unless she just said she is unwell ("Pain 7/10" from a button).
+  if (!opts.force && message.trim().split(/\s+/).filter(Boolean).length < 4) return null;
   try {
-    const out = await llm.assessUrgency(message, { pregnancyWeek });
+    // The model must see what she is answering: alone, "It was a 7" (her
+    // sleep score) was read as "pain rated 7/10" and escalated in prod.
+    const askedQuestion = phone ? (await db.getLastBotMessage(phone).catch(() => null))?.response ?? null : null;
+    const out = await llm.assessUrgency(message, { pregnancyWeek, askedQuestion });
     if (!out) return null;
     const cap = (process.env.LLM_TRIAGE_MAX ?? '').toLowerCase() === 'critical' ? 'critical' : 'high';
     const level = URGENCY_RANK[out.urgency] > URGENCY_RANK[cap] ? cap : out.urgency;
@@ -297,6 +305,11 @@ export interface ProcessMessageResult {
    *  this turn — lets callers (POST /chat's audit wiring) log 'ai_call'
    *  vs a plain 'write' without re-deriving consent state themselves. */
   aiUsed?: boolean;
+  /** A question with reply options ("what did you mean?"). `response` is
+   *  the text form with a numbered list (what history stores, and what any
+   *  transport without buttons sends); `body` is the question alone, for
+   *  WhatsApp reply buttons and the app's chips. */
+  buttons?: { body: string; options: string[] };
 }
 
 export interface ProcessMessageOptions {
@@ -440,7 +453,7 @@ export async function processMessage(
     aiUsed = onboardingTurn.aiUsed;
     let onboardingTriage = earlyDanger;
     if (canUseAi(await loadConsentState(from))) {
-      const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week);
+      const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week, from);
       if (raised) {
         onboardingTriage = raised;
         await auditDangerEscalation(from, raised.urgencyLevel, { source: 'llm_raise' });
@@ -535,6 +548,9 @@ export async function processMessage(
 
   const command = handled ? null : parseCommand(message);
   let journalNote = '';
+  let replyOptions: string[] | null = null;
+  // She chose "I feel unwell"/"Pain N/10" in the check-in: always triage.
+  let forceTriage = false;
   let journalSession = handled ? null : await journalManager.getJournalSession(from);
   if (journalSession && isJournalSessionStale(journalSession.updatedAt, new Date())) {
     await journalManager.cancelJournal(from);
@@ -567,17 +583,29 @@ export async function processMessage(
     const result = await journalManager.processJournalResponse(from, message, session.currentStage, { canAi: journalAi }) as {
       response: string;
       passThrough?: boolean;
+      unwell?: boolean;
+      options?: string[];
+      mentionsSymptom?: boolean;
     };
-    if (result.passThrough) {
+    if (result.unwell && !journalAi) {
+      // No model to talk it through: point her to care in plain words.
+      response = t(lang, 'journal_unwell_no_ai');
+      conversationContext = 'journaling';
+      handled = true;
+    } else if (result.passThrough) {
       journalNote = t(lang, 'journal_paused_note');
+      forceTriage = !!result.unwell;
     } else {
       response = result.response;
       conversationContext = 'journaling';
       handled = true;
+      if (result.options?.length) replyOptions = result.options;
       // A free-text journal answer the rules missed may still be an
       // emergency ("baby has been quiet all day"): second opinion, raise-only.
-      if (journalAi) {
-        const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week);
+      // A score answer ("It was a 7") only when it also mentions a symptom;
+      // the deterministic rules above still see every word either way.
+      if (journalAi && (!JOURNAL_SCORE_STAGES.has(session.currentStage) || result.mentionsSymptom)) {
+        const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week, from);
         if (raised) {
           await journalManager.interruptForDanger(from, message, raised);
           dangerSignAnalysis = raised;
@@ -661,7 +689,7 @@ export async function processMessage(
       const aiConsentState = await loadConsentState(from);
       const status = pregnancyStatus(user, new Date());
       if (canUseAi(aiConsentState)) {
-        const raisePromise = llmTriageRaise(message, dangerSignAnalysis.urgencyLevel, user.pregnancy_week);
+        const raisePromise = llmTriageRaise(message, dangerSignAnalysis.urgencyLevel, user.pregnancy_week, from, { force: forceTriage });
         response = await getAmaaiiResponse(message, {
           userName: user.name,
           pregnancyWeek: status.phase === 'pregnant' ? status.week : null,
@@ -746,6 +774,9 @@ export async function processMessage(
     channel,
   };
 
+  const buttons = replyOptions ? { body: response, options: replyOptions } : undefined;
+  if (buttons) response = withOptionList(buttons.body, buttons.options, lang);
+
   await db.saveConversation(from, message, response, analysisData);
 
   return {
@@ -753,6 +784,7 @@ export async function processMessage(
     urgencyLevel: analysisData.urgencyLevel,
     context: conversationContext,
     aiUsed,
+    ...(buttons ? { buttons } : {}),
   };
 }
 
@@ -871,9 +903,13 @@ export async function handleIncomingMessage(
       await handleUnsupportedMedia(from);
       return;
     }
-    const { response, urgencyLevel } = await processMessage(from, message, profileName);
+    const { response, urgencyLevel, buttons } = await processMessage(from, message, profileName);
 
-    await sendWhatsAppMessage(from, response);
+    if (buttons) {
+      await sendWhatsAppButtons(from, buttons.body, buttons.options, response);
+    } else {
+      await sendWhatsAppMessage(from, response);
+    }
     log.info(`Response sent successfully to ${from}`);
 
     // Durable follow-up for high-risk cases (P4-A — see the job/handler

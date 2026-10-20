@@ -1012,9 +1012,12 @@ export function createApp(opts: CreateAppOptions = {}): Express {
         });
       }
       res.json({
-        response: result.response,
+        // A question with options: the app shows the question and the
+        // options as chips (history keeps the numbered-list form).
+        response: result.buttons ? result.buttons.body : result.response,
         urgencyLevel: result.urgencyLevel,
         context: result.context,
+        ...(result.buttons ? { options: result.buttons.options } : {}),
         ...(result.consentRequired ? { consentRequired: true } : {}),
       });
     } catch (error) {

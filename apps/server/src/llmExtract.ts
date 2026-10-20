@@ -331,6 +331,55 @@ Examples:
   return Object.keys(result).length ? result : null;
 }
 
+// Context-aware journal reading: the answer is read against the exact
+// question Amaaii asked (the per-field extractors above see only her
+// words, so "It was a 7" after the sleep question had no way to mean
+// anything in particular). The caller validates every value
+// (core validJournalFields) and builds any "what did you mean?" buttons
+// itself; the model only proposes.
+const JOURNAL_FIELD_SPEC: Record<string, string> = {
+  mood: '{"mood": int 1-10 (how she feels emotionally)}',
+  sleep: '{"quality": int 1-10 (how well she slept), "hours": number 0-16 (hours slept)}',
+  baby_movement: '{"count": int 0-200 (times she felt the baby move today)}',
+  water: '{"glasses": int 0-30 (glasses of water today)}',
+  appetite: '{"appetite": "good"|"moderate"|"poor"}',
+};
+
+export interface JournalReading {
+  status: 'clear' | 'ambiguous' | 'no_answer';
+  answer: Record<string, unknown>;
+  readings: Record<string, unknown>[];
+  symptom: string;
+}
+
+export async function interpretJournalAnswer(
+  stage: string,
+  question: string | null,
+  answer: string
+): Promise<JournalReading | null> {
+  const spec = JOURNAL_FIELD_SPEC[stage];
+  if (!spec) return null;
+  const out = await extract(
+    `You read a pregnant or postpartum mother's reply during a daily check-in and record her answer to the question Amaaii asked. The answer's fields: ${spec}.
+Return STRICT JSON: {"status": "clear"|"ambiguous"|"no_answer", "answer": {fields}, "readings": [{fields}], "symptom": string}
+- clear: the reply answers the question in one way. Put the values she gave in "answer"; leave out any field she did not give.
+- ambiguous: the SAME words could be different values, e.g. one bare number when the question asked for two values. Put up to 2 possible answers in "readings", most likely first. A value she simply did not give is not ambiguity: that is "clear" with only the values she gave.
+- no_answer: she did not answer it (a question back, a new topic, or no value at all).
+- symptom: if she mentions a physical symptom or feeling unwell (pain, bleeding, headache, fever...), name it in a few words; otherwise "".
+Never invent a value she did not give. Replies may be in English, Kiswahili or Sheng; Kiswahili hours: "saa nne" = 4 hours.`,
+    `Amaaii asked:\n"""${(question ?? '').slice(0, 500)}"""\n\nHer reply:\n"""${answer}"""`
+  );
+  if (!out || typeof out !== 'object') return null;
+  const status = out.status === 'clear' || out.status === 'ambiguous' || out.status === 'no_answer' ? out.status : null;
+  if (!status) return null;
+  return {
+    status,
+    answer: out.answer && typeof out.answer === 'object' ? out.answer : {},
+    readings: Array.isArray(out.readings) ? out.readings.filter((r: unknown) => r && typeof r === 'object').slice(0, 2) : [],
+    symptom: typeof out.symptom === 'string' ? out.symptom.slice(0, 60) : '',
+  };
+}
+
 // Raise-only safety net over the deterministic danger rules (2026-10
 // simulation: the rules caught 8/34 scripted emergencies; the AI reply
 // often told her to go to hospital anyway, but nothing escalated —
@@ -340,7 +389,7 @@ export type LlmUrgency = 'low' | 'moderate' | 'high' | 'critical';
 
 export async function assessUrgency(
   message: string,
-  context: { pregnancyWeek?: number | null; postpartumDays?: number | null } = {}
+  context: { pregnancyWeek?: number | null; postpartumDays?: number | null; askedQuestion?: string | null } = {}
 ): Promise<{ urgency: LlmUrgency; reason: string } | null> {
   const stage = context.postpartumDays != null
     ? `She gave birth ${context.postpartumDays} days ago.`
@@ -354,8 +403,11 @@ Return STRICT JSON: {"urgency": "low"|"moderate"|"high"|"critical", "reason": "<
 - high: needs a health worker TODAY — any bleeding or spotting, fever, reduced baby movements, regular contractions before 37 weeks, vomiting so she can't keep water down, swelling of face/hands, BP 140-159/90-109, violence against her, a fall, wound redness with fever, newborn not feeding, yellow, floppy or with fever.
 - moderate: worth mentioning at the next clinic visit.
 - low: everything else, INCLUDING symptoms she denies ("no bleeding"), things that already stopped, hypotheticals ("if I bleed what do I do"), general questions about other people, and normal pregnancy discomforts.
+- Her message may answer Amaaii's last message. Read a number or rating as the answer to that question (a sleep or mood score is not a pain score), and never classify a symptom she did not mention.
 Messages may be in English, Kiswahili or Sheng.`,
-    message
+    context.askedQuestion
+      ? `Amaaii's last message to her:\n"""${context.askedQuestion.slice(0, 500)}"""\n\nHer reply:\n"""${message}"""`
+      : message
   );
   if (!out || typeof out.urgency !== 'string') return null;
   const urgency = out.urgency.toLowerCase();
