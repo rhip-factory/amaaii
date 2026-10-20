@@ -18,3 +18,7 @@ coverage/
 out/
 next-env.d.ts
 *.tsbuildinfo
+
+# Mother-simulation outputs (scripts/sim) — transcripts, scratch DBs, costs
+sim-runs/
+sim-baseline.txt
