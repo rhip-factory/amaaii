@@ -21,6 +21,9 @@ require('tsx/cjs');
 
 process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
+// These tests count chokepoint calls for the AI reply alone; the extra
+// raise-only triage call is covered in tests/journalEscape.test.ts.
+process.env.LLM_TRIAGE_RAISE = '0';
 process.env.AUTH_SECRET = 'test-auth-secret';
 
 const db = require('../apps/server/src/database');

@@ -13,7 +13,7 @@ import type { Lang, Urgency } from './types';
 
 type StringDict = Record<string, string>;
 
-const STRINGS: Record<Lang, StringDict> = {
+export const STRINGS: Record<Lang, StringDict> = {
   en: {
     // Onboarding
     name_prompt: "Hello! 👋 I'm Amaaii, your pregnancy companion. I'm here to support you throughout your pregnancy journey.\n\nWhat's your name? You can call me by any name you're comfortable with.",
@@ -36,6 +36,13 @@ const STRINGS: Record<Lang, StringDict> = {
     // shown for non-critical turns.
     consent_request: "Before we begin, I need your permission to store and use your messages so I can support you 💚 Amaaii keeps your chats and check-ins securely, personalises your care, and automatically watches for urgent danger signs — even before you finish signing up. Read our privacy notice: {url}\n\nReply *I AGREE* to continue, or *STOP* if you'd rather not.",
     consent_reprompt: "I didn't quite catch that. To use Amaaii, please reply with the word *AGREE* (or *I AGREE*) to accept our privacy notice and continue — I'll always alert you to urgent danger signs either way. Read the notice here: {url}\n\nOr reply *STOP* if you don't wish to continue.",
+    // Reply to a question about the consent request ("what is this?",
+    // "before I agree, where is the notice?"). Must keep the reprompt
+    // marker phrase so the stateless gate still recognises its own prompt.
+    consent_explain: "Good question 💚 Amaaii is a pregnancy helper. To answer you and remember your due date, check-ins and questions, we need to save your messages. Only you and the Amaaii team can see them — we never sell them, and you can ask us to delete everything at any time. Full notice: {url}\n\nWhen you're ready, please reply with the word *AGREE* (or *I AGREE*). If you'd rather not, reply *STOP*.",
+    // After STOP / "I don't agree". Keeps the consent_request marker so a
+    // later "I AGREE" still grants straight away.
+    consent_declined: "Okay, no problem — I won't sign you up or use your messages to support you. 💚 I will still always tell you if a message sounds like a danger sign. If you change your mind, Reply *I AGREE* to continue.",
     consent_thanks: "✅ Thank you — you're all set on privacy.\n\n📇 Please save this number in your contacts as *Amaaii*, so you always know a message is from us.\n\nLet's get to know you a little.",
 
     // Consent — web /chat (PWA) copy. Returned alongside consentRequired:
@@ -58,7 +65,7 @@ const STRINGS: Record<Lang, StringDict> = {
     journal_mood_ok: "Thank you for sharing.",
     journal_mood_low: "I'm here for you. 💚",
     journal_mood_followup: "{ack}\n\nAny physical symptoms today? (e.g., nausea, headache, back pain, or type 'none')",
-    journal_mood_invalid: "Please rate your mood from 1 to 10 (1 being very low, 10 being excellent)",
+    journal_mood_invalid: "Please rate your mood from 1 to 10 (1 being very low, 10 being excellent) — or type *stop* to end the check-in.",
     journal_symptoms_noted: "I've noted your symptoms.\n\nHow was your sleep last night? Rate quality (1-10) and hours slept (e.g., \"7/10, 6 hours\")",
     journal_baby_movement_q: "How many times did you feel baby move today? (It's okay if you're not sure yet)",
     journal_water_q: "How many glasses of water did you drink today? (Aim for 8-10 glasses)",
@@ -95,6 +102,11 @@ const STRINGS: Record<Lang, StringDict> = {
     journal_summary_done: "\n✅ Journal saved! Great job taking care of yourself and baby today! 💚",
     journal_no_symptoms: "No symptoms",
     journal_pause: "We'll pause the journal for now. Please seek care first!",
+    journal_cancelled: "No problem — I've stopped the check-in. Nothing more will be asked. Type *journal* any time to do one. 💚",
+    journal_paused_note: "(I've paused your daily check-in so I can answer you. Type *journal* any time to start it again.)",
+    journal_mood_skip: "No problem, we'll skip the mood rating today.",
+    journal_water_skip: "No problem, I'll leave water blank today.",
+    journal_none_today: "You haven't done a check-in today yet. Type *journal* to start one!",
 
     // Heads-up after free-text scan
     heads_up_symptoms: "Thanks for adding that — I noted **{list}**. Worth mentioning at your next visit.\n\n",
@@ -107,6 +119,11 @@ const STRINGS: Record<Lang, StringDict> = {
     // emergency message reduces compliance.
     danger_critical: "🚨 URGENT — this is a medical emergency. Your safety and your baby's come first.\n\nGO TO HOSPITAL NOW:\n1. The nearest hospital or health centre — leave immediately\n2. Call 999 for an ambulance, or ask anyone to take you\n3. Don't wait, don't drive yourself if you can avoid it\n\nIf this is an emotional crisis, call Befrienders Kenya 0722 178 177.\n\nPlease go now. Tell me when you're safe. 💚",
     danger_high: "⚠️ Important: this symptom needs to be checked by a healthcare provider TODAY.\n\nVisit your nearest clinic or hospital within the next few hours. Don't wait until tomorrow. If it worsens before you can get there, call 999.",
+    // Shorter escalation for a repeat mention within the same episode
+    // (see escalationVariant in dangerSigns.ts) — the full copy sent three
+    // times in a row read as a broken bot in the 2026-10 simulation.
+    danger_critical_repeat: "🚨 This still sounds like an emergency. Please go to the nearest hospital now or call 999 — have you been able to get there? If you are already being cared for, tell me and I'll stop repeating this. 💚",
+    danger_high_repeat: "⚠️ Please still get this checked by a health worker today. Have you been able to reach a clinic? If you've already been seen, tell me what they said.",
     danger_moderate: "This is worth discussing with your healthcare provider soon. Try to schedule a visit this week.\n\nIn the meantime, rest and monitor how you feel. Tell me right away if symptoms worsen. 💚",
 
     // Recommendations
@@ -139,6 +156,8 @@ const STRINGS: Record<Lang, StringDict> = {
     // Consent (P3-B, Kenya DPA) — Kiswahili variants of the EN copy above.
     consent_request: "Kabla hatujaanza, ninahitaji ruhusa yako kuhifadhi na kutumia ujumbe wako ili nikusaidie 💚 Amaaii huhifadhi mazungumzo na taarifa zako za afya kwa usalama, hukupa huduma ya kibinafsi, na hugundua dalili za hatari moja kwa moja — hata kabla hujamaliza kujisajili. Soma taarifa yetu ya faragha: {url}\n\nJibu *NAKUBALI* kuendelea, au *SITAKI* kama hutaki.",
     consent_reprompt: "Sikuelewa vizuri. Ili kutumia Amaaii, tafadhali jibu na neno *NAKUBALI* kukubali taarifa yetu ya faragha na kuendelea — nitakuarifu daima kuhusu dalili za hatari hata hivyo. Soma taarifa hapa: {url}\n\nAu jibu *SITAKI* kama hutaki kuendelea.",
+    consent_explain: "Swali zuri 💚 Amaaii ni msaidizi wa ujauzito. Ili nikujibu na kukumbuka tarehe yako ya kujifungua, majarida na maswali yako, tunahitaji kuhifadhi ujumbe wako. Ni wewe tu na timu ya Amaaii mnaoweza kuuona — hatuuuzi kamwe, na unaweza kuomba tufute kila kitu wakati wowote. Taarifa kamili: {url}\n\nUkiwa tayari, tafadhali jibu na neno *NAKUBALI*. Kama hutaki, jibu *SITAKI*.",
+    consent_declined: "Sawa, hakuna shida — sitakusajili wala kutumia ujumbe wako kukusaidia. 💚 Bado nitakuambia kila wakati ujumbe ukionekana kuwa dalili ya hatari. Ukibadilisha nia, Jibu *NAKUBALI* kuendelea.",
     consent_thanks: "✅ Asante — umekamilisha faragha.\n\n📇 Tafadhali hifadhi namba hii kwenye simu yako kama *Amaaii*, ili ujue kila wakati kwamba ujumbe unatoka kwetu.\n\nSasa hebu tukujue kidogo.",
 
     web_consent_required: "Unahitaji kukubali idhini ya matumizi ya data ya Amaaii kabla sijazungumza nawe. Tafadhali fungua Mipangilio kwenye programu na utoe idhini ili kuendelea — bado nitakuarifu kuhusu dalili za hatari unazotaja.",
@@ -155,7 +174,7 @@ const STRINGS: Record<Lang, StringDict> = {
     journal_mood_ok: "Asante kwa kushiriki.",
     journal_mood_low: "Niko hapa kwa ajili yako. 💚",
     journal_mood_followup: "{ack}\n\nUna dalili zozote za kimwili leo? (mfano: kichefuchefu, maumivu ya kichwa, maumivu ya mgongo, au andika 'hapana')",
-    journal_mood_invalid: "Tafadhali kadiria hali yako ya akili kutoka 1 hadi 10 (1 ni chini sana, 10 ni bora kabisa)",
+    journal_mood_invalid: "Tafadhali kadiria hali yako ya akili kutoka 1 hadi 10 (1 ni chini sana, 10 ni bora kabisa) — au andika *acha* kusimamisha jarida.",
     journal_symptoms_noted: "Nimezingatia dalili zako.\n\nUlilala vipi usiku wa jana? Kadiria ubora (1-10) na masaa uliyolala (mfano: \"7/10, masaa 6\")",
     journal_baby_movement_q: "Mtoto alitembea mara ngapi leo? (Ni sawa ikiwa hujui bado)",
     journal_water_q: "Ulikunywa glasi ngapi za maji leo? (Lenga glasi 8-10)",
@@ -192,6 +211,11 @@ const STRINGS: Record<Lang, StringDict> = {
     journal_summary_done: "\n✅ Jarida limehifadhiwa! Hongera kwa kujitunza wewe na mtoto leo! 💚",
     journal_no_symptoms: "Hakuna dalili",
     journal_pause: "Tutasitisha jarida kwa sasa. Tafadhali tafuta huduma kwanza!",
+    journal_cancelled: "Sawa — nimesimamisha jarida. Sitakuuliza maswali zaidi. Andika *jarida* wakati wowote kuanza tena. 💚",
+    journal_paused_note: "(Nimesimamisha jarida lako la leo ili nikujibu. Andika *jarida* wakati wowote kuanza tena.)",
+    journal_mood_skip: "Sawa, tutaruka kipimo cha hisia leo.",
+    journal_water_skip: "Sawa, nitaacha maji wazi leo.",
+    journal_none_today: "Bado hujafanya jarida la leo. Andika *jarida* kuanza!",
 
     heads_up_symptoms: "Asante kwa kuongeza hilo — nimezingatia **{list}**. Inafaa kutaja katika ziara yako ijayo.\n\n",
 
@@ -200,6 +224,8 @@ const STRINGS: Record<Lang, StringDict> = {
     // Danger sign canned escalations — Kiswahili, command tone, no hedging.
     danger_critical: "🚨 HARAKA SANA — Hii ni dharura. Usalama wako na wa mtoto ni wa kwanza.\n\nNENDA HOSPITALI SASA HIVI:\n1. Kituo cha afya cha karibu zaidi — ondoka mara moja\n2. Piga 999 kwa gari la wagonjwa, au mwombe yeyote akupeleke\n3. Usisubiri. Usijiendeshe gari mwenyewe iwezekanavyo\n\nKama ni shida ya kiakili au unahisi kujidhuru, piga Befrienders Kenya 0722 178 177.\n\nNenda sasa hivi. Niarifu ukifika salama. 💚",
     danger_high: "⚠️ Muhimu: dalili hii inahitaji kuangaliwa na mtoa huduma wa afya LEO.\n\nTembelea kliniki au hospitali ya karibu ndani ya masaa machache. Usisubiri hadi kesho. Ikiwa hali itazidi kabla hujafika, piga 999.",
+    danger_critical_repeat: "🚨 Hii bado inaonekana kuwa dharura. Tafadhali nenda hospitali ya karibu sasa au piga 999 — umeweza kufika? Kama tayari unahudumiwa, niambie na nitaacha kurudia ujumbe huu. 💚",
+    danger_high_repeat: "⚠️ Tafadhali bado uangaliwe na mhudumu wa afya leo. Umeweza kufika kliniki? Kama tayari umeonwa, niambie walisema nini.",
     danger_moderate: "Hii inafaa kuzungumza na mtoa huduma wako wa afya hivi karibuni. Jaribu kupanga ziara wiki hii.\n\nWakati huo, pumzika na ufuatilie unavyojisikia. Niambie mara moja ikiwa dalili zinaongezeka. 💚",
 
     // Recommendations
@@ -251,4 +277,12 @@ export function dangerCopy(level: Urgency | string | undefined, lang?: string | 
   if (level === 'high') return t(lang, 'danger_high');
   if (level === 'moderate') return t(lang, 'danger_moderate');
   return '';
+}
+
+// The short "still an emergency — have you reached care?" form, for a
+// repeat escalation inside the same episode (see escalationVariant).
+export function dangerRepeatCopy(level: Urgency | string | undefined, lang?: string | null): string {
+  if (level === 'critical') return t(lang, 'danger_critical_repeat');
+  if (level === 'high') return t(lang, 'danger_high_repeat');
+  return dangerCopy(level, lang);
 }

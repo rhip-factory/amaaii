@@ -24,6 +24,8 @@ import {
   parseSleepAnswer,
   parseAppetiteAnswer,
   scanFreeText,
+  parseCommand,
+  looksLikeOffTopic,
   generateJournalSummary as coreGenerateJournalSummary,
   generateRecommendations as coreGenerateRecommendations,
   extractWeeklySymptoms as coreExtractWeeklySymptoms,
@@ -34,6 +36,7 @@ import type {
   JournalPatch,
   JournalStage,
   JournalSummaryData,
+  DangerSignResult,
   SymptomHistoryEntry,
 } from '@amaaii/core';
 
@@ -41,7 +44,17 @@ interface JournalResponseSuccess {
   response: string;
   nextStage?: JournalStage;
   completed: boolean;
+  /** The answer wasn't an answer — it was a question or a new topic. The
+   *  session has been closed and the caller should route the message
+   *  normally (the 2026-10 simulation's "journal trap"). */
+  passThrough?: boolean;
 }
+
+type JournalChannel = 'whatsapp' | 'web';
+
+// Per-stage retry counts live in the session blob under this key, never
+// in the journals row itself.
+const ATTEMPTS_KEY = '__attempts';
 
 interface JournalResponseError {
   error: true;
@@ -55,6 +68,9 @@ interface JournalSessionView {
   currentStage: string;
   journalData: Record<string, unknown>;
   journalId: number | null;
+  channel: string;
+  startedAt: string | null;
+  updatedAt: string | null;
 }
 
 // Free-text journal stages (questions, notes) re-run symptom + danger
@@ -86,7 +102,11 @@ class JournalManager {
   // is now stateless. (Phase 0 §7.5: drop in-memory Map so sessions
   // survive restarts.)
 
-  async startJournalSession(userPhone: string, _user: unknown): Promise<JournalSessionView> {
+  async startJournalSession(
+    userPhone: string,
+    _user: unknown,
+    channel: JournalChannel = 'whatsapp'
+  ): Promise<JournalSessionView> {
     // If there's an active session in the DB, resume it (e.g. after a
     // server restart mid-flow). Otherwise create a fresh journal row
     // and a new session pointing at it — this enables multi-checkin per
@@ -99,6 +119,9 @@ class JournalManager {
         currentStage: existingDbSession.currentStage,
         journalData: existingDbSession.journalData || {},
         journalId: existingDbSession.journalId,
+        channel: existingDbSession.channel ?? 'whatsapp',
+        startedAt: existingDbSession.startedAt ?? null,
+        updatedAt: existingDbSession.updatedAt ?? null,
       };
     }
 
@@ -111,11 +134,15 @@ class JournalManager {
       currentStage: 'greeting',
       journalData: {},
       journalId,
+      channel,
+      startedAt: null,
+      updatedAt: null,
     };
     await db.upsertJournalSession(userPhone, {
       currentStage: session.currentStage,
       journalData: session.journalData,
       journalId,
+      channel,
     });
     return session;
   }
@@ -128,7 +155,35 @@ class JournalManager {
       currentStage: row.currentStage,
       journalData: row.journalData || {},
       journalId: row.journalId,
+      channel: row.channel ?? 'whatsapp',
+      startedAt: row.startedAt ?? null,
+      updatedAt: row.updatedAt ?? null,
     };
+  }
+
+  /** Ends an open session without completing it (the "stop"/"acha"
+   *  command, or a stale/abandoned session). The partial journals row
+   *  stays, marked incomplete. */
+  async cancelJournal(userPhone: string): Promise<void> {
+    await db.deleteJournalSession(userPhone);
+  }
+
+  /** A CRITICAL/HIGH danger sign arrived mid-journal: record it on the
+   *  in-progress journal row and close the session, so the caller can run
+   *  the normal escalation path (copy, audit, follow-up). */
+  async interruptForDanger(userPhone: string, message: string, danger: DangerSignResult): Promise<void> {
+    const session = await db.getJournalSession(userPhone);
+    if (!session) return;
+    const patch: JournalPatch = {
+      red_flags_detected: JSON.stringify(danger.detectedSigns),
+    };
+    if (session.currentStage === 'symptoms') {
+      patch.physical_symptoms = parseSymptomsAnswer(message).value;
+    }
+    if (session.journalId) {
+      await db.createOrUpdateJournal(userPhone, patch, session.journalId);
+    }
+    await db.deleteJournalSession(userPhone);
   }
 
   async processJournalResponse(
@@ -147,6 +202,9 @@ class JournalManager {
     const stage = (currentStage || dbSession.currentStage) as JournalStage;
     const journalData = dbSession.journalData || {};
     const journalId = dbSession.journalId || null;
+    const attempts = { ...((journalData[ATTEMPTS_KEY] as Record<string, number> | undefined) || {}) };
+    const tries = (key: string): number => attempts[key] ?? 0;
+    let passThrough = false;
     const user = await db.getUser(userPhone);
     const pregnancyWeek = user?.pregnancy_week ?? 0;
     const lang = pickLang(user && user.language);
@@ -195,8 +253,17 @@ class JournalManager {
           if (out && out.mood) moodScore = out.mood;
         }
         const moodValid = !!(moodScore && moodScore >= 1 && moodScore <= 10);
-        nextStage = nextJournalStage(stage, { pregnancyWeek, moodValid });
-        if (moodValid) {
+        if (!moodValid && looksLikeOffTopic(message)) {
+          passThrough = true;
+          break;
+        }
+        // Two unparseable answers in a row: skip the rating rather than
+        // asking the same question forever.
+        const skipMood = !moodValid && tries('mood') >= 1;
+        nextStage = nextJournalStage(stage, { pregnancyWeek, moodValid: moodValid || skipMood });
+        if (skipMood) {
+          response = t(lang, 'journal_mood_followup', { ack: t(lang, 'journal_mood_skip') });
+        } else if (moodValid) {
           journalUpdate.emotional_state = moodScore as number;
           journalUpdate.mood_description = message;
           const ack =
@@ -205,12 +272,17 @@ class JournalManager {
             t(lang, 'journal_mood_low');
           response = t(lang, 'journal_mood_followup', { ack });
         } else {
+          attempts.mood = tries('mood') + 1;
           response = t(lang, 'journal_mood_invalid');
         }
         break;
       }
 
       case 'symptoms': {
+        if (message.includes('?')) {
+          passThrough = true;
+          break;
+        }
         const { value } = parseSymptomsAnswer(message);
         journalUpdate.physical_symptoms = value;
         const dangerAnalysis = detectDangerSigns(message);
@@ -243,6 +315,10 @@ class JournalManager {
           }
         }
 
+        if (journalUpdate.sleep_quality == null && journalUpdate.sleep_hours == null && looksLikeOffTopic(message)) {
+          passThrough = true;
+          break;
+        }
         nextStage = nextJournalStage(stage, { pregnancyWeek });
         response = nextStage === 'baby_movement'
           ? t(lang, 'journal_baby_movement_q')
@@ -255,6 +331,10 @@ class JournalManager {
         if (movementCount === null) {
           const out = await llm.extractMovement(message);
           if (out && out.count != null) movementCount = out.count;
+        }
+        if (movementCount === null && looksLikeOffTopic(message)) {
+          passThrough = true;
+          break;
         }
         const water_q = t(lang, 'journal_water_q');
         if (movementCount !== null) {
@@ -288,10 +368,19 @@ class JournalManager {
             waterCount >= 6 ? t(lang, 'journal_water_ok') :
             t(lang, 'journal_water_low');
           response = t(lang, 'journal_water_followup', { ack });
+          nextStage = nextJournalStage(stage, { pregnancyWeek });
+        } else if (looksLikeOffTopic(message)) {
+          passThrough = true;
+        } else if (tries('water') >= 1) {
+          response = t(lang, 'journal_water_followup', { ack: t(lang, 'journal_water_skip') });
+          nextStage = nextJournalStage(stage, { pregnancyWeek });
         } else {
+          // Re-ask once at the same stage (the old code advanced anyway,
+          // so the corrected number was then parsed as the appetite).
+          attempts.water = 1;
           response = t(lang, 'journal_water_invalid');
+          nextStage = stage;
         }
-        nextStage = nextJournalStage(stage, { pregnancyWeek });
         break;
       }
 
@@ -301,7 +390,12 @@ class JournalManager {
           const out = await llm.extractAppetite(message);
           if (out && out.appetite) appetiteLevel = out.appetite;
         }
-        journalUpdate.appetite = appetiteLevel || 'moderate';
+        if (appetiteLevel === null && looksLikeOffTopic(message)) {
+          passThrough = true;
+          break;
+        }
+        // Unknown stays unknown — never silently record 'moderate'.
+        if (appetiteLevel) journalUpdate.appetite = appetiteLevel;
         nextStage = nextJournalStage(stage, { pregnancyWeek });
         response = t(lang, 'journal_questions_q');
         break;
@@ -345,6 +439,11 @@ class JournalManager {
         break;
     }
 
+    if (passThrough) {
+      await db.deleteJournalSession(userPhone);
+      return { response: '', completed: false, passThrough: true };
+    }
+
     if (Object.keys(journalUpdate).length > 0) {
       // All journal writes go to the SAME row created in
       // startJournalSession — multi-checkin works because each
@@ -353,7 +452,7 @@ class JournalManager {
       await db.createOrUpdateJournal(userPhone, journalUpdate, journalId);
     }
 
-    const mergedJournalData = { ...journalData, ...journalUpdate };
+    const mergedJournalData = { ...journalData, ...journalUpdate, [ATTEMPTS_KEY]: attempts };
 
     if (nextStage === 'completed') {
       await db.deleteJournalSession(userPhone);
@@ -362,6 +461,7 @@ class JournalManager {
         currentStage: nextStage as JournalStage,
         journalData: mergedJournalData,
         journalId,
+        channel: dbSession.channel ?? 'whatsapp',
       });
     }
 
@@ -463,24 +563,20 @@ class JournalManager {
     return coreExtractNumber(message);
   }
 
+  // Whole-message commands (packages/core/src/commands.ts). The old
+  // substring matchers fired on "recheck in", "what is journal?" and on
+  // "journal summary" itself.
   isJournalCommand(message: string): boolean {
-    const commands = [
-      // EN
-      'journal', 'daily check-in', 'check in', 'daily journal', 'start journal',
-      // SW
-      'jarida', 'anza jarida', 'jarida langu', 'ukaguzi wa kila siku',
-    ];
-    return commands.some((cmd) => message.toLowerCase().includes(cmd));
+    return parseCommand(message) === 'journal';
   }
 
   isSummaryCommand(message: string): boolean {
-    const commands = ['journal summary', 'weekly summary', 'my progress', 'how am i doing'];
-    return commands.some((cmd) => message.toLowerCase().includes(cmd));
+    const cmd = parseCommand(message);
+    return cmd === 'summary' || cmd === 'weekly_summary';
   }
 
   isDoctorReportCommand(message: string): boolean {
-    const commands = ['doctor report', 'generate report', 'medical summary'];
-    return commands.some((cmd) => message.toLowerCase().includes(cmd));
+    return parseCommand(message) === 'doctor_report';
   }
 }
 

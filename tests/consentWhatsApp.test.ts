@@ -192,3 +192,46 @@ describe('WhatsApp consent gate — returning/migrated users', () => {
     expect(rows.every((r: { version: number }) => r.version === CONSENT_VERSION)).toBe(true);
   });
 });
+
+// 2026-10 mother simulation: the old /\b(agree|yes|...)\b/ check granted
+// consent on questions and refusals. Only an unambiguous yes grants.
+describe('WhatsApp consent gate — questions and refusals never grant', () => {
+  const notConsent = [
+    "I don't agree",
+    'before I agree, where can I read the privacy notice?',
+    'WHAT IS AGREE I DONT UNDERSTAND',
+    'Hii AGREE ni nini',
+  ];
+  for (const msg of notConsent) {
+    it(`"${msg}" does not grant consent`, async () => {
+      const phone = nextPhone();
+      await deliver(phone, 'Hi');
+      const reply = await deliver(phone, msg);
+      expect(reply).not.toMatch(/what'?s your name/i);
+      const state = deriveConsentState(await db.getConsents(phone));
+      expect(hasActiveConsent(state, 'data_processing')).toBe(false);
+    });
+  }
+
+  it('a question gets a plain explanation that still asks for AGREE', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const reply = await deliver(phone, 'what is this and who sees my messages?');
+    expect(reply).toMatch(/pregnancy helper/i);
+    expect(reply).toMatch(/please reply with the word \*agree\*/i);
+  });
+
+  it('STOP records a decline and an AGREE afterwards still grants', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const stop = await deliver(phone, 'STOP');
+    expect(stop).toMatch(/danger sign/i);
+    const rows = await db.getConsents(phone);
+    expect(rows.some((r: { purpose: string; granted: number | boolean }) => r.purpose === 'data_processing' && !r.granted)).toBe(true);
+
+    const later = await deliver(phone, 'I AGREE');
+    expect(later).toMatch(/what'?s your name/i);
+    const state = deriveConsentState(await db.getConsents(phone));
+    expect(hasActiveConsent(state, 'data_processing')).toBe(true);
+  });
+});

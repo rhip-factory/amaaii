@@ -214,3 +214,31 @@ export function deriveConsentState(events: ConsentLedgerEvent[]): ConsentState {
     revokedAt: event.revoked_at,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// WhatsApp consent replies. The old check was a bare
+// /\b(agree|yes|nakubali|ndiyo)\b/, which granted consent on "I don't
+// agree", "before I agree, where can I read it?" and "WHAT IS AGREE I DONT
+// UNDERSTAND". Consent must be an unambiguous yes: only a short, anchored
+// affirmative grants; any negation or question never does.
+// ---------------------------------------------------------------------------
+export type ConsentReply = 'grant' | 'decline' | 'question' | 'unclear';
+
+const CONSENT_GRANT =
+  /^(?:(?:ok(?:ay)?|sawa|yes|ndiyo|ndio|yeah|yap)[\s,]+)?(?:i\s+)?(?:agree|accept|nakubali|nimekubali|kubali)(?:[\s,]+(?:to\s+(?:this|that|it|the\s+(?:terms|privacy\s+notice))|na\s+(?:hii|masharti)))?$|^(?:yes|ndiyo|ndio)$/;
+const CONSENT_DECLINE = /^(?:stop|sitaki|unsubscribe|i\s+do\s+not\s+agree|i\s+don'?t\s+agree|sikubali|no\s+i\s+don'?t\s+agree)$/;
+const CONSENT_NEGATION = /\b(?:not|don'?t|do\s+not|never|no|sikubali|hapana|sitaki|si)\b/;
+const CONSENT_QUESTION = /\?|\b(?:what|why|how|who|where|when|which|before|explain|understand|nini|kwa\s*nini|vipi|nani|wapi|lini|sielewi|sijaelewa|eleza)\b/;
+
+export function classifyConsentReply(message: string): ConsentReply {
+  const text = message
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[*_~"!.\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}️]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (CONSENT_DECLINE.test(text)) return 'decline';
+  if (CONSENT_QUESTION.test(text)) return 'question';
+  if (!CONSENT_NEGATION.test(text) && CONSENT_GRANT.test(text)) return 'grant';
+  return 'unclear';
+}
