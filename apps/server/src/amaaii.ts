@@ -12,6 +12,7 @@
 // porting.
 
 import { chat } from '@amaaii/adapters';
+import { t } from '@amaaii/core';
 import type { ConversationRow, MedicalHistoryRecord } from '@amaaii/core';
 import { log } from './logger';
 
@@ -19,7 +20,7 @@ const BASE_SYSTEM_PROMPT = `You are Amaaii — a warm, knowledgeable companion f
 
 VOICE
 - Talk like a trusted friend who has done midwife training: warm, plain, never preachy.
-- USE HER NAME in every reply that is longer than one sentence — at least once. Not just at the start. Not "Hello {name}" every time, but woven naturally into the sentence ("Grace, that's completely normal at week 18..." or "It makes sense, Grace — week 18 is when...").
+- Use her first name now and then, woven naturally into a sentence ("It makes sense, Grace — week 18 is when..."). Not in every reply, and never "Hello {name}" every time.
 - REFERENCE HER CURRENT WEEK when the answer changes by trimester or week (food, exercise, kick counts, milestones, common symptoms). Saying "at 18 weeks your baby is..." is far better than "during pregnancy your baby is...".
 - Acknowledge what she just said before answering. ("That sounds exhausting." → then the answer.)
 - Keep replies SHORT — 1–4 sentences for chit-chat, up to ~6 for educational answers. Never walls of text.
@@ -32,6 +33,9 @@ CARE WITH HISTORY
   * Q "should I be worried?" + context shows headache 3 days running → "You've mentioned the headache for three days now — that's worth telling your nurse this week."
   * Q general → still use her name; reference week when relevant.
 - DO NOT invent specifics ("at 3am you...") that aren't in the context.
+- The conversation history shows "[NAME]" wherever her name was masked for privacy. NEVER write "[NAME]" or any other bracketed placeholder yourself — use her first name from USER_CONTEXT, or no name.
+- You cannot change her profile, save anything, book visits or send reminders. NEVER say "I've updated…", "I've saved…" or "I've booked…". To fix her name, week or language she can simply tell you ("my name is…", "I'm 28 weeks", "Kiswahili tafadhali") and the system confirms it separately.
+- If USER_CONTEXT says she is postpartum, she is no longer pregnant: talk about her recovery and her newborn (feeding, sleep, bleeding, mood, baby's danger signs), not pregnancy weeks.
 - DO NOT escalate triage from history alone — that is handled separately by deterministic rules. You may say "this has been bothering you for a few days, it would be worth telling your nurse this week" — never imply emergency from a pattern.
 
 VARY YOUR CLOSINGS
@@ -121,6 +125,8 @@ SUPPORTIVE RESPONSES:
 export interface AmaaiiContext {
   userName?: string | null;
   pregnancyWeek?: number | null;
+  /** Days since the birth, when she is postpartum (core pregnancyStatus). */
+  postpartumDays?: number | null;
   location?: string | null;
   isNewUser?: boolean;
   conversationHistory?: ConversationRow[];
@@ -132,11 +138,60 @@ export interface AmaaiiContext {
   medicalHistory?: MedicalHistoryRecord | null;
 }
 
+// Turns that carry no conversational memory: consent, onboarding and
+// journal Q&A, canned follow-ups. Feeding these to the model filled its
+// tiny window with "rate your mood 1-10" (2026-10 simulation).
+const NON_MEMORY_CONTEXTS = new Set(['consent_gate', 'onboarding', 'journaling', 'follow_up', 'journal_summary', 'doctor_report', 'profile_update']);
+export const MEMORY_TURNS = 6;
+
+/** The real conversation turns to replay, oldest first. History arrives
+ *  newest first (getConversationHistory is DESC). */
+export function selectMemoryTurns(history: ConversationRow[] | undefined, limit = MEMORY_TURNS): ConversationRow[] {
+  return (history || [])
+    .filter((c) => !NON_MEMORY_CONTEXTS.has(c.context ?? '') && c.message !== '[System Follow-up]')
+    .slice(0, limit)
+    .reverse();
+}
+
+function sqliteUtcMs(ts: string | null | undefined): number | null {
+  if (!ts) return null;
+  const ms = Date.parse(/[zZ]$/.test(ts) ? ts : `${ts.replace(' ', 'T')}Z`);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/** "Last message N days ago" and recent escalations, so the model knows
+ *  about time gaps and what already happened. */
+export function memoryLines(history: ConversationRow[] | undefined, now: Date): string[] {
+  const lines: string[] = [];
+  const rows = history || [];
+  const last = sqliteUtcMs(rows[0]?.timestamp);
+  if (last != null) {
+    const days = Math.floor((now.getTime() - last) / (24 * 60 * 60 * 1000));
+    if (days >= 2) lines.push(`Last message from her: ${days} days ago (acknowledge the gap if natural)`);
+  }
+  const flags = new Set<string>();
+  for (const r of rows) {
+    const ts = sqliteUtcMs(r.timestamp);
+    if (ts == null || now.getTime() - ts > 14 * 24 * 60 * 60 * 1000) continue;
+    if (r.urgency_level !== 'high' && r.urgency_level !== 'critical') continue;
+    try {
+      for (const d of JSON.parse(r.danger_signs_detected || '[]') as { sign?: string }[]) {
+        if (d && d.sign) flags.add(d.sign.replace(/^AI triage:\s*/, ''));
+      }
+    } catch {
+      /* malformed row — skip */
+    }
+  }
+  if (flags.size) lines.push(`Escalated in the last 14 days: ${[...flags].slice(0, 5).join('; ')} — ask how she is now`);
+  return lines;
+}
+
 export async function getAmaaiiResponse(userMessage: string, context: AmaaiiContext = {}): Promise<string> {
   try {
     const {
       userName,
       pregnancyWeek,
+      postpartumDays,
       location,
       isNewUser,
       conversationHistory,
@@ -167,7 +222,11 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     // Compact USER_CONTEXT block — what the AI should "remember".
     const ctxLines: string[] = [];
     if (firstName) ctxLines.push(`Name: ${firstName}`);
-    if (pregnancyWeek != null) ctxLines.push(`Pregnancy week: ${pregnancyWeek}`);
+    if (postpartumDays != null) {
+      ctxLines.push(`Postpartum: baby born ${postpartumDays} day${postpartumDays === 1 ? '' : 's'} ago (she is no longer pregnant)`);
+    } else if (pregnancyWeek != null) {
+      ctxLines.push(`Pregnancy week: ${pregnancyWeek} (today)`);
+    }
     if (location) ctxLines.push(`Location: ${location}`);
     if (trendLine) ctxLines.push(`Recent 7d: ${trendLine}`);
     if (medicalHistory && Object.keys(medicalHistory).length > 0) {
@@ -184,8 +243,18 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
       if (Array.isArray(mh.medications) && mh.medications.length) {
         bits.push(`medications: ${mh.medications.join(', ')}`);
       }
+      if (typeof mh.miscarriages === 'number' && mh.miscarriages > 0) bits.push(`miscarriages: ${mh.miscarriages}`);
+      if (Array.isArray(mh.previous_deliveries) && mh.previous_deliveries.length) {
+        const deliveries = (mh.previous_deliveries as { mode?: string | null; complications?: string | null }[])
+          .map((d) => [d.mode, d.complications].filter(Boolean).join(' – '))
+          .filter(Boolean);
+        if (deliveries.length) bits.push(`previous births: ${deliveries.join('; ')}`);
+      }
+      if (Array.isArray(mh.allergies) && mh.allergies.length) bits.push(`allergies: ${mh.allergies.join(', ')}`);
       if (bits.length) ctxLines.push(`Medical history: ${bits.join(' · ')}`);
     }
+    const memory = memoryLines(conversationHistory, new Date());
+    ctxLines.push(...memory);
     const userContextBlock = ctxLines.length
       ? `\n\nUSER_CONTEXT:\n- ${ctxLines.join('\n- ')}\n(Use this naturally — like a friend who remembers. Do not list it back.)`
       : '';
@@ -202,14 +271,11 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
       { role: 'system', content: systemPrompt + '\n\n' + contextualPrompt + userContextBlock + langPrompt },
     ];
 
-    if (conversationHistory && conversationHistory.length > 0) {
-      // Last 3 exchanges. Reversed because db returns DESC.
-      const recent = conversationHistory.slice(0, 3).reverse();
-      recent.forEach((conv) => {
-        messages.push({ role: 'user', content: conv.message ?? '' });
-        messages.push({ role: 'assistant', content: conv.response ?? '' });
-      });
-    }
+    const recent = selectMemoryTurns(conversationHistory);
+    recent.forEach((conv) => {
+      messages.push({ role: 'user', content: conv.message ?? '' });
+      messages.push({ role: 'assistant', content: conv.response ?? '' });
+    });
 
     messages.push({ role: 'user', content: userMessage });
 
@@ -253,13 +319,17 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     // returns finish_reason 'length' and no text. Passing that through
     // sent the mother the literal word "null", so treat it as a failure
     // and fall back to the canned apology below.
-    const reply = completion.choices[0]?.message?.content?.trim();
-    if (!reply) {
+    const raw = completion.choices[0]?.message?.content?.trim();
+    if (!raw) {
       throw new Error(`empty completion (finish_reason: ${completion.choices[0]?.finish_reason})`);
     }
-    return reply;
+    // The model sometimes copies the "[NAME]" mask it sees in history;
+    // she should never see a placeholder.
+    if (!raw.includes('[NAME]')) return raw;
+    const reply = raw.replace(/\[NAME\]/g, firstName ?? '').replace(/ +([,.!?])/g, '$1').replace(/^[,\s]+/, '').trim();
+    return reply || raw;
   } catch (error) {
     log.error('OpenAI API error', error);
-    return "I'm sorry, I'm having trouble processing your message right now. Please try again later or contact your healthcare provider if this is urgent. 💚";
+    return t(context.language, 'ai_error');
   }
 }

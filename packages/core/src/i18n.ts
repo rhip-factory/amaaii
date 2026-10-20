@@ -18,14 +18,18 @@ export const STRINGS: Record<Lang, StringDict> = {
     // Onboarding
     name_prompt: "Hello! 👋 I'm Amaaii, your pregnancy companion. I'm here to support you throughout your pregnancy journey.\n\nWhat's your name? You can call me by any name you're comfortable with.",
     name_thanks: "Thank you {name}! 💚 To provide you with the best support, could you tell me your age?",
-    age_thanks: "Thank you! How many weeks pregnant are you? (If you're not sure, you can tell me the date of your last period)",
+    age_thanks: "Thank you! How far along is your pregnancy? 🤰 You can say weeks or months (e.g. \"20 weeks\" or \"5 months\"), or the date your last period started. If your baby is already born, just tell me when.",
     age_prompt_again: "Thank you {name}! 💚 To provide you with the best support, could you tell me your age?",
+    age_prompt_retry: "Sorry, I didn't get your age. How old are you? Just the number is fine, e.g. 24.",
+    age_prompt_profile: "Nice to meet you, {name}! 💚 (If you'd like me to call you something else, just say \"call me …\".) How old are you?",
+    location_prompt_again: "Which town or area do you live in? (e.g. Kibera, Nakuru, Kisumu) It helps me point you to the nearest clinic.",
+    postpartum_thanks: "Congratulations on your baby! 💚 I'll support you through these early weeks.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
     // "at week {weeks}" rather than "{weeks} weeks along" so the copy stays
     // grammatical for every value the parser can now produce — the old
     // wording rendered "You're 1 weeks along", and week 0 is valid too.
     week_thanks: "Great! You're at week {weeks}. 🤰\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
     week_lmp_thanks: "Based on your last period, you're at about week {weeks}. Your expected delivery date is around {edd}.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
-    week_prompt_again: "I didn't catch that — could you try again?\n\n• Just a number works: \"22\"\n• Or \"22 weeks\"\n• Or your last period date: \"22 March\" or \"22/3/2026\"",
+    week_prompt_again: "I didn't catch that — no problem! Any of these works:\n• Weeks: \"22\" or \"22 weeks\"\n• Months: \"5 months\"\n• Your last period: \"22 March\"\n• Not sure? Your clinic card (the mother & child booklet) has your due date written on it.\nIf your baby is already born, tell me when.",
     location_done: "Perfect! I now have your basic information:\n{summary}\n\nYou can:\n• Share how you're feeling today\n• Ask me any pregnancy questions\n• Tell me about any symptoms you're experiencing\n• Type \"help\" to see what I can do\n\nHow are you feeling today? 💚",
     welcome_back: "Welcome back {name}! How can I help you today?",
 
@@ -107,6 +111,14 @@ export const STRINGS: Record<Lang, StringDict> = {
     journal_mood_skip: "No problem, we'll skip the mood rating today.",
     journal_water_skip: "No problem, I'll leave water blank today.",
     journal_none_today: "You haven't done a check-in today yet. Type *journal* to start one!",
+    lang_set_sw: "Sawa! Kuanzia sasa nitakuandikia kwa Kiswahili. 💚 (Ukitaka Kiingereza, andika \"English\".)",
+    lang_set_en: "Okay! I'll write to you in English from now on. 💚 (For Kiswahili, just type \"Kiswahili\".)",
+    profile_name_updated: "Done — I'll call you {name} from now on. 💚",
+    profile_week_updated: "Thanks for telling me — I've changed your pregnancy to week {weeks}. 🤰 I'll count forward from here.",
+    delivery_congrats: "Congratulations, mama! 💚 I've noted that your baby has arrived. From now on I'll support you and your newborn — ask me anything about feeding, healing or baby's health.\n\nIf you have heavy bleeding or fever, or the baby isn't feeding, go to the clinic straight away.",
+    delivery_ask: "By the way — your due date has passed. Has your baby arrived? If yes, just tell me (for example \"I gave birth on Monday\") so I can support you both. 💚",
+    checkin_followup: "Hi! I wanted to check in - were you able to see a healthcare provider? How are you feeling now? 💚",
+    ai_error: "I'm sorry, I'm having trouble processing your message right now. Please try again later or contact your healthcare provider if this is urgent. 💚",
 
     // Heads-up after free-text scan
     heads_up_symptoms: "Thanks for adding that — I noted **{list}**. Worth mentioning at your next visit.\n\n",
@@ -145,11 +157,15 @@ export const STRINGS: Record<Lang, StringDict> = {
     // Onboarding
     name_prompt: "Habari! 👋 Mimi ni Amaaii, mwenzio wa ujauzito. Niko hapa kukusaidia katika safari yako ya ujauzito.\n\nJina lako ni nani? Unaweza kuniambia jina lolote unalopenda.",
     name_thanks: "Asante {name}! 💚 Ili nikupe msaada bora, je, una umri gani?",
-    age_thanks: "Asante! Una wiki ngapi za ujauzito? (Ikiwa hujui, unaweza kuniambia tarehe ya hedhi yako ya mwisho)",
+    age_thanks: "Asante! Mimba yako ina muda gani? 🤰 Unaweza kusema wiki au miezi (mfano \"wiki 20\" au \"miezi 5\"), au tarehe hedhi yako ya mwisho ilipoanza. Kama mtoto ameshazaliwa, niambie lini.",
     age_prompt_again: "Asante {name}! 💚 Ili nikupe msaada bora, je, una umri gani?",
+    age_prompt_retry: "Samahani, sikupata umri wako. Una miaka mingapi? Nambari tu inatosha, mfano 24.",
+    age_prompt_profile: "Nimefurahi kukujua, {name}! 💚 (Kama ungependa nikuite jina lingine, sema \"niite …\".) Una miaka mingapi?",
+    location_prompt_again: "Unaishi mji au eneo gani? (mfano Kibera, Nakuru, Kisumu) Inanisaidia kukuelekeza kliniki ya karibu.",
+    postpartum_thanks: "Hongera kwa mtoto wako! 💚 Nitakusaidia katika wiki hizi za mwanzo.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika)",
     week_thanks: "Vizuri! Una wiki {weeks} za ujauzito. 🤰\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika)",
     week_lmp_thanks: "Kulingana na hedhi yako ya mwisho, una takriban wiki {weeks} za ujauzito. Tarehe ya kujifungua inakadiriwa kuwa karibu na {edd}.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu)",
-    week_prompt_again: "Sikuelewa — jaribu tena tafadhali.\n\n• Nambari peke yake inafaa: \"22\"\n• Au \"wiki 22\"\n• Au tarehe ya hedhi yako ya mwisho: \"22 Machi\" au \"22/3/2026\"",
+    week_prompt_again: "Sikuelewa — hakuna shida! Mojawapo ya haya inafaa:\n• Wiki: \"22\" au \"wiki 22\"\n• Miezi: \"miezi 5\"\n• Hedhi ya mwisho: \"22 Machi\"\n• Hujui? Kadi yako ya kliniki (kitabu cha mama na mtoto) ina tarehe ya kujifungua.\nKama mtoto ameshazaliwa, niambie lini.",
     location_done: "Vizuri! Sasa nina taarifa zako za msingi:\n{summary}\n\nUnaweza:\n• Kushiriki unavyojisikia leo\n• Kuniuliza maswali yoyote ya ujauzito\n• Kuniambia kuhusu dalili zozote unazoona\n• Andika \"help\" kuona ninayoweza kufanya\n\nUnajisikiaje leo? 💚",
     welcome_back: "Karibu tena {name}! Ninawezaje kukusaidia leo?",
 
@@ -216,6 +232,14 @@ export const STRINGS: Record<Lang, StringDict> = {
     journal_mood_skip: "Sawa, tutaruka kipimo cha hisia leo.",
     journal_water_skip: "Sawa, nitaacha maji wazi leo.",
     journal_none_today: "Bado hujafanya jarida la leo. Andika *jarida* kuanza!",
+    lang_set_sw: "Sawa! Kuanzia sasa nitakuandikia kwa Kiswahili. 💚 (Ukitaka Kiingereza, andika \"English\".)",
+    lang_set_en: "Okay! I'll write to you in English from now on. 💚 (For Kiswahili, just type \"Kiswahili\".)",
+    profile_name_updated: "Sawa — nitakuita {name} kuanzia sasa. 💚",
+    profile_week_updated: "Asante kwa kuniambia — nimebadilisha mimba yako kuwa wiki {weeks}. 🤰 Nitahesabu kuanzia hapa.",
+    delivery_congrats: "Hongera, mama! 💚 Nimeandika kwamba mtoto wako amezaliwa. Kuanzia sasa nitakusaidia wewe na mtoto — niulize lolote kuhusu kunyonyesha, kupona au afya ya mtoto.\n\nUkiwa na damu nyingi au homa, au mtoto hanyonyi, nenda kliniki mara moja.",
+    delivery_ask: "Kwa njia — tarehe yako ya kujifungua imepita. Je, mtoto amezaliwa? Kama ndiyo, niambie tu (mfano \"Nimejifungua Jumatatu\") ili niwasaidie nyote wawili. 💚",
+    checkin_followup: "Habari! Nilitaka kukuuliza — uliweza kumwona mhudumu wa afya? Unajisikiaje sasa? 💚",
+    ai_error: "Samahani, nina shida kushughulikia ujumbe wako sasa hivi. Tafadhali jaribu tena baadaye, au wasiliana na mhudumu wako wa afya kama ni dharura. 💚",
 
     heads_up_symptoms: "Asante kwa kuongeza hilo — nimezingatia **{list}**. Inafaa kutaja katika ziara yako ijayo.\n\n",
 
@@ -285,4 +309,32 @@ export function dangerRepeatCopy(level: Urgency | string | undefined, lang?: str
   if (level === 'critical') return t(lang, 'danger_critical_repeat');
   if (level === 'high') return t(lang, 'danger_high_repeat');
   return dangerCopy(level, lang);
+}
+
+// ---------------------------------------------------------------------------
+// Language detection for a NEW WhatsApp user (consent + onboarding only —
+// afterwards the language changes only on an explicit request, so a mother
+// who code-switches doesn't flip back and forth). In the simulation every
+// WhatsApp mother ended up on 'en', including the ones who only wrote
+// Kiswahili. Returns null when the message is too short or too mixed.
+// ---------------------------------------------------------------------------
+const SW_MARKERS = new Set([
+  'na', 'ni', 'ya', 'wa', 'za', 'la', 'kwa', 'sana', 'nina', 'niko', 'mimi', 'wewe', 'habari', 'asante',
+  'tafadhali', 'nini', 'gani', 'leo', 'jana', 'kesho', 'mtoto', 'mimba', 'sijui', 'sawa', 'hapana', 'ndiyo',
+  'ndio', 'naomba', 'nataka', 'kuna', 'hii', 'hiyo', 'lakini', 'pia', 'bado', 'kidogo', 'wiki', 'miezi',
+  'mwezi', 'damu', 'homa', 'maumivu', 'kichwa', 'tumbo', 'daktari', 'kliniki', 'hospitali', 'vizuri',
+  'mzuri', 'salama', 'karibu', 'shida', 'msaada', 'kwanini', 'vipi', 'sasa', 'mama', 'kama', 'hapa',
+  'huku', 'yangu', 'wangu', 'changu', 'langu', 'yako', 'wako', 'nimechoka', 'naogopa', 'nifanye',
+  'mpaka', 'tu', 'jina', 'miaka', 'umri', 'nakubali', 'jambo', 'hujambo', 'sijambo', 'shikamoo',
+]);
+const SW_VERB = /^(?:nina|nili|nime|nita|nisi|tuna|tume|tuli|wame|wali|wana|una|ume|uli)[a-z]{3,}$/;
+
+export function detectLanguage(message: string): Lang | null {
+  const words = (message || '').toLowerCase().match(/[a-z']+/g) || [];
+  if (words.length < 2) return null;
+  const sw = words.filter((w) => SW_MARKERS.has(w) || SW_VERB.test(w)).length;
+  const ratio = sw / words.length;
+  if (ratio >= 0.35) return 'sw';
+  if (ratio <= 0.1) return 'en';
+  return null;
 }

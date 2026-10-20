@@ -92,6 +92,24 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
             if (e) log.error('Error adding users.language column', e);
           });
         }
+        // delivery_date: set when she tells us the baby has arrived — the
+        // switch from pregnancy to postpartum (pregnancyStatus in core).
+        const hasDelivery = (rows || []).some((r) => r.name === 'delivery_date');
+        if (!hasDelivery) {
+          db.run(`ALTER TABLE users ADD COLUMN delivery_date DATE`, (e) => {
+            if (e) log.error('Error adding users.delivery_date column', e);
+          });
+        }
+        // The current week is derived from edd on every read now; rows
+        // onboarded with only a stored week get an edd anchored at the
+        // time that week was last written. Idempotent (edd IS NULL).
+        db.run(
+          `UPDATE users SET edd = date(updated_at, '+' || ((40 - pregnancy_week) * 7) || ' days')
+           WHERE edd IS NULL AND pregnancy_week IS NOT NULL AND pregnancy_week BETWEEN 0 AND 42`,
+          (e) => {
+            if (e) log.error('Error backfilling users.edd', e);
+          }
+        );
       });
 
       db.run(

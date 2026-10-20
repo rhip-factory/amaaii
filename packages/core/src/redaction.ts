@@ -39,6 +39,12 @@
 // unmasked, even though the current turn's system prompt is allowed to
 // carry the first token alone.
 //
+// Side effect seen in the 2026-10 simulation: the model copied the
+// "[NAME]" mask from its own masked history into new replies. That is
+// handled at the output, not here — amaaii.ts tells the model never to
+// write placeholders and swaps any "[NAME]" it still emits for the first
+// name. The masking policy above is unchanged.
+//
 // ---------------------------------------------------------------------
 // ID-NUMBER DECISION (documented per work order — do not silently add
 // standalone-number masking later without re-reading this)

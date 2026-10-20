@@ -18,8 +18,12 @@ import {
   escalationVariant,
   parseCommand,
   isJournalSessionStale,
+  parseProfileUpdate,
+  pregnancyStatus,
+  detectLanguage,
   cleanName,
   parseWeekOrLMP,
+  parseAge,
   calculateEDDFromWeeks,
   CONSENT_VERSION,
   deriveConsentState,
@@ -49,8 +53,8 @@ const JOURNAL_REMINDER_MARKERS = [
 // strings interpolate {url}, so the rendered text itself can't be used
 // as a marker the way NAME_PROMPT_MARKERS reuses the full literal
 // name_prompt string) — same "was the bot's last message asking X?"
-// detection pattern as NAME_PROMPT_MARKERS / WEEK_REPROMPT_MARKERS
-// above, kept stateless per CLAUDE.md's onboarding design.
+// detection pattern as NAME_PROMPT_MARKERS / WEEK_PROMPT_MARKERS
+// below, kept stateless per CLAUDE.md's onboarding design.
 const CONSENT_PROMPT_MARKERS = ['Reply *I AGREE* to continue', 'Jibu *NAKUBALI* kuendelea'];
 // consent_explain reuses the reprompt phrase below; consent_declined reuses
 // the prompt phrase above ("Reply *I AGREE* to continue").
@@ -112,6 +116,66 @@ export async function llmTriageRaise(
     log.warn('LLM triage raise failed', { error: err instanceof Error ? err.message : String(err) });
     return null;
   }
+}
+
+const DELIVERY_ASK_MARKERS = [t('en', 'delivery_ask').slice(0, 40), t('sw', 'delivery_ask').slice(0, 40)];
+
+// When was the baby born? "yesterday"/"jana" and "N days ago"/"siku N"
+// deterministically; otherwise the extraction model; otherwise today.
+async function birthDateFrom(message: string): Promise<string> {
+  const now = new Date();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const lower = message.toLowerCase();
+  if (/\b(?:yesterday|jana)\b/.test(lower)) return iso(new Date(now.getTime() - dayMs));
+  const ago = lower.match(/\b(\d{1,2})\s*(?:days?\s+ago|siku\s+(?:zilizopita|iliyopita))\b/) || lower.match(/\bsiku\s+(\d{1,2})\s+zilizopita\b/);
+  if (ago) return iso(new Date(now.getTime() - parseInt(ago[1], 10) * dayMs));
+  if (/\b(?:today|leo|this\s+morning|asubuhi\s+hii)\b/.test(lower)) return iso(now);
+  const out = await llm.extractOnboardingSlots(message, ['week']).catch(() => null);
+  if (out?.deliveryDate) {
+    const days = Math.floor((now.getTime() - Date.parse(`${out.deliveryDate}T00:00:00Z`)) / dayMs);
+    if (days >= 0 && days <= 365) return out.deliveryDate;
+  }
+  if (out?.babyAgeDays != null && out.babyAgeDays >= 0 && out.babyAgeDays <= 365) {
+    return iso(new Date(now.getTime() - out.babyAgeDays * dayMs));
+  }
+  return iso(now);
+}
+
+// She mentioned a condition (HIV, twins, a stillbirth, high blood pressure…)
+// in chat. The only writer of medical_history used to be the PWA form, so
+// the AI forgot these within three turns. Background, best-effort: merge
+// what the extractor finds into the stored record.
+const CONDITION_WORDS = /\b(?:hiv|arvs?|tld|diabetes|diabetic|kisukari|sugar|pressure|presha|hypertension|anaemia|anemia|twins|mapacha|stillbirth|still\s*born|miscarriage|miscarried|c-?section|caesarean|cesarean|upasuaji|asthma|pumu|epilepsy|kifafa|sickle|thyroid|pre-?eclampsia|methyldopa|nifedipine|labetalol|metformin|insulin|ivf|allergic|allergy)\b/i;
+
+function mergeHistory(existing: Record<string, unknown>, found: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...existing };
+  for (const [key, value] of Object.entries(found)) {
+    const prev = merged[key];
+    if (Array.isArray(value)) {
+      const seen = new Set((Array.isArray(prev) ? prev : []).map((v) => JSON.stringify(v)));
+      merged[key] = [...(Array.isArray(prev) ? prev : []), ...value.filter((v) => !seen.has(JSON.stringify(v)))];
+    } else if (prev == null) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+export function captureMedicalHistory(phone: string, message: string): Promise<void> | null {
+  if (!CONDITION_WORDS.test(message)) return null;
+  return (async () => {
+    try {
+      const found = await llm.extractMedicalHistory(message);
+      if (!found || Object.keys(found).length === 0) return;
+      const existing = await db.getMedicalHistory(phone);
+      const { rawText, updatedAt: _updatedAt, ...extracted } = existing || { rawText: null, updatedAt: '' };
+      const raw = [rawText, `[chat] ${message}`].filter(Boolean).join('\n').slice(-4000);
+      await db.saveMedicalHistory(phone, { rawText: raw, extracted: mergeHistory(extracted, found) });
+    } catch (err) {
+      log.warn('Medical history capture failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  })();
 }
 
 // Did the AI reply already tell her to get care now? Then the canned
@@ -226,7 +290,19 @@ export async function processMessage(
 
   const user = await userManager.getOrCreateUser(from, profileName);
   const userContext = userManager.getUserContext(user);
-  const lang = pickLang(user.language);
+  let lang = pickLang(user.language);
+
+  // While she is new (consent + onboarding) on WhatsApp, follow the
+  // language she writes in. Afterwards it changes only when she asks
+  // ("Kiswahili tafadhali"), so code-switching doesn't flip it.
+  if (channel === 'whatsapp' && userContext.needsOnboarding) {
+    const detected = detectLanguage(message);
+    if (detected && detected !== lang) {
+      await db.updateUser(from, { language: detected });
+      user.language = detected;
+      lang = detected;
+    }
+  }
 
   log.info('User context', userContext);
 
@@ -325,7 +401,11 @@ export async function processMessage(
   // entirely, leaving downstream features without context.
   if (earlyDanger.urgencyLevel !== 'critical' && userContext.needsOnboarding) {
     conversationContext = 'onboarding';
-    response = consentGrantedPrefix + await handleOnboarding(user, message, from, lang);
+    const onboardingTurn = await handleOnboarding(user, message, from, lang, {
+      canAi: canUseAi(await loadConsentState(from)),
+    });
+    response = consentGrantedPrefix + onboardingTurn.response;
+    aiUsed = onboardingTurn.aiUsed;
     let onboardingTriage = earlyDanger;
     if (canUseAi(await loadConsentState(from))) {
       const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week);
@@ -349,7 +429,7 @@ export async function processMessage(
       urgencyLevel: onboardingTriage.urgencyLevel,
       context: conversationContext,
     });
-    return { response, urgencyLevel: onboardingTriage.urgencyLevel, context: conversationContext };
+    return { response, urgencyLevel: onboardingTriage.urgencyLevel, context: conversationContext, aiUsed };
   }
 
   // --- Journal session + commands ------------------------------------
@@ -359,10 +439,58 @@ export async function processMessage(
   // message isn't a CRITICAL/HIGH danger sign or a cancel — the 2026-10
   // simulation found mothers trapped for months in "rate your mood
   // 1-10" while reporting bleeding and fevers.
-  const command = parseCommand(message);
-  let journalNote = '';
+  // --- Conversational profile updates ----------------------------------
+  // "my name is…", "I'm 28 weeks", "Kiswahili tafadhali", "nimejifungua".
+  // Deterministic and confirmed back to her; the AI is told it cannot
+  // change anything itself (it used to claim "I've updated that").
   let handled = false;
-  let journalSession = await journalManager.getJournalSession(from);
+  let profileNote = '';
+  const profileUpdate = earlyDanger.urgencyLevel === 'low' || earlyDanger.urgencyLevel === 'moderate'
+    ? parseProfileUpdate(message)
+    : null;
+  if (profileUpdate?.kind === 'language') {
+    if (profileUpdate.lang !== lang) {
+      await userManager.updateUserProfile(from, { language: profileUpdate.lang });
+      user.language = profileUpdate.lang;
+      lang = profileUpdate.lang;
+    }
+    if (profileUpdate.whole) {
+      response = t(lang, lang === 'sw' ? 'lang_set_sw' : 'lang_set_en');
+      handled = true;
+    }
+  } else if (profileUpdate?.kind === 'name') {
+    await userManager.updateUserProfile(from, { name: profileUpdate.name });
+    user.name = profileUpdate.name;
+    response = t(lang, 'profile_name_updated', { name: profileUpdate.name });
+    handled = true;
+  } else if (profileUpdate?.kind === 'week') {
+    const edd = calculateEDDFromWeeks(profileUpdate.weeks);
+    await userManager.updateUserProfile(from, { pregnancy_week: profileUpdate.weeks, edd });
+    user.pregnancy_week = profileUpdate.weeks;
+    user.edd = edd;
+    response = t(lang, 'profile_week_updated', { weeks: profileUpdate.weeks });
+    handled = true;
+  } else if (profileUpdate?.kind === 'birth' && !user.delivery_date) {
+    const status = pregnancyStatus(user, new Date());
+    // A birth before ~22 weeks isn't a "baby arrived" update this flow
+    // should make on its own; leave that to the AI and a health worker.
+    if (status.phase === 'pregnant' && status.week >= 22) {
+      const deliveryDate = await birthDateFrom(message);
+      await userManager.updateUserProfile(from, { delivery_date: deliveryDate });
+      user.delivery_date = deliveryDate;
+      if (profileUpdate.whole) {
+        response = t(lang, 'delivery_congrats');
+        handled = true;
+      } else {
+        profileNote = t(lang, 'delivery_congrats');
+      }
+    }
+  }
+  if (handled) conversationContext = 'profile_update';
+
+  const command = handled ? null : parseCommand(message);
+  let journalNote = '';
+  let journalSession = handled ? null : await journalManager.getJournalSession(from);
   if (journalSession && isJournalSessionStale(journalSession.updatedAt, new Date())) {
     await journalManager.cancelJournal(from);
     journalSession = null;
@@ -441,7 +569,7 @@ export async function processMessage(
     dangerSignAnalysis = earlyDanger;
     const mood = assessMood(message);
     const symptoms = extractSymptoms(message);
-    const conversationHistory = await db.getConversationHistory(from, 5);
+    const conversationHistory = await db.getConversationHistory(from, 20);
 
     log.info('Analysis', { urgencyLevel: dangerSignAnalysis.urgencyLevel, mood, symptoms });
 
@@ -480,11 +608,13 @@ export async function processMessage(
       // canned ai_off_reply takes its place. Journaling/danger detection
       // above this branch are entirely unaffected either way.
       const aiConsentState = await loadConsentState(from);
+      const status = pregnancyStatus(user, new Date());
       if (canUseAi(aiConsentState)) {
         const raisePromise = llmTriageRaise(message, dangerSignAnalysis.urgencyLevel, user.pregnancy_week);
         response = await getAmaaiiResponse(message, {
           userName: user.name,
-          pregnancyWeek: user.pregnancy_week,
+          pregnancyWeek: status.phase === 'pregnant' ? status.week : null,
+          postpartumDays: status.phase === 'postpartum' ? status.days : null,
           location: user.location,
           isNewUser: userContext.isNewUser,
           conversationHistory,
@@ -494,6 +624,7 @@ export async function processMessage(
           medicalHistory: mh,
         });
         aiUsed = true;
+        captureMedicalHistory(from, message);
         const raised = await raisePromise;
         if (raised) {
           dangerSignAnalysis = {
@@ -516,6 +647,14 @@ export async function processMessage(
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
 
+      if (profileNote) response = `${profileNote}\n\n${response}`;
+      // Due date passed with no birth recorded: ask once.
+      const askedDelivery = conversationHistory.some((turn) =>
+        !!turn.response && DELIVERY_ASK_MARKERS.some((m) => turn.response!.includes(m))
+      );
+      if (status.phase === 'pregnant' && status.overdue && !askedDelivery) {
+        response += `\n\n${t(lang, 'delivery_ask')}`;
+      }
       if (journalNote) {
         response += `\n\n${journalNote}`;
       } else {
@@ -607,8 +746,11 @@ export interface CheckinFollowupPayload {
  */
 export async function sendCheckinFollowup(payload: CheckinFollowupPayload): Promise<void> {
   const { phone } = payload;
-  await sendWhatsAppMessage(phone, CHECKIN_FOLLOWUP_MESSAGE);
-  await db.saveConversation(phone, '[System Follow-up]', CHECKIN_FOLLOWUP_MESSAGE, {
+  // Her language; the English text is CHECKIN_FOLLOWUP_MESSAGE verbatim.
+  const user = await db.getUser(phone).catch(() => undefined);
+  const message = pickLang(user?.language) === 'sw' ? t('sw', 'checkin_followup') : CHECKIN_FOLLOWUP_MESSAGE;
+  await sendWhatsAppMessage(phone, message);
+  await db.saveConversation(phone, '[System Follow-up]', message, {
     context: 'follow_up',
     dangerSigns: [],
     urgencyLevel: 'low',
@@ -662,132 +804,235 @@ export async function handleIncomingMessage(
   } catch (error) {
     log.error('Error in message handler', error);
     try {
-      // We don't have user.language here (the lookup may be what failed),
-      // so default to English. Real localized error UX is Phase 1.
-      await sendWhatsAppMessage(from, t('en', 'error_generic'));
+      // The user lookup may be what failed, so English is the fallback.
+      const failedUser = await db.getUser(from).catch(() => undefined);
+      await sendWhatsAppMessage(from, t(pickLang(failedUser?.language), 'error_generic'));
     } catch (sendError) {
       log.error('Failed to send error message', sendError);
     }
   }
 }
 
-// Marker phrases used to detect that the bot's most recent outbound was
-// a name prompt — must check both languages because the user can switch
-// language between turns. (Phase 0 stays stateless; the proper state
-// machine is Phase 1.)
+// Marker phrases used to detect that the bot's most recent outbound asked
+// for a given field — both languages, because the language can change
+// between turns. Onboarding stays stateless: the next question is the
+// first missing field, and these markers tell us whether we just asked it.
 const NAME_PROMPT_MARKERS = [
   "What's your name?", // EN
   "Jina lako ni nani?", // SW
 ];
+const LOCATION_PROMPT_MARKERS = ['Where are you located', 'Which town or area', 'Uko wapi', 'Unaishi mji'];
+const AGE_PROMPT_MARKERS = ['tell me your age', 'How old are you', 'una umri gani', 'Una miaka mingapi'];
+const WEEK_PROMPT_MARKERS = ['How far along', "I didn't catch that", 'Mimba yako ina muda gani', 'Sikuelewa — hakuna shida'];
 
-// Substrings that uniquely identify the week-stage re-prompt. Used to
-// count consecutive failed attempts so we can escalate to the LLM
-// fallback after the 3rd try.
-const WEEK_REPROMPT_MARKERS = [
-  "I didn't catch that", // EN re-prompt
-  "Sikuelewa",           // SW re-prompt
-];
+type OnboardingSlot = 'name' | 'age' | 'week' | 'location';
 
-// Liberal parser for the pregnancy-week answer, name cleaning, and the
-// EDD-from-weeks calculation are all deterministic and now live in
-// packages/core/src/onboarding.ts: parseWeekOrLMP, cleanName,
-// calculateEDDFromWeeks (weeksFromLMP / inferLMPYear are internal
-// helpers used by parseWeekOrLMP itself).
+function missingSlots(u: Partial<UserWithFlag>): OnboardingSlot[] {
+  const out: OnboardingSlot[] = [];
+  if (!u.name) out.push('name');
+  if (!u.age) out.push('age');
+  if (u.pregnancy_week == null && !u.delivery_date) out.push('week');
+  if (!u.location) out.push('location');
+  return out;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
+function validName(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const name = cleanName(raw);
+  if (!name || name.length > 40 || !/[a-zA-Z]/.test(name) || name.split(/\s+/).length > 4) return null;
+  if (/\b(?:pregnant|fine|okay|ok|hello|hi|agree|yes|no|mimba|sawa)\b/i.test(name)) return null;
+  return name;
+}
+
+function validLocation(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const loc = raw
+    .trim()
+    .replace(/^(?:i\s+(?:live|stay)\s+(?:in|at)|i'?m\s+(?:in|from|at)|from|in|at|niko|naishi|ninaishi|nakaa|kutoka)\s+/i, '')
+    .replace(/[.!]+$/, '')
+    .trim();
+  if (!loc || loc.length > 60 || loc.includes('?') || loc.split(/\s+/).length > 6 || !/[a-zA-Z]/.test(loc)) return null;
+  if (detectDangerSigns(loc).urgencyLevel !== 'low') return null;
+  return loc;
+}
+
+// Plain-code validation of a slot the LLM proposed. The model only ever
+// proposes; nothing it says is saved without passing these checks.
+function slotsFromLlm(
+  out: llm.OnboardingSlots,
+  missing: OnboardingSlot[],
+  current: OnboardingSlot,
+  message: string,
+  now: Date
+): UpdateUserInput {
+  const update: UpdateUserInput = {};
+  if (missing.includes('name') && (current === 'name' || /\b(?:my name is|i'?m called|naitwa|ninaitwa|jina langu|call me|this is|ni mimi)\b/i.test(message))) {
+    const name = validName(out.name);
+    if (name) update.name = name;
+  }
+  if (missing.includes('age') && out.age != null && out.age >= 12 && out.age <= 55
+      && (current === 'age' || /\b(?:years?|yrs?|miaka|age|aged|umri|y\/o|yo)\b/i.test(message))) {
+    update.age = out.age;
+  }
+  if (missing.includes('week')) {
+    if (out.babyBorn) {
+      let delivery: string | null = null;
+      if (out.deliveryDate) {
+        const days = Math.floor((now.getTime() - Date.parse(`${out.deliveryDate}T00:00:00Z`)) / DAY_MS);
+        if (days >= 0 && days <= 365) delivery = out.deliveryDate;
+      } else if (out.babyAgeDays != null && out.babyAgeDays >= 0 && out.babyAgeDays <= 365) {
+        delivery = isoDay(new Date(now.getTime() - out.babyAgeDays * DAY_MS));
+      }
+      update.delivery_date = delivery ?? isoDay(now);
+    } else {
+      let weeks: number | null = null;
+      let lmp: string | undefined;
+      let edd: string | undefined;
+      if (out.weeks != null) weeks = out.weeks;
+      else if (out.months != null && out.months > 0 && out.months <= 10) weeks = Math.round(out.months * 4.33);
+      else if (out.lmp) {
+        const days = Math.floor((now.getTime() - Date.parse(`${out.lmp}T00:00:00Z`)) / DAY_MS);
+        if (days >= 0 && days <= 300) {
+          lmp = out.lmp;
+          weeks = Math.floor(days / 7);
+        }
+      } else if (out.edd) {
+        const toEdd = Math.floor((Date.parse(`${out.edd}T00:00:00Z`) - now.getTime()) / DAY_MS);
+        if (toEdd >= -14 && toEdd <= 280) {
+          edd = out.edd;
+          weeks = Math.max(0, Math.floor((280 - toEdd) / 7));
+        }
+      }
+      if (weeks != null && weeks >= 0 && weeks <= 42) {
+        update.pregnancy_week = weeks;
+        update.edd = edd ?? (lmp ? userManager.calculateEDD(lmp) : calculateEDDFromWeeks(weeks));
+        if (lmp) update.lmp = lmp;
+      }
+    }
+  }
+  if (missing.includes('location') && (current === 'location' || /\b(?:live|stay|from|naishi|niko|nakaa|kutoka|located)\b/i.test(message))) {
+    const loc = validLocation(out.location);
+    if (loc) update.location = loc;
+  }
+  return update;
+}
+
+// The question to ask for `next`, given what we already know. `retry` is
+// true when we just asked for that same field and couldn't read the answer.
+function onboardingPrompt(next: OnboardingSlot, u: Partial<UserWithFlag>, lang: string, retry: boolean, nameJustSet: boolean): string {
+  switch (next) {
+    case 'name':
+      return t(lang, 'name_prompt');
+    case 'age':
+      if (retry) return t(lang, 'age_prompt_retry');
+      // A name we didn't ask for came from her WhatsApp profile — let her change it.
+      return nameJustSet ? t(lang, 'name_thanks', { name: u.name ?? '' }) : t(lang, 'age_prompt_profile', { name: u.name ?? '' });
+    case 'week':
+      return retry ? t(lang, 'week_prompt_again') : t(lang, 'age_thanks');
+    case 'location':
+      if (retry) return t(lang, 'location_prompt_again');
+      if (u.delivery_date) return t(lang, 'postpartum_thanks');
+      if (u.lmp && u.edd) return t(lang, 'week_lmp_thanks', { weeks: u.pregnancy_week ?? '', edd: u.edd });
+      return t(lang, 'week_thanks', { weeks: u.pregnancy_week ?? '' });
+  }
+}
+
+// LLM-first, still stateless onboarding (2026-10 simulation: "4 months"
+// was stored as week 4, "nina miaka kumi na tisa" looped for months, age
+// was read out of "250mg", and any next sentence became the location).
+// 1. Deterministic fast path for the field we're on.
+// 2. If that misses — or the message is long enough to carry several
+//    facts — one LLM call proposes every missing field; plain code
+//    validates each before anything is saved.
+// 3. Save, RE-READ the user, then ask for the next missing field.
+// 4. A question she asks along the way gets a short answer first.
 async function handleOnboarding(
   user: UserWithFlag,
   message: string,
   phoneNumber: string,
-  lang: string = 'en'
-): Promise<string> {
-  if (!user.name) {
-    const lastBot = await db.getLastBotMessage(phoneNumber);
-    const previousWasNamePrompt =
-      !!lastBot && !!lastBot.response &&
-      NAME_PROMPT_MARKERS.some((m) => lastBot.response.includes(m));
-    if (previousWasNamePrompt) {
-      const cleaned = cleanName(message);
-      // Sanity bounds — a reasonable name is 1-40 chars and has at least one letter.
-      if (cleaned.length > 0 && cleaned.length <= 40 && /[a-zA-Z]/.test(cleaned)) {
-        await userManager.updateUserProfile(phoneNumber, { name: cleaned });
-        return t(lang, 'name_thanks', { name: cleaned });
+  lang: string = 'en',
+  opts: { canAi?: boolean } = {}
+): Promise<{ response: string; aiUsed: boolean }> {
+  const missing = missingSlots(user);
+  if (missing.length === 0) return { response: t(lang, 'welcome_back', { name: user.name ?? '' }), aiUsed: false };
+  const current = missing[0];
+  const now = new Date();
+  const lastResp = (await db.getLastBotMessage(phoneNumber))?.response || '';
+  const askedName = NAME_PROMPT_MARKERS.some((m) => lastResp.includes(m));
+  const askedLocation = LOCATION_PROMPT_MARKERS.some((m) => lastResp.includes(m));
+  // The turn that grants consent ("I AGREE") carries no profile facts.
+  const isConsentReply = classifyConsentReply(message) === 'grant';
+
+  const update: UpdateUserInput = {};
+  if (!isConsentReply) {
+    if (current === 'name' && askedName) {
+      const name = validName(message);
+      if (name && message.trim().split(/\s+/).length <= 6) update.name = name;
+    } else if (current === 'age') {
+      const age = parseAge(message);
+      if (age != null) update.age = age;
+    } else if (current === 'week') {
+      const parsed = parseWeekOrLMP(message);
+      if (parsed && parsed.weeks >= 0 && parsed.weeks <= 42) {
+        update.pregnancy_week = parsed.weeks;
+        update.edd = parsed.lmp ? userManager.calculateEDD(parsed.lmp) : calculateEDDFromWeeks(parsed.weeks);
+        if (parsed.lmp) update.lmp = parsed.lmp;
       }
+    } else if (current === 'location' && askedLocation) {
+      const loc = validLocation(message);
+      if (loc) update.location = loc;
     }
-    return t(lang, 'name_prompt');
-  }
 
-  if (!user.age) {
-    const ageMatch = message.match(/\d+/);
-    if (ageMatch) {
-      const age = parseInt(ageMatch[0], 10);
-      await userManager.updateUserProfile(user.phone_number, { age });
-      return t(lang, 'age_thanks');
-    }
-    return t(lang, 'age_prompt_again', { name: user.name });
-  }
-
-  // `== null` rather than `!user.pregnancy_week`: week 0 is a VALID stored
-  // value (an LMP within the last 6 days), and truthiness would treat it as
-  // unset — re-asking this question forever and never reaching the location
-  // step. Same reason for every other pregnancy_week check in this codebase.
-  if (user.pregnancy_week == null) {
-    let parsed = parseWeekOrLMP(message);
-
-    // 3-strikes LLM fallback: if regex missed AND the bot has already
-    // sent the re-prompt twice in the recent history, this is the
-    // user's 3rd attempt — escalate to LLM extraction. Helps users
-    // who phrase things in ways our regex doesn't cover ("5 months
-    // along", "second trimester", "I'm not really sure but maybe...").
-    if (!parsed) {
-      const recent = await db.getConversationHistory(phoneNumber, 5);
-      const reprompts = (recent || []).filter((turn) => {
-        const resp = turn.response;
-        return !!resp && WEEK_REPROMPT_MARKERS.some((m) => resp.includes(m));
-      }).length;
-      if (reprompts >= 2) {
-        log.info('Onboarding week: 3-strikes LLM fallback triggered', { phoneNumber, reprompts });
-        const out = await llm.extractWeekOrLMP(message).catch(() => null);
-        if (out && (out.weeks || out.lmp)) {
-          if (out.lmp) {
-            const wk = userManager.calculatePregnancyWeek(out.lmp);
-            if (wk !== null && wk >= 0 && wk <= 42) parsed = { weeks: wk, lmp: out.lmp };
-          } else if (out.weeks != null) {
-            parsed = { weeks: out.weeks };
-          }
+    const words = message.trim().split(/\s+/).filter(Boolean).length;
+    const currentFilled = Object.keys(update).length > 0;
+    if ((!currentFilled && words >= 1) || words >= 5) {
+      const out = await llm.extractOnboardingSlots(message, missing).catch(() => null);
+      if (out) {
+        const proposed = slotsFromLlm(out, missing, current, message, now);
+        for (const [k, v] of Object.entries(proposed)) {
+          if ((update as Record<string, unknown>)[k] === undefined) (update as Record<string, unknown>)[k] = v;
         }
       }
     }
-
-    // `parsed.weeks != null` rather than truthiness — this is the exact line
-    // that used to silently reject week 0: an LMP six days ago parses
-    // correctly to {weeks: 0}, the falsy 0 short-circuited before the range
-    // check, and the user got the generic "I didn't catch that" re-prompt
-    // blaming their date FORMAT for something the parser had understood
-    // perfectly. Observed in production onboarding.
-    if (parsed && parsed.weeks != null && parsed.weeks >= 0 && parsed.weeks <= 42) {
-      const edd = parsed.lmp
-        ? userManager.calculateEDD(parsed.lmp)
-        : calculateEDDFromWeeks(parsed.weeks);
-      const update: UpdateUserInput = { pregnancy_week: parsed.weeks, edd };
-      if (parsed.lmp) update.lmp = parsed.lmp;
-      // UpdateUserInput (no index signature) vs. updateUserProfile's
-      // Record<string, unknown> parameter (accepts arbitrary keys and
-      // whitelist-filters them at runtime) — same "no index signature ->
-      // has one" assignability gap as above.
-      await userManager.updateUserProfile(user.phone_number, update as Record<string, unknown>);
-      return parsed.lmp
-        ? t(lang, 'week_lmp_thanks', { weeks: parsed.weeks, edd: edd ?? '' })
-        : t(lang, 'week_thanks', { weeks: parsed.weeks });
-    }
-    return t(lang, 'week_prompt_again');
   }
 
-  if (!user.location) {
-    await userManager.updateUserProfile(user.phone_number, { location: message });
-    const summary = userManager.formatUserSummary(user);
-    return t(lang, 'location_done', { summary });
+  let fresh: Partial<UserWithFlag> = user;
+  if (Object.keys(update).length > 0) {
+    // UpdateUserInput (no index signature) vs. updateUserProfile's
+    // Record<string, unknown> parameter — whitelist-filtered at runtime.
+    fresh = (await userManager.updateUserProfile(phoneNumber, update as Record<string, unknown>)) ?? { ...user, ...update };
   }
 
-  return t(lang, 'welcome_back', { name: user.name });
+  const stillMissing = missingSlots(fresh);
+  if (stillMissing.length === 0) {
+    const summary = userManager.formatUserSummary(fresh);
+    return { response: t(lang, 'location_done', { summary }), aiUsed: false };
+  }
+  const next = stillMissing[0];
+  const askedCurrent = {
+    name: askedName,
+    age: AGE_PROMPT_MARKERS.some((m) => lastResp.includes(m)),
+    week: WEEK_PROMPT_MARKERS.some((m) => lastResp.includes(m)),
+    location: askedLocation,
+  }[current];
+  const retry = next === current && askedCurrent && Object.keys(update).length === 0;
+  const prompt = onboardingPrompt(next, fresh, lang, retry, update.name !== undefined);
+
+  // She asked something instead of answering: answer briefly, then ask again.
+  if (opts.canAi && !isConsentReply && Object.keys(update).length === 0 && message.includes('?')) {
+    const answer = await getAmaaiiResponse(message, {
+      userName: fresh.name,
+      pregnancyWeek: fresh.pregnancy_week,
+      location: fresh.location,
+      currentContext: 'onboarding',
+      language: lang,
+    });
+    return { response: `${answer}\n\n${prompt}`, aiUsed: true };
+  }
+  return { response: prompt, aiUsed: false };
 }
 
 function checkIfMentalHealth(message: string): boolean {

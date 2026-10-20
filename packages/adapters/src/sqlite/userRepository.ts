@@ -25,6 +25,8 @@ const USER_FIELD_MAP: Record<string, string> = {
   risk_level: 'risk_level',
   anc_visits: 'anc_visits',
   language: 'language',
+  delivery_date: 'delivery_date',
+  deliveryDate: 'delivery_date',
 };
 
 // D14: defense in depth — reject unknown columns at the DB layer too.
@@ -40,6 +42,7 @@ const UPDATE_USER_ALLOWED = new Set([
   'risk_level',
   'anc_visits',
   'language',
+  'delivery_date',
 ]);
 
 export class SqliteUserRepository implements UserRepository {

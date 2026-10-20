@@ -4,6 +4,7 @@
 import * as db from './database';
 import { log } from './logger';
 import { wasAccountDeleted } from './audit';
+import { pregnancyStatus } from '@amaaii/core';
 import type { UpdateUserInput, UserRow } from '@amaaii/core';
 
 /** UserRow plus the `isNewUser` flag getOrCreateUser() stamps onto it —
@@ -34,6 +35,7 @@ class UserManager {
         user!.isNewUser = true;
       } else {
         user.isNewUser = false;
+        await this.refreshDerivedWeek(user);
       }
 
       return user as UserWithFlag;
@@ -71,6 +73,7 @@ class UserManager {
   async getUserForRead(phoneNumber: string): Promise<UserWithFlag | undefined> {
     const existing = await db.getUser(phoneNumber);
     if (existing) {
+      await this.refreshDerivedWeek(existing);
       return { ...existing, isNewUser: false };
     }
     if (await wasAccountDeleted(phoneNumber)) {
@@ -79,11 +82,31 @@ class UserManager {
     return this.getOrCreateUser(phoneNumber);
   }
 
+  /**
+   * Keep the stored pregnancy_week in step with the calendar. It used to be
+   * written once at onboarding and never moved; now it is re-derived from
+   * edd/lmp (core pregnancyStatus) on every read, and written back when it
+   * changes so every reader (journal, provider views, GET /me) agrees.
+   * Mutates `user` in place. Best-effort: a failed write never blocks a read.
+   */
+  async refreshDerivedWeek(user: UserRow): Promise<void> {
+    if (!user.edd && !user.lmp) return;
+    const status = pregnancyStatus(user, new Date());
+    if (status.phase !== 'pregnant' || status.week === user.pregnancy_week) return;
+    user.pregnancy_week = status.week;
+    try {
+      await db.updateUser(user.phone_number, { pregnancy_week: status.week });
+    } catch (err) {
+      log.warn('Could not persist derived pregnancy week', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   async updateUserProfile(phoneNumber: string, updates: Record<string, unknown>): Promise<UserRow | undefined> {
     try {
       const validFields = [
         'name', 'age', 'pregnancy_week', 'edd',
         'location', 'lmp', 'risk_level', 'anc_visits',
+        'language', 'delivery_date',
       ];
 
       const filteredUpdates: Record<string, unknown> = {};
@@ -172,7 +195,8 @@ class UserManager {
       // Stays true until name, age, week, AND location are all set;
       // otherwise handleOnboarding's location step is never reached
       // (the router skips onboarding once this flag flips).
-      needsOnboarding: !user.name || !user.age || user.pregnancy_week == null || !user.location,
+      // A mother who joins after the birth has a delivery_date instead of a week.
+      needsOnboarding: !user.name || !user.age || (user.pregnancy_week == null && !user.delivery_date) || !user.location,
     };
 
     return context;
@@ -203,7 +227,8 @@ class UserManager {
 
     if (user.name) summary.push(`Name: ${user.name}`);
     if (user.age) summary.push(`Age: ${user.age}`);
-    if (user.pregnancy_week != null) summary.push(`Week: ${user.pregnancy_week}`);
+    if (user.delivery_date) summary.push(`Baby born: ${user.delivery_date}`);
+    else if (user.pregnancy_week != null) summary.push(`Week: ${user.pregnancy_week}`);
     if (user.edd) summary.push(`Due: ${user.edd}`);
     if (user.location) summary.push(`Location: ${user.location}`);
 
