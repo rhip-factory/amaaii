@@ -68,6 +68,13 @@ describe('months and Kiswahili numbers', () => {
     expect(parseSwahiliNumber('kumi na tisa')).toBe(19);
   });
 
+  it('a due date is read as a due date, and explicit weeks win over any date', () => {
+    const due = parseWeekOrLMP('my due date is 2027-01-12');
+    expect(due?.edd).toBe('2027-01-12');
+    expect(due?.lmp).toBeUndefined();
+    expect(parseWeekOrLMP("I'm 11 weeks, due around 14 October")).toEqual({ weeks: 11 });
+  });
+
   it('keeps the existing week and date forms', () => {
     expect(parseWeekOrLMP('20 weeks')).toEqual({ weeks: 20 });
     expect(parseWeekOrLMP('22')).toEqual({ weeks: 22 });

@@ -458,5 +458,60 @@
     "message": "I fell asleep early last night",
     "expected_urgency": "low",
     "note": "'fell asleep' is not a fall"
+  },
+  {
+    "message": "sijazimia leo. niko sawa, nimeenda hospitali",
+    "expected_urgency": "low",
+    "note": "sim 2026-10 final run: 'I haven't fainted today'"
+  },
+  {
+    "message": "The bleeding is the normal one after delivery, it's getting lighter",
+    "expected_urgency": "low",
+    "note": "normal postpartum lochia"
+  },
+  {
+    "message": "I only have normal lochia bleeding after delivery, nothing heavy",
+    "expected_urgency": "low",
+    "note": "normal lochia"
+  },
+  {
+    "message": "I have heavy bleeding after delivery",
+    "expected_urgency": "critical",
+    "note": "heavy postpartum bleeding is never neutralized"
+  },
+  {
+    "message": "Dada yangu alipata spotting mapema kwenye mimba yake, mimi sina",
+    "expected_urgency": "low",
+    "note": "someone else's symptom"
+  },
+  {
+    "message": "the doctor checked me and said the spotting is nothing serious",
+    "expected_urgency": "low",
+    "note": "clinician reassurance"
+  },
+  {
+    "message": "Please, will the magnesium hurt the baby too?",
+    "expected_urgency": "low",
+    "note": "medicine-safety question"
+  },
+  {
+    "message": "I think I could really hurt the baby",
+    "expected_urgency": "critical",
+    "note": "a thought of harm is never neutralized"
+  },
+  {
+    "message": "No cracks or bleeding, just sore when he latches",
+    "expected_urgency": "low",
+    "note": "negated list with a non-symptom first"
+  },
+  {
+    "message": "nina maumivu yanakuja kila dakika kumi na mgongo unauma, ni 34 weeks",
+    "expected_urgency": "high",
+    "note": "SW regular contractions"
+  },
+  {
+    "message": "mtoto wangu hajacheza sana leo kama kawaida",
+    "expected_urgency": "high",
+    "note": "SW reduced movement (negative perfect)"
   }
 ]

@@ -8,6 +8,8 @@
 export interface WeekOrLmp {
   weeks: number;
   lmp?: string;
+  /** Set when the date she gave was her DUE date ("due 14 October"). */
+  edd?: string;
 }
 
 // LMP year inference: if the month suggests an LMP within ~10 months
@@ -38,7 +40,40 @@ export function weeksFromLMP(lmp: string): number {
 export function parseWeekOrLMP(raw: string): WeekOrLmp | null {
   if (typeof raw !== 'string') return null;
   const lower = raw.trim().toLowerCase();
+  // Explicit weeks win over any date in the same message: "I'm 11 weeks,
+  // due around 14 October" is week 11 (the date used to be read as an LMP,
+  // giving week 21 — 2026-10 simulation).
+  const explicitWeeks = lower.match(/\b(\d{1,2})\s*(?:weeks?|wks?)\b|\bwiki\s+(\d{1,2})\b|\b(\d{1,2})\s*wiki\b/);
+  if (explicitWeeks) {
+    const w = parseInt(explicitWeeks[1] ?? explicitWeeks[2] ?? explicitWeeks[3], 10);
+    if (w >= 0 && w <= 42) return { weeks: w };
+  }
+  const date = parseDateInText(lower);
+  if (date) {
+    // "due 14 October", "EDD 2026-10-14", "tarehe ya kujifungua …"
+    const dueContext = /\b(?:due|edd|expected|deliver(?:y)?\s+date|kujifungua)\b/.test(lower.slice(0, date.index + 1));
+    if (dueContext) {
+      // A due date is in the future: a year-less date inferred into the
+      // past (inferLMPYear assumes an LMP) rolls forward a year.
+      let iso = date.iso;
+      let days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.now()) / 86400000);
+      if (days < -14) {
+        iso = `${parseInt(iso.slice(0, 4), 10) + 1}${iso.slice(4)}`;
+        days = Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.now()) / 86400000);
+      }
+      if (days >= -14 && days <= 280) return { weeks: Math.max(0, Math.floor((280 - days) / 7)), edd: iso };
+      return null;
+    }
+    return { weeks: weeksFromLMP(date.iso), lmp: date.iso };
+  }
+  return parseWeekPhrases(lower);
+}
 
+// Finds a calendar date in the text: numeric (YYYY-MM-DD, D/M/YY(YY)) or
+// with a month name in English or Kiswahili. The year is inferred when
+// missing (inferLMPYear) — fine for a past LMP; a due date is checked by
+// the caller.
+function parseDateInText(lower: string): { iso: string; index: number } | null {
   // `m` intentionally untyped: it's reassigned from several different
   // regex matches below, and one branch reshapes the captured groups
   // into a normalised [_, day, month, year] tuple that doesn't fit
@@ -47,15 +82,13 @@ export function parseWeekOrLMP(raw: string): WeekOrLmp | null {
   // Numeric date forms first (most specific).
   let m: RegExpMatchArray | (string | undefined)[] | null = lower.match(/(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})/);
   if (m) {
-    const lmp = `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`;
-    return { weeks: weeksFromLMP(lmp), lmp };
+    return { iso: `${m[1]}-${String(m[2]).padStart(2, '0')}-${String(m[3]).padStart(2, '0')}`, index: (m as RegExpMatchArray).index ?? 0 };
   }
   m = lower.match(/(\d{1,2})[\-\/](\d{1,2})[\-\/](\d{2,4})/);
   if (m) {
     let yr = parseInt(m[3] as string, 10);
     if (yr < 100) yr += 2000;
-    const lmp = `${yr}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
-    return { weeks: weeksFromLMP(lmp), lmp };
+    return { iso: `${yr}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`, index: (m as RegExpMatchArray).index ?? 0 };
   }
 
   // Month-name forms: "22 march", "march 22", "22nd of march", with
@@ -80,17 +113,24 @@ export function parseWeekOrLMP(raw: string): WeekOrLmp | null {
   if (!m) {
     // "march 22" / "march 22 2026"
     const m2 = lower.match(new RegExp(`(${monthAlt})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?`, 'i'));
-    if (m2) m = [m2[0], m2[2], m2[1], m2[3]]; // normalise to [_, day, month, year]
+    if (m2) {
+      m = [m2[0], m2[2], m2[1], m2[3]]; // normalise to [_, day, month, year]
+      (m as unknown as { index: number }).index = m2.index ?? 0;
+    }
   }
   if (m) {
     const day = parseInt(m[1] as string, 10);
     const mo = MONTHS[(m[2] as string).toLowerCase()];
     if (day >= 1 && day <= 31 && mo) {
       const yr = m[3] ? parseInt(m[3], 10) : inferLMPYear(mo);
-      const lmp = `${yr}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      return { weeks: weeksFromLMP(lmp), lmp };
+      return { iso: `${yr}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`, index: (m as unknown as { index?: number }).index ?? 0 };
     }
   }
+  return null;
+}
+
+function parseWeekPhrases(lower: string): WeekOrLmp | null {
+  let m: RegExpMatchArray | null;
 
   // Months ("I'm 5 months", "miezi mitano") — before the bare "i'm N"
   // pattern below, which used to read "I'm 5 months" as week 5.

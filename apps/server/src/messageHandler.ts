@@ -59,6 +59,8 @@ const CONSENT_PROMPT_MARKERS = ['Reply *I AGREE* to continue', 'Jibu *NAKUBALI* 
 // consent_explain reuses the reprompt phrase below; consent_declined reuses
 // the prompt phrase above ("Reply *I AGREE* to continue").
 const CONSENT_REPROMPT_MARKERS = ['please reply with the word *AGREE*', 'tafadhali jibu na neno *NAKUBALI*'];
+const CONSENT_EXPLAIN_MARKERS = ['Straight answers:', 'More detail 💚', 'Majibu ya moja kwa moja:', 'Maelezo zaidi 💚'];
+// consent_explain_more keeps the reprompt phrase too ("reply with the word *AGREE*").
 
 // PUBLIC_BASE_URL is read at call time (not module load) so it can vary
 // per-request in tests/dev without restarting the process. The /privacy
@@ -130,6 +132,10 @@ export async function llmTriageRaise(
   }
 }
 
+// The baby is already here — in any phrasing parseProfileUpdate's
+// stricter BIRTH pattern might miss.
+const BIRTH_CUE = /\b(?:born|delivered|gave\s+birth|nimejifungua|nilijifungua|amezaliwa|alizaliwa|nimezaa)\b/i;
+
 const DELIVERY_ASK_MARKERS = [t('en', 'delivery_ask').slice(0, 40), t('sw', 'delivery_ask').slice(0, 40)];
 
 // When was the baby born? "yesterday"/"jana" and "N days ago"/"siku N"
@@ -142,6 +148,12 @@ async function birthDateFrom(message: string, canAi: boolean): Promise<string> {
   if (/\b(?:yesterday|jana)\b/.test(lower)) return iso(new Date(now.getTime() - dayMs));
   const ago = lower.match(/\b(\d{1,2})\s*(?:days?\s+ago|siku\s+(?:zilizopita|iliyopita))\b/) || lower.match(/\bsiku\s+(\d{1,2})\s+zilizopita\b/);
   if (ago) return iso(new Date(now.getTime() - parseInt(ago[1], 10) * dayMs));
+  const weeksAgo = lower.match(/\b(\d{1,2}|one|two|three|four|five|six)\s*weeks?\s+(?:ago|old)\b/) || lower.match(/\bwiki\s+(\d{1,2}|mbili|tatu|nne|tano|sita)\s+(?:zilizopita|iliyopita)\b/);
+  if (weeksAgo) {
+    const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, mbili: 2, tatu: 3, nne: 4, tano: 5, sita: 6 };
+    const n = WORDS[weeksAgo[1]] ?? parseInt(weeksAgo[1], 10);
+    if (n >= 0 && n <= 52) return iso(new Date(now.getTime() - n * 7 * dayMs));
+  }
   if (/\b(?:today|leo|this\s+morning|asubuhi\s+hii)\b/.test(lower)) return iso(now);
   if (!canAi) return iso(now);
   const out = await llm.extractOnboardingSlots(message, ['week']).catch(() => null);
@@ -232,7 +244,13 @@ async function handleConsentGate(
   }
 
   if (alreadyPrompted && reply === 'question') {
-    return { response: t(lang, 'consent_explain', { url: privacyNoticeUrl() }), granted: false };
+    // A second question gets more detail, not the same text again (the
+    // simulation's mothers were sent one canned answer six times).
+    const gaveFirst = CONSENT_EXPLAIN_MARKERS.slice(0, 1).concat(CONSENT_EXPLAIN_MARKERS[2]).some((m) => lastResp.includes(m));
+    return {
+      response: t(lang, gaveFirst ? 'consent_explain_more' : 'consent_explain', { url: privacyNoticeUrl() }),
+      granted: false,
+    };
   }
 
   if (alreadyPrompted && reply === 'grant') {
@@ -1035,11 +1053,18 @@ async function handleOnboarding(
       const age = parseAge(message);
       if (age != null) update.age = age;
     } else if (current === 'week') {
-      const parsed = parseWeekOrLMP(message);
-      if (parsed && parsed.weeks >= 0 && parsed.weeks <= 42) {
-        update.pregnancy_week = parsed.weeks;
-        update.edd = parsed.lmp ? userManager.calculateEDD(parsed.lmp) : calculateEDDFromWeeks(parsed.weeks);
-        if (parsed.lmp) update.lmp = parsed.lmp;
+      if (parseProfileUpdate(message)?.kind === 'birth' || BIRTH_CUE.test(message)) {
+        // "Baby was born 2 weeks ago, 16th Feb" — that date is the birth,
+        // not a last period (it used to be stored as pregnancy week 2).
+        update.delivery_date = await birthDateFrom(message, !!opts.canAi);
+      } else {
+        const parsed = parseWeekOrLMP(message);
+        if (parsed && parsed.weeks >= 0 && parsed.weeks <= 42) {
+          update.pregnancy_week = parsed.weeks;
+          update.edd = parsed.edd
+            ?? (parsed.lmp ? userManager.calculateEDD(parsed.lmp) : calculateEDDFromWeeks(parsed.weeks));
+          if (parsed.lmp) update.lmp = parsed.lmp;
+        }
       }
     } else if (current === 'location' && askedLocation) {
       const loc = validLocation(message);
@@ -1058,6 +1083,12 @@ async function handleOnboarding(
           if ((update as Record<string, unknown>)[k] === undefined) (update as Record<string, unknown>)[k] = v;
         }
       }
+    }
+    // A birth wins over any pregnancy week proposed alongside it.
+    if (update.delivery_date) {
+      delete update.pregnancy_week;
+      delete update.edd;
+      delete update.lmp;
     }
   }
 
