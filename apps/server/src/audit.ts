@@ -44,7 +44,8 @@ export async function recordAuditSafe(event: AuditEventInput): Promise<void> {
  */
 export async function auditDangerEscalation(
   phone: string,
-  urgencyLevel: Urgency | string | undefined
+  urgencyLevel: Urgency | string | undefined,
+  extra: Record<string, unknown> = {}
 ): Promise<void> {
   if (urgencyLevel !== 'critical' && urgencyLevel !== 'high') return;
   incrementDangerEscalation(urgencyLevel);
@@ -53,7 +54,9 @@ export async function auditDangerEscalation(
     action: 'danger_escalation',
     resource: 'conversation',
     resourceOwner: phone,
-    metadata: { urgencyLevel },
+    // `source: 'llm_raise'` marks an escalation the raise-only AI triage
+    // added on top of the deterministic rules (messageHandler.ts).
+    metadata: { urgencyLevel, ...extra },
   });
 }
 

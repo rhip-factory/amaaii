@@ -5,7 +5,7 @@
 // tests/llmProvider.test.ts — no network calls.
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { chat, getOpenAIClient, resolveModel, __resetClient } from '@amaaii/adapters';
-import { extractWeekOrLMP, parseJsonReply } from '../apps/server/src/llmExtract';
+import { extractMood, extractWeekOrLMP, parseJsonReply } from '../apps/server/src/llmExtract';
 import { getAmaaiiResponse } from '../apps/server/src/amaaii';
 
 function fakeCompletion(content: string | null, finish_reason = 'stop') {
@@ -119,5 +119,14 @@ describe('empty AI replies', () => {
     vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test');
     stubCreate('  Pole sana, Wanjiru. 💚 \n');
     expect(await getAmaaiiResponse('hi', { userName: 'Wanjiru' })).toBe('Pole sana, Wanjiru. 💚');
+  });
+});
+
+describe('extraction calls', () => {
+  it('leave room for Claude reasoning tokens (80 came back empty; cap ≥ 300)', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test');
+    const create = stubCreate('{"mood": 6}');
+    await extractMood('meh');
+    expect((create.mock.calls[0][0] as { max_tokens: number }).max_tokens).toBeGreaterThanOrEqual(300);
   });
 });

@@ -14,6 +14,10 @@ import {
   t,
   pickLang,
   dangerCopy,
+  dangerRepeatCopy,
+  escalationVariant,
+  parseCommand,
+  isJournalSessionStale,
   cleanName,
   parseWeekOrLMP,
   calculateEDDFromWeeks,
@@ -21,8 +25,9 @@ import {
   deriveConsentState,
   needsConsent,
   canUseAi,
+  classifyConsentReply,
 } from '@amaaii/core';
-import type { UpdateUserInput, ConsentState } from '@amaaii/core';
+import type { UpdateUserInput, ConsentState, DangerSignResult } from '@amaaii/core';
 import userManager, { type UserWithFlag } from './userManager';
 import * as db from './database';
 import journalManager from './journalManager';
@@ -47,11 +52,9 @@ const JOURNAL_REMINDER_MARKERS = [
 // detection pattern as NAME_PROMPT_MARKERS / WEEK_REPROMPT_MARKERS
 // above, kept stateless per CLAUDE.md's onboarding design.
 const CONSENT_PROMPT_MARKERS = ['Reply *I AGREE* to continue', 'Jibu *NAKUBALI* kuendelea'];
+// consent_explain reuses the reprompt phrase below; consent_declined reuses
+// the prompt phrase above ("Reply *I AGREE* to continue").
 const CONSENT_REPROMPT_MARKERS = ['please reply with the word *AGREE*', 'tafadhali jibu na neno *NAKUBALI*'];
-
-function isAffirmativeConsent(message: string): boolean {
-  return /\b(agree|yes|nakubali|ndiyo)\b/i.test(message.trim());
-}
 
 // PUBLIC_BASE_URL is read at call time (not module load) so it can vary
 // per-request in tests/dev without restarting the process. The /privacy
@@ -65,6 +68,57 @@ function privacyNoticeUrl(): string {
 
 async function loadConsentState(phoneNumber: string): Promise<ConsentState> {
   return deriveConsentState(await db.getConsents(phoneNumber));
+}
+
+// --- Raise-only AI triage -------------------------------------------------
+// The deterministic rules stay authoritative and always run first. This
+// asks the extraction model for a second opinion ONLY when the rules said
+// low/moderate, and its answer can only RAISE the turn's urgency (to HIGH
+// by default; LLM_TRIAGE_MAX=critical allows CRITICAL). It never lowers
+// anything, never runs without the optional ai_responses consent, and any
+// error/timeout means "no raise". Kill switch: LLM_TRIAGE_RAISE=0.
+const URGENCY_RANK: Record<string, number> = { low: 0, moderate: 1, high: 2, critical: 3 };
+
+function llmTriageEnabled(): boolean {
+  const flag = (process.env.LLM_TRIAGE_RAISE ?? '').toLowerCase();
+  return flag !== '0' && flag !== 'false' && flag !== 'off';
+}
+
+export async function llmTriageRaise(
+  message: string,
+  rulesUrgency: string,
+  pregnancyWeek: number | null | undefined
+): Promise<DangerSignResult | null> {
+  if (!llmTriageEnabled()) return null;
+  if ((URGENCY_RANK[rulesUrgency] ?? 0) >= URGENCY_RANK.high) return null;
+  // Greetings, numbers and one-word journal answers carry nothing to triage.
+  if (message.trim().split(/\s+/).filter(Boolean).length < 4) return null;
+  try {
+    const out = await llm.assessUrgency(message, { pregnancyWeek });
+    if (!out) return null;
+    const cap = (process.env.LLM_TRIAGE_MAX ?? '').toLowerCase() === 'critical' ? 'critical' : 'high';
+    const level = URGENCY_RANK[out.urgency] > URGENCY_RANK[cap] ? cap : out.urgency;
+    if (URGENCY_RANK[level] < URGENCY_RANK.high || URGENCY_RANK[level] <= (URGENCY_RANK[rulesUrgency] ?? 0)) {
+      return null;
+    }
+    const urgencyLevel = level as 'high' | 'critical';
+    return {
+      detectedSigns: [{ sign: `AI triage: ${out.reason}`.trim(), level: urgencyLevel }],
+      urgencyLevel,
+      requiresUrgentCare: true,
+      recommendedAction: '',
+    };
+  } catch (err) {
+    log.warn('LLM triage raise failed', { error: err instanceof Error ? err.message : String(err) });
+    return null;
+  }
+}
+
+// Did the AI reply already tell her to get care now? Then the canned
+// escalation copy isn't prepended on top of it (urgency is still raised).
+function advisesCareNow(reply: string): boolean {
+  return /\b(?:hospital|clinic|facility|health\s+(?:centre|center|worker|provider)|999|hospitali|kliniki|kituo\s+cha\s+afya)\b/i.test(reply)
+    && /\b(?:now|today|immediately|right\s+away|tonight|sasa|leo|haraka|mara\s+moja)\b/i.test(reply);
 }
 
 // Stateless consent gate for the WhatsApp channel — re-reads state each
@@ -84,7 +138,27 @@ async function handleConsentGate(
     CONSENT_PROMPT_MARKERS.some((m) => lastResp.includes(m)) ||
     CONSENT_REPROMPT_MARKERS.some((m) => lastResp.includes(m));
 
-  if (alreadyPrompted && isAffirmativeConsent(message)) {
+  const reply = classifyConsentReply(message);
+
+  if (reply === 'decline') {
+    // An explicit no. Recorded (append-only ledger) so the decision is
+    // auditable; the gate keeps answering danger signs regardless.
+    await db.recordConsent(phoneNumber, 'data_processing', false, CONSENT_VERSION);
+    await recordAuditSafe({
+      actor: phoneNumber,
+      action: 'consent_revoke',
+      resource: 'consent',
+      resourceOwner: phoneNumber,
+      metadata: { purpose: 'data_processing', granted: false, channel: 'whatsapp', via: 'decline_reply' },
+    });
+    return { response: t(lang, 'consent_declined'), granted: false };
+  }
+
+  if (alreadyPrompted && reply === 'question') {
+    return { response: t(lang, 'consent_explain', { url: privacyNoticeUrl() }), granted: false };
+  }
+
+  if (alreadyPrompted && reply === 'grant') {
     await db.recordConsent(phoneNumber, 'data_processing', true, CONSENT_VERSION);
     await db.recordConsent(phoneNumber, 'ai_responses', true, CONSENT_VERSION);
     await recordAuditSafe({
@@ -169,10 +243,10 @@ export async function processMessage(
 
   // CRITICAL danger signs short-circuit everything, including consent —
   // Kenya DPA vital-interests basis (see CLAUDE.md / the P3-B work
-  // order). `earlyDanger` is recomputed against the SAME `message`
-  // further down (as `dangerSignAnalysis`), so a CRITICAL message always
-  // lands in that branch regardless of what happens between here and
-  // there — nothing below this line is allowed to intercept it.
+  // order). `earlyDanger` is reused as `dangerSignAnalysis` further down,
+  // and a CRITICAL/HIGH message interrupts an open journal session, so it
+  // always lands in the escalation branch — nothing below this line is
+  // allowed to intercept it.
   const earlyDanger = detectDangerSigns(message);
 
   // --- Consent gate (P3-B) --------------------------------------------
@@ -252,45 +326,99 @@ export async function processMessage(
   if (earlyDanger.urgencyLevel !== 'critical' && userContext.needsOnboarding) {
     conversationContext = 'onboarding';
     response = consentGrantedPrefix + await handleOnboarding(user, message, from, lang);
+    let onboardingTriage = earlyDanger;
+    if (canUseAi(await loadConsentState(from))) {
+      const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week);
+      if (raised) {
+        onboardingTriage = raised;
+        await auditDangerEscalation(from, raised.urgencyLevel, { source: 'llm_raise' });
+      }
+    }
     if (
-      earlyDanger.urgencyLevel === 'high' ||
-      earlyDanger.urgencyLevel === 'moderate'
+      onboardingTriage.urgencyLevel === 'high' ||
+      onboardingTriage.urgencyLevel === 'moderate'
     ) {
-      response = `${dangerCopy(earlyDanger.urgencyLevel, lang)}\n\n${response}`;
+      response = `${dangerCopy(onboardingTriage.urgencyLevel, lang)}\n\n${response}`;
     }
     const sx = extractSymptoms(message);
     if (sx.length > 0) {
       await db.saveSymptoms(from, sx, assessMood(message), earlyDanger.urgencyLevel);
     }
     await db.saveConversation(from, message, response, {
-      dangerSigns: earlyDanger.detectedSigns || [],
-      urgencyLevel: earlyDanger.urgencyLevel,
+      dangerSigns: onboardingTriage.detectedSigns || [],
+      urgencyLevel: onboardingTriage.urgencyLevel,
       context: conversationContext,
     });
-    return { response, urgencyLevel: earlyDanger.urgencyLevel, context: conversationContext };
+    return { response, urgencyLevel: onboardingTriage.urgencyLevel, context: conversationContext };
   }
 
-  // Active journal session (DB-backed since 7.5).
-  const activeJournalSession = await journalManager.getJournalSession(from);
+  // --- Journal session + commands ------------------------------------
+  // Commands match the WHOLE message (core parseCommand), never a
+  // substring. An open journal session only captures the next message
+  // when it is (a) on this same channel, (b) not stale, and (c) the
+  // message isn't a CRITICAL/HIGH danger sign or a cancel — the 2026-10
+  // simulation found mothers trapped for months in "rate your mood
+  // 1-10" while reporting bleeding and fevers.
+  const command = parseCommand(message);
+  let journalNote = '';
+  let handled = false;
+  let journalSession = await journalManager.getJournalSession(from);
+  if (journalSession && isJournalSessionStale(journalSession.updatedAt, new Date())) {
+    await journalManager.cancelJournal(from);
+    journalSession = null;
+  }
+  if (journalSession && journalSession.channel !== channel) {
+    // Another channel's half-done check-in never swallows this message.
+    // "journal" here takes the session over; anything else leaves it be.
+    if (command === 'journal') await journalManager.cancelJournal(from);
+    journalSession = null;
+  }
 
-  if (journalManager.isJournalCommand(message) || activeJournalSession) {
-    if (!activeJournalSession) {
-      const session = await journalManager.startJournalSession(from, user);
-      // processJournalResponse only returns the {error} shape when there
-      // is no active session in the DB — we just created/fetched one, so
-      // this narrows away that compile-time-only variant. If it were
-      // ever wrong at runtime, `.response` would simply read as
-      // `undefined`, same as the original JS's unchecked property access.
-      const result = await journalManager.processJournalResponse(from, message, session.currentStage) as { response: string };
-      response = result.response;
-    } else {
-      // Manager handles its own session deletion on completion.
-      const result = await journalManager.processJournalResponse(from, message, activeJournalSession.currentStage) as { response: string };
-      response = result.response;
-    }
+  if (journalSession && (earlyDanger.urgencyLevel === 'critical' || earlyDanger.urgencyLevel === 'high')) {
+    await journalManager.interruptForDanger(from, message, earlyDanger);
+    journalNote = t(lang, 'journal_pause');
+  } else if (journalSession && command === 'cancel') {
+    await journalManager.cancelJournal(from);
+    response = t(lang, 'journal_cancelled');
     conversationContext = 'journaling';
-  } else if (journalManager.isSummaryCommand(message)) {
-    if (message.toLowerCase().includes('weekly')) {
+    handled = true;
+  } else if (journalSession && command && command !== 'journal') {
+    // Asked for a summary/report/help mid-check-in: close the check-in
+    // and answer the command.
+    await journalManager.cancelJournal(from);
+  } else if (journalSession || command === 'journal') {
+    const session = journalSession ?? await journalManager.startJournalSession(from, user, channel);
+    // processJournalResponse only returns the {error} shape when there
+    // is no active session in the DB — we just created/fetched one.
+    const result = await journalManager.processJournalResponse(from, message, session.currentStage) as {
+      response: string;
+      passThrough?: boolean;
+    };
+    if (result.passThrough) {
+      journalNote = t(lang, 'journal_paused_note');
+    } else {
+      response = result.response;
+      conversationContext = 'journaling';
+      handled = true;
+      // A free-text journal answer the rules missed may still be an
+      // emergency ("baby has been quiet all day"): second opinion, raise-only.
+      if (canUseAi(await loadConsentState(from))) {
+        const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week);
+        if (raised) {
+          await journalManager.interruptForDanger(from, message, raised);
+          dangerSignAnalysis = raised;
+          response = `${dangerCopy(raised.urgencyLevel, lang)}\n\n${t(lang, 'journal_pause')}`;
+          conversationContext = 'danger_sign_detected';
+          await auditDangerEscalation(from, raised.urgencyLevel, { source: 'llm_raise' });
+        }
+      }
+    }
+  }
+
+  if (handled) {
+    // Journal turn (or cancel) — nothing more to route.
+  } else if (command === 'summary' || command === 'weekly_summary') {
+    if (command === 'weekly_summary') {
       response = await journalManager.getWeeklySummary(from);
     } else {
       const todaysJournal = await db.getTodaysJournal(from);
@@ -300,42 +428,41 @@ export async function processMessage(
         // structurally compatible in practice but TS's assignability
         // rules don't bridge "no index signature" -> "has one" for two
         // separately-declared interfaces without a cast.
-        response = await journalManager.generateJournalSummary(todaysJournal as typeof todaysJournal & Record<string, unknown>, {});
+        response = await journalManager.generateJournalSummary(todaysJournal as typeof todaysJournal & Record<string, unknown>, {}, lang);
       } else {
-        response = "You haven't completed today's journal yet. Type 'journal' to start!";
+        response = t(lang, 'journal_none_today');
       }
     }
     conversationContext = 'journal_summary';
-  } else if (journalManager.isDoctorReportCommand(message)) {
+  } else if (command === 'doctor_report') {
     response = await journalManager.generateDoctorReport(from, 30);
     conversationContext = 'doctor_report';
   } else {
-    dangerSignAnalysis = detectDangerSigns(message);
+    dangerSignAnalysis = earlyDanger;
     const mood = assessMood(message);
     const symptoms = extractSymptoms(message);
+    const conversationHistory = await db.getConversationHistory(from, 5);
 
     log.info('Analysis', { urgencyLevel: dangerSignAnalysis.urgencyLevel, mood, symptoms });
 
     // Routing precedence (per spec §7.4): CRITICAL short-circuits;
     // un-onboarded users were already routed above; HIGH escalates;
     // everything else goes to the AI.
-    if (dangerSignAnalysis.urgencyLevel === 'critical') {
-      response = dangerCopy('critical', lang);
+    if (dangerSignAnalysis.urgencyLevel === 'critical' || dangerSignAnalysis.urgencyLevel === 'high') {
+      const level = dangerSignAnalysis.urgencyLevel;
+      // Full copy the first time; a shorter "have you reached care?"
+      // version for a repeat inside the same episode. Urgency, audit and
+      // follow-up are identical either way.
+      response = escalationVariant(level, conversationHistory, new Date()) === 'repeat'
+        ? dangerRepeatCopy(level, lang)
+        : dangerCopy(level, lang);
+      if (journalNote) response += `\n\n${journalNote}`;
       conversationContext = 'danger_sign_detected';
       if (symptoms.length > 0) {
-        await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
+        await db.saveSymptoms(from, symptoms, mood, level);
       }
-      await auditDangerEscalation(from, dangerSignAnalysis.urgencyLevel);
-    } else if (dangerSignAnalysis.urgencyLevel === 'high') {
-      response = dangerCopy('high', lang);
-      conversationContext = 'danger_sign_detected';
-      if (symptoms.length > 0) {
-        await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
-      }
-      await auditDangerEscalation(from, dangerSignAnalysis.urgencyLevel);
+      await auditDangerEscalation(from, level);
     } else {
-      const conversationHistory = await db.getConversationHistory(from, 5);
-
       if (checkIfMentalHealth(message)) {
         conversationContext = 'mental_health';
       }
@@ -354,6 +481,7 @@ export async function processMessage(
       // above this branch are entirely unaffected either way.
       const aiConsentState = await loadConsentState(from);
       if (canUseAi(aiConsentState)) {
+        const raisePromise = llmTriageRaise(message, dangerSignAnalysis.urgencyLevel, user.pregnancy_week);
         response = await getAmaaiiResponse(message, {
           userName: user.name,
           pregnancyWeek: user.pregnancy_week,
@@ -366,6 +494,20 @@ export async function processMessage(
           medicalHistory: mh,
         });
         aiUsed = true;
+        const raised = await raisePromise;
+        if (raised) {
+          dangerSignAnalysis = {
+            ...raised,
+            detectedSigns: [...dangerSignAnalysis.detectedSigns, ...raised.detectedSigns],
+          };
+          if (!advisesCareNow(response)) {
+            const copy = escalationVariant(raised.urgencyLevel, conversationHistory, new Date()) === 'repeat'
+              ? dangerRepeatCopy(raised.urgencyLevel, lang)
+              : dangerCopy(raised.urgencyLevel, lang);
+            response = `${copy}\n\n${response}`;
+          }
+          await auditDangerEscalation(from, raised.urgencyLevel, { source: 'llm_raise' });
+        }
       } else {
         response = t(lang, 'ai_off_reply');
       }
@@ -374,17 +516,21 @@ export async function processMessage(
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
 
-      // Deterministic journal reminder (D19): append iff user hasn't
-      // journaled today AND no recent bot turn already nudged them
-      // (in either language).
-      const todaysJournal = await db.getTodaysJournal(from);
-      if (!todaysJournal) {
-        const remindedRecently = (conversationHistory || []).some((turn) => {
-          const resp = turn.response;
-          return !!resp && JOURNAL_REMINDER_MARKERS.some((m) => resp.includes(m));
-        });
-        if (!remindedRecently) {
-          response += `\n\n${t(lang, 'journal_reminder')}`;
+      if (journalNote) {
+        response += `\n\n${journalNote}`;
+      } else {
+        // Deterministic journal reminder (D19): append iff user hasn't
+        // journaled today AND no recent bot turn already nudged them
+        // (in either language).
+        const todaysJournal = await db.getTodaysJournal(from);
+        if (!todaysJournal) {
+          const remindedRecently = (conversationHistory || []).some((turn) => {
+            const resp = turn.response;
+            return !!resp && JOURNAL_REMINDER_MARKERS.some((m) => resp.includes(m));
+          });
+          if (!remindedRecently) {
+            response += `\n\n${t(lang, 'journal_reminder')}`;
+          }
         }
       }
     }
@@ -397,16 +543,15 @@ export async function processMessage(
   // grant consent, which is the overwhelming majority of turns.
   response = consentGrantedPrefix + response;
 
-  const analysisData =
-    conversationContext === 'journaling' ||
-    conversationContext === 'journal_summary' ||
-    conversationContext === 'doctor_report'
-      ? { dangerSigns: [] as unknown[], urgencyLevel: 'low', context: conversationContext }
-      : {
-          dangerSigns: dangerSignAnalysis?.detectedSigns || [],
-          urgencyLevel: dangerSignAnalysis?.urgencyLevel || 'low',
-          context: conversationContext,
-        };
+  // Every context — journal turns included — records the message's real
+  // deterministic urgency. (Journal turns used to be forced to 'low',
+  // which silently skipped the follow-up job and the audit row.)
+  const triage = dangerSignAnalysis ?? earlyDanger;
+  const analysisData = {
+    dangerSigns: triage.detectedSigns || [],
+    urgencyLevel: triage.urgencyLevel || 'low',
+    context: conversationContext,
+  };
 
   await db.saveConversation(from, message, response, analysisData);
 

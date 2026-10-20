@@ -1,7 +1,8 @@
 // P1-E: ported 1:1 from services/llmExtract.js (final step of the TS
 // migration — see CLAUDE.md). LLM fallback for soft journal fields. Used
-// ONLY when regex fails to extract the expected shape — never for
-// triage (danger signs stay rule-based per spec §6.2).
+// ONLY when regex fails to extract the expected shape. The one triage use
+// is assessUrgency() below, and it can only RAISE the deterministic
+// rules' urgency, never lower it (see messageHandler.ts#llmTriageRaise).
 //
 // Calls the extraction model (LLM_EXTRACT_MODEL, else the app model) with
 // response_format json_object, a 6-second timeout, and returns null on any
@@ -101,7 +102,10 @@ export async function extract(instructions: string, userText: string): Promise<a
         ],
         {
           model: 'gpt-3.5-turbo',
-          max_tokens: 80,
+          // 80 was enough for gpt-3.5, but Claude models spend ~70 tokens
+          // reasoning even at minimal effort and then return nothing (194
+          // of 227 extractions came back empty in the 2026-10 simulation).
+          max_tokens: 300,
           temperature: 0,
           response_format: { type: 'json_object' },
           purpose: 'extract',
@@ -323,4 +327,36 @@ Examples:
   if (Number.isInteger(out.weeks) && out.weeks >= 1 && out.weeks <= 42) result.weeks = out.weeks;
   if (typeof out.lmp === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(out.lmp)) result.lmp = out.lmp;
   return Object.keys(result).length ? result : null;
+}
+
+// Raise-only safety net over the deterministic danger rules (2026-10
+// simulation: the rules caught 8/34 scripted emergencies; the AI reply
+// often told her to go to hospital anyway, but nothing escalated —
+// no follow-up job, no audit row, no provider feed). The caller only ever
+// uses this to RAISE urgency; a null / error / timeout means "no raise".
+export type LlmUrgency = 'low' | 'moderate' | 'high' | 'critical';
+
+export async function assessUrgency(
+  message: string,
+  context: { pregnancyWeek?: number | null; postpartumDays?: number | null } = {}
+): Promise<{ urgency: LlmUrgency; reason: string } | null> {
+  const stage = context.postpartumDays != null
+    ? `She gave birth ${context.postpartumDays} days ago.`
+    : context.pregnancyWeek != null
+      ? `She is about ${context.pregnancyWeek} weeks pregnant.`
+      : 'Her pregnancy stage is unknown.';
+  const out = await extract(
+    `You are a triage nurse for pregnant and postpartum women in Kenya. Classify ONLY what the mother says is happening to her (or her newborn) NOW. ${stage}
+Return STRICT JSON: {"urgency": "low"|"moderate"|"high"|"critical", "reason": "<max 12 words>"}.
+- critical: needs emergency care now — heavy bleeding, soaked pads, seizures, fainting, severe headache with vision changes or BP >= 160/110, water broke, severe abdominal pain after a blow, baby not moving for hours late in pregnancy, chest pain or can't breathe, thoughts of suicide or harming the baby (including "better off without me"), newborn not breathing/blue/fitting.
+- high: needs a health worker TODAY — any bleeding or spotting, fever, reduced baby movements, regular contractions before 37 weeks, vomiting so she can't keep water down, swelling of face/hands, BP 140-159/90-109, violence against her, a fall, wound redness with fever, newborn not feeding, yellow, floppy or with fever.
+- moderate: worth mentioning at the next clinic visit.
+- low: everything else, INCLUDING symptoms she denies ("no bleeding"), things that already stopped, hypotheticals ("if I bleed what do I do"), general questions about other people, and normal pregnancy discomforts.
+Messages may be in English, Kiswahili or Sheng.`,
+    message
+  );
+  if (!out || typeof out.urgency !== 'string') return null;
+  const urgency = out.urgency.toLowerCase();
+  if (!['low', 'moderate', 'high', 'critical'].includes(urgency)) return null;
+  return { urgency: urgency as LlmUrgency, reason: typeof out.reason === 'string' ? out.reason.slice(0, 120) : '' };
 }

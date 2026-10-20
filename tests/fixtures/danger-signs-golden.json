@@ -49,7 +49,6 @@
     "expected_urgency": "critical",
     "note": "suicidal ideation"
   },
-
   {
     "message": "I have a severe headache that has lasted two days",
     "expected_urgency": "high",
@@ -100,7 +99,6 @@
     "expected_urgency": "high",
     "note": "spotting"
   },
-
   {
     "message": "I have a mild headache today",
     "expected_urgency": "moderate",
@@ -151,7 +149,6 @@
     "expected_urgency": "moderate",
     "note": "morning sickness"
   },
-
   {
     "message": "my blood pressure was fine at the clinic",
     "expected_urgency": "low",
@@ -227,7 +224,6 @@
     "expected_urgency": "low",
     "note": "'tired' as adjective, no symptom-verb precedent"
   },
-
   {
     "message": "BLEEDING HEAVILY!!!",
     "expected_urgency": "critical",
@@ -302,5 +298,165 @@
     "message": "leaking from my vagina, watery",
     "expected_urgency": "moderate",
     "note": "leaking with bodily context — moderate (not amniotic-specific)"
+  },
+  {
+    "message": "Hello Amaaii, I'm feeling okay today. No bleeding at all and no headache. Which exercise is safe?",
+    "expected_urgency": "low",
+    "note": "sim 2026-10: negated symptom list must not escalate"
+  },
+  {
+    "message": "aki no swelling or bleeding or anything like that, just the dizzy sometimes",
+    "expected_urgency": "moderate",
+    "note": "negation list via 'or'; dizziness still moderate"
+  },
+  {
+    "message": "Hakuna bleeding, hakuna pain wala headache, nimechoka tu kidogo",
+    "expected_urgency": "moderate",
+    "note": "SW/EN code-switched negation; fatigue remains"
+  },
+  {
+    "message": "sina homa wala damu",
+    "expected_urgency": "low",
+    "note": "SW negation list with wala"
+  },
+  {
+    "message": "nimeshaambiwa ni kawaida. maumivu ni kidogo tu, sina damu nyingi",
+    "expected_urgency": "low",
+    "note": "sina damu nyingi = not heavy bleeding"
+  },
+  {
+    "message": "HOMA BAY. WHY YOU SAY GO TO HOSPITAL I DONT FEEL SICK",
+    "expected_urgency": "low",
+    "note": "place name Homa Bay is not homa (fever)"
+  },
+  {
+    "message": "Sasa niko vizuri, homa imeisha.",
+    "expected_urgency": "low",
+    "note": "resolved fever"
+  },
+  {
+    "message": "nikipata homa au damu nyingi nitaenda mara moja",
+    "expected_urgency": "low",
+    "note": "hypothetical (if I get...) is not a report"
+  },
+  {
+    "message": "Hapana, sijafikiria kujiumiza wala kumdhuru mtoto. Nimechoka tu.",
+    "expected_urgency": "moderate",
+    "note": "negated self-harm must not fire CRITICAL; fatigue only"
+  },
+  {
+    "message": "Nataka kujua tu kama dawa ya malaria inaweza kumdhuru mtoto.",
+    "expected_urgency": "low",
+    "note": "medicine-safety question, not a harm thought"
+  },
+  {
+    "message": "My nipples are cracked and bleeding from breastfeeding",
+    "expected_urgency": "low",
+    "note": "non-vaginal bleeding"
+  },
+  {
+    "message": "No, I'm bleeding heavily since morning",
+    "expected_urgency": "critical",
+    "note": "a comma after 'no' breaks the negation"
+  },
+  {
+    "message": "no pain and bleeding heavily",
+    "expected_urgency": "critical",
+    "note": "'and' without a second negator ends the negation list"
+  },
+  {
+    "message": "I'm not sure if it's bleeding or discharge",
+    "expected_urgency": "high",
+    "note": "negator not directly before the symptom: still escalates"
+  },
+  {
+    "message": "nimeanguka soko leo, nilizimia.",
+    "expected_urgency": "critical",
+    "note": "SW past-tense fainting (nilizimia)"
+  },
+  {
+    "message": "Mume wangu amenipiga, natoka damu chini na tumbo linauma sana",
+    "expected_urgency": "high",
+    "note": "SW 'natoka damu' + violence"
+  },
+  {
+    "message": "Damu inatoka nyingi sana, nimelowesha pedi kadhaa ndani ya saa moja",
+    "expected_urgency": "critical",
+    "note": "postpartum haemorrhage, SW"
+  },
+  {
+    "message": "I soaked two pads in an hour",
+    "expected_urgency": "critical",
+    "note": "soaked pads"
+  },
+  {
+    "message": "BP this morning 165/112 with a severe headache",
+    "expected_urgency": "critical",
+    "note": "severe-range BP"
+  },
+  {
+    "message": "my home readings were 150/100 and 148/98",
+    "expected_urgency": "high",
+    "note": "raised BP"
+  },
+  {
+    "message": "120/80 at the clinic today, all good",
+    "expected_urgency": "low",
+    "note": "normal BP is not a sign"
+  },
+  {
+    "message": "I'm seeing flashing spots and my face is swollen",
+    "expected_urgency": "critical",
+    "note": "visual disturbance wording"
+  },
+  {
+    "message": "a lot of water just gushed down my legs, its clear",
+    "expected_urgency": "critical",
+    "note": "rupture of membranes"
+  },
+  {
+    "message": "my baby has been moving much less since yesterday, only a few kicks",
+    "expected_urgency": "high",
+    "note": "reduced fetal movement"
+  },
+  {
+    "message": "The baby hasn't moved since this morning and it's now evening",
+    "expected_urgency": "high",
+    "note": "no movement since morning"
+  },
+  {
+    "message": "mtoto wangu hasongi tumboni kama zamani leo",
+    "expected_urgency": "high",
+    "note": "SW reduced movement"
+  },
+  {
+    "message": "pains coming every 10 mins and my back is paining. am 34 weeks",
+    "expected_urgency": "high",
+    "note": "regular contractions"
+  },
+  {
+    "message": "ninatapika kila saa sijaweza kunywa hata maji siku mbili",
+    "expected_urgency": "high",
+    "note": "SW persistent vomiting"
+  },
+  {
+    "message": "Sometimes I think everyone would be better off without me, I wish I could just disappear",
+    "expected_urgency": "critical",
+    "note": "passive suicidal ideation"
+  },
+  {
+    "message": "my baby is not breathing properly and his lips are turning blue",
+    "expected_urgency": "critical",
+    "note": "newborn emergency"
+  },
+  {
+    "message": "the baby is not feeding and looks very yellow",
+    "expected_urgency": "high",
+    "note": "newborn danger sign"
+  },
+  {
+    "message": "I fell asleep early last night",
+    "expected_urgency": "low",
+    "note": "'fell asleep' is not a fall"
   }
 ]

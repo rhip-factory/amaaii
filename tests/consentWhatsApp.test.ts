@@ -21,6 +21,19 @@ const db = require('../apps/server/src/database');
 const tw = require('../packages/adapters/src/whatsapp');
 const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
 const { CONSENT_VERSION, deriveConsentState, hasActiveConsent } = require('@amaaii/core');
+// A stub model, so these tests never wait on a real network call (the
+// dummy key above would only fail slowly).
+const { __setClient } = require('@amaaii/adapters');
+__setClient({
+  chat: {
+    completions: {
+      create: async () => ({
+        id: 'stub', object: 'chat.completion', created: 0, model: 'stub',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'A short stub answer.', refusal: null }, logprobs: null }],
+      }),
+    },
+  },
+} as never);
 
 const sent: { to: string; message: string }[] = [];
 
@@ -190,5 +203,58 @@ describe('WhatsApp consent gate — returning/migrated users', () => {
     expect(hasActiveConsent(state, 'data_processing')).toBe(true);
     const rows = await db.getConsents(phone);
     expect(rows.every((r: { version: number }) => r.version === CONSENT_VERSION)).toBe(true);
+  });
+});
+
+// 2026-10 mother simulation: the old /\b(agree|yes|...)\b/ check granted
+// consent on questions and refusals. Only an unambiguous yes grants.
+describe('WhatsApp consent gate — questions and refusals never grant', () => {
+  const notConsent = [
+    "I don't agree",
+    'before I agree, where can I read the privacy notice?',
+    'WHAT IS AGREE I DONT UNDERSTAND',
+    'Hii AGREE ni nini',
+  ];
+  for (const msg of notConsent) {
+    it(`"${msg}" does not grant consent`, async () => {
+      const phone = nextPhone();
+      await deliver(phone, 'Hi');
+      const reply = await deliver(phone, msg);
+      expect(reply).not.toMatch(/what'?s your name/i);
+      const state = deriveConsentState(await db.getConsents(phone));
+      expect(hasActiveConsent(state, 'data_processing')).toBe(false);
+    });
+  }
+
+  it('a question gets a plain explanation that still asks for AGREE', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const reply = await deliver(phone, 'what is this and who sees my messages?');
+    expect(reply).toMatch(/pregnancy helper/i);
+    expect(reply).toMatch(/please reply with the word \*agree\*/i);
+  });
+
+  it('STOP records a decline and an AGREE afterwards still grants', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const stop = await deliver(phone, 'STOP');
+    expect(stop).toMatch(/danger sign/i);
+    const rows = await db.getConsents(phone);
+    expect(rows.some((r: { purpose: string; granted: number | boolean }) => r.purpose === 'data_processing' && !r.granted)).toBe(true);
+
+    const later = await deliver(phone, 'I AGREE');
+    expect(later).toMatch(/what'?s your name/i);
+    const state = deriveConsentState(await db.getConsents(phone));
+    expect(hasActiveConsent(state, 'data_processing')).toBe(true);
+  });
+});
+
+describe('WhatsApp consent gate — a yes inside a longer message', () => {
+  it('"I AGREE. But who will see my messages?" grants (the 2026-10 re-run looped on this)', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    await deliver(phone, 'I AGREE. But who will see my messages?');
+    const state = deriveConsentState(await db.getConsents(phone));
+    expect(hasActiveConsent(state, 'data_processing')).toBe(true);
   });
 });

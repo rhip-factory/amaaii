@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .env
 .env.local
 .DS_Store
@@ -18,3 +18,7 @@ coverage/
 out/
 next-env.d.ts
 *.tsbuildinfo
+
+# Mother-simulation outputs (scripts/sim) — transcripts, scratch DBs, costs
+sim-runs/
+sim-baseline.txt
