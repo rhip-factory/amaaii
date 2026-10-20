@@ -67,6 +67,9 @@ export interface ChatOptions {
   max_tokens?: number;
   temperature?: number;
   response_format?: ChatResponseFormat;
+  /** 'extract' = a structured-field fallback (llmExtract.ts), which may run
+   *  on a different, faster model via LLM_EXTRACT_MODEL. Default 'reply'. */
+  purpose?: 'reply' | 'extract';
   /** Stored user record — used ONLY to strip the user's FULL name out
    *  of user/assistant message content. Never used to add anything to
    *  the outbound request. Omit if the caller has no user context
@@ -91,11 +94,14 @@ export function isLlmConfigured(): boolean {
 
 /**
  * LLM_MODEL, when set, overrides every caller's model (one switch for the
- * whole app, e.g. `openai/gpt-4o-mini`). Otherwise the caller's plain
- * OpenAI name is used, prefixed with `openai/` on OpenRouter so it hits
- * the same model there.
+ * whole app, e.g. `openai/gpt-4o-mini`). LLM_EXTRACT_MODEL, when set, wins
+ * over it for extraction calls — extraction runs under a tight timeout
+ * while the mother waits, so it can stay on a fast model even if replies
+ * move to a slower one. Otherwise the caller's plain OpenAI name is used,
+ * prefixed with `openai/` on OpenRouter so it hits the same model there.
  */
-export function resolveModel(requested: string): string {
+export function resolveModel(requested: string, purpose: ChatOptions['purpose'] = 'reply'): string {
+  if (purpose === 'extract' && process.env.LLM_EXTRACT_MODEL) return process.env.LLM_EXTRACT_MODEL;
   if (process.env.LLM_MODEL) return process.env.LLM_MODEL;
   if (usingOpenRouter() && !requested.includes('/')) return `openai/${requested}`;
   return requested;
@@ -153,12 +159,12 @@ export async function chat(
   messages: ChatMessage[],
   opts: ChatOptions = {}
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-  const { model = DEFAULT_MODEL, max_tokens, temperature, response_format, user } = opts;
+  const { model = DEFAULT_MODEL, max_tokens, temperature, response_format, purpose, user } = opts;
 
   const redactedMessages = messages.map((m) => redactMessage(m, user));
 
   const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-    model: resolveModel(model),
+    model: resolveModel(model, purpose),
     messages: redactedMessages as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
     ...(max_tokens != null ? { max_tokens } : {}),
     ...(temperature != null ? { temperature } : {}),
@@ -169,8 +175,16 @@ export async function chat(
   // prompts — these are pregnancy health conversations. Enforced per
   // request so it can't silently depend on account settings. (`zdr: true`
   // is stricter but currently matches no OpenAI endpoint.)
+  //
+  // Reasoning is pinned to 'minimal' for the same keep-it-explicit reason.
+  // Claude Haiku/Sonnet 5.5 think by default, and the thinking counts
+  // against max_tokens: at our 80–320 token budgets it ate whole replies
+  // (an empty completion, or one cut off mid-sentence) and blew the
+  // extraction timeout. 'minimal' is the lowest level every model
+  // accepts — 'none' is a 400 on Sonnet 5.5 — and non-reasoning models
+  // like gpt-3.5-turbo ignore the field.
   const body = usingOpenRouter()
-    ? ({ ...params, provider: { data_collection: 'deny' } } as typeof params)
+    ? ({ ...params, provider: { data_collection: 'deny' }, reasoning: { effort: 'minimal' } } as typeof params)
     : params;
 
   incrementLlmCall();

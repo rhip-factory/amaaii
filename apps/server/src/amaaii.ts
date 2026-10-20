@@ -243,12 +243,16 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
       user: { name: userName },
     });
 
-    // OpenAI's SDK types `message.content` as `string | null` (nullable
-    // for tool-call-only responses). This integration never requests
-    // tool calls, so content is always a string in practice — matching
-    // the original JS's implicit assumption. Cast documents that, rather
-    // than silently loosening this function's return type.
-    return completion.choices[0].message.content as string;
+    // `message.content` can be null or empty even without tool calls: a
+    // thinking model that spends the whole max_tokens budget reasoning
+    // returns finish_reason 'length' and no text. Passing that through
+    // sent the mother the literal word "null", so treat it as a failure
+    // and fall back to the canned apology below.
+    const reply = completion.choices[0]?.message?.content?.trim();
+    if (!reply) {
+      throw new Error(`empty completion (finish_reason: ${completion.choices[0]?.finish_reason})`);
+    }
+    return reply;
   } catch (error) {
     log.error('OpenAI API error', error);
     return "I'm sorry, I'm having trouble processing your message right now. Please try again later or contact your healthcare provider if this is urgent. 💚";
