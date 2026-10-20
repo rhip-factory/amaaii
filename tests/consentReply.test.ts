@@ -6,7 +6,18 @@ import { describe, it, expect } from 'vitest';
 import { classifyConsentReply } from '@amaaii/core';
 
 describe('classifyConsentReply', () => {
-  const grant = ['I AGREE', 'agree', '*I AGREE*', 'I agree.', 'Yes, I agree 👍', 'ok I agree', 'NAKUBALI', 'Sawa nakubali', 'Ndiyo', 'yes'];
+  const grant = [
+    'I AGREE', 'agree', '*I AGREE*', 'I agree.', 'Yes, I agree 👍', 'ok I agree', 'NAKUBALI', 'Sawa nakubali', 'Ndiyo', 'yes',
+    // Real replies from the simulation that must grant: the yes comes with
+    // a question or a complaint in the same message.
+    'I AGREE. But who will see my messages?',
+    'ok i agree 😅 but who will see my messages? i dont want my mum to know yet',
+    'Sawa, I agree. Ila hii ni ya siri sio?',
+    'Please I AGREE, just tell me what to do',
+    'Still the same message. Let me try exactly how it is written: *I AGREE*',
+    'Naona unaandika AGREE tu. Sawa nimeandika hapa: AGREE.',
+    'I already said I AGREE above, please check.',
+  ];
   const decline = ['STOP', 'SITAKI', "I don't agree", 'I do not agree', 'sikubali'];
   const question = [
     'before I agree, where can I read the privacy notice?',
@@ -14,6 +25,8 @@ describe('classifyConsentReply', () => {
     'Hii AGREE ni nini',
     'why do you need that?',
     'yes please explain',
+    'Ok but what is Amaaii exactly? I will agree after I understand',
+    'Okay I have read it. Before I say I agree, please who owns Amaaii?',
   ];
   const unclear = ['no thanks', 'still not sure', 'ok', 'hello'];
 
