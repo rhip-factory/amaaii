@@ -77,6 +77,16 @@ describe('WhatsApp consent gate — new user precedence', () => {
     expect(hasActiveConsent(state, 'ai_responses')).toBe(true);
   });
 
+  it('the grant reply asks her to save the number as Amaaii, before the name prompt', async () => {
+    // Until Meta approves the display name (business verification), chats
+    // show a bare phone number; a saved contact is what shows "Amaaii".
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const reply = await deliver(phone, 'I AGREE');
+    expect(reply).toMatch(/save this number in your contacts as \*Amaaii\*/);
+    expect(reply.indexOf('*Amaaii*')).toBeLessThan(reply.search(/what'?s your name/i));
+  });
+
   it('case-insensitive / bare "agree" also counts', async () => {
     const phone = nextPhone();
     await deliver(phone, 'Hi');

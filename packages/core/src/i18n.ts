@@ -36,7 +36,7 @@ const STRINGS: Record<Lang, StringDict> = {
     // shown for non-critical turns.
     consent_request: "Before we begin, I need your permission to store and use your messages so I can support you 💚 Amaaii keeps your chats and check-ins securely, personalises your care, and automatically watches for urgent danger signs — even before you finish signing up. Read our privacy notice: {url}\n\nReply *I AGREE* to continue, or *STOP* if you'd rather not.",
     consent_reprompt: "I didn't quite catch that. To use Amaaii, please reply with the word *AGREE* (or *I AGREE*) to accept our privacy notice and continue — I'll always alert you to urgent danger signs either way. Read the notice here: {url}\n\nOr reply *STOP* if you don't wish to continue.",
-    consent_thanks: "✅ Thank you — you're all set on privacy. Let's get to know you a little.",
+    consent_thanks: "✅ Thank you — you're all set on privacy.\n\n📇 Please save this number in your contacts as *Amaaii*, so you always know a message is from us.\n\nLet's get to know you a little.",
 
     // Consent — web /chat (PWA) copy. Returned alongside consentRequired:
     // true instead of processing the message.
@@ -139,7 +139,7 @@ const STRINGS: Record<Lang, StringDict> = {
     // Consent (P3-B, Kenya DPA) — Kiswahili variants of the EN copy above.
     consent_request: "Kabla hatujaanza, ninahitaji ruhusa yako kuhifadhi na kutumia ujumbe wako ili nikusaidie 💚 Amaaii huhifadhi mazungumzo na taarifa zako za afya kwa usalama, hukupa huduma ya kibinafsi, na hugundua dalili za hatari moja kwa moja — hata kabla hujamaliza kujisajili. Soma taarifa yetu ya faragha: {url}\n\nJibu *NAKUBALI* kuendelea, au *SITAKI* kama hutaki.",
     consent_reprompt: "Sikuelewa vizuri. Ili kutumia Amaaii, tafadhali jibu na neno *NAKUBALI* kukubali taarifa yetu ya faragha na kuendelea — nitakuarifu daima kuhusu dalili za hatari hata hivyo. Soma taarifa hapa: {url}\n\nAu jibu *SITAKI* kama hutaki kuendelea.",
-    consent_thanks: "✅ Asante — umekamilisha faragha. Sasa hebu tukujue kidogo.",
+    consent_thanks: "✅ Asante — umekamilisha faragha.\n\n📇 Tafadhali hifadhi namba hii kwenye simu yako kama *Amaaii*, ili ujue kila wakati kwamba ujumbe unatoka kwetu.\n\nSasa hebu tukujue kidogo.",
 
     web_consent_required: "Unahitaji kukubali idhini ya matumizi ya data ya Amaaii kabla sijazungumza nawe. Tafadhali fungua Mipangilio kwenye programu na utoe idhini ili kuendelea — bado nitakuarifu kuhusu dalili za hatari unazotaja.",
 
