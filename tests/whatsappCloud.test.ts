@@ -141,6 +141,40 @@ describe('Cloud API client', () => {
     });
   });
 
+  it('retries a network failure (no HTTP response) and then delivers', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed', { cause: { code: 'ECONNRESET' } }))
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [{ id: 'wamid.OUT' }] }) });
+    vi.stubGlobal('fetch', fetchMock);
+    await cloud.sendCloudText('whatsapp:+254700000001', 'Hello');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after two retries and names the underlying cause', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(cloud.sendCloudText('whatsapp:+254700000001', 'Hi')).rejects.toMatchObject({
+      name: 'CloudApiError',
+      status: 0,
+      message: expect.stringContaining('ENOTFOUND'),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('never retries once Meta has answered, even with a 5xx (could double-send)', async () => {
+    const fetchMock = mockFetch(500, { error: { message: 'Internal error', code: 1 } });
+    await expect(cloud.sendCloudText('whatsapp:+254700000001', 'Hi')).rejects.toMatchObject({ status: 500 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('never retries our own timeout (the send may already be in flight)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(cloud.sendCloudText('whatsapp:+254700000001', 'Hi')).rejects.toMatchObject({ status: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('sends the OTP as an authentication template with the code in body and button', async () => {
     const fetchMock = mockFetch();
     await cloud.sendCloudOtpTemplate('whatsapp:+254700000001', '123456', 'amaaii_otp');

@@ -20,7 +20,7 @@ const REQUEST_TIMEOUT_MS = 10000;
 export class CloudApiError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    readonly status: number, // 0 = no HTTP response (network failure or timeout)
     // Meta's numeric error code, e.g. 131047 = outside the 24-hour
     // customer-service window (a free-form message needs a template).
     readonly code: number | undefined
@@ -39,17 +39,51 @@ export function toMetaRecipient(phone: string): string {
   return phone.replace(/^whatsapp:/, '').replace(/^\+/, '');
 }
 
+// Retried: failures where Meta never answered — DNS, refused or reset
+// connections (undici's "fetch failed"). Seen live as a one-off blip that
+// left a mother's voice note with no reply at all. Not retried: any HTTP
+// response (Meta answered; resending a 4xx/5xx risks a duplicate) and our
+// own timeout (the send may already be in flight). A reset after Meta
+// accepted the request could still double-send — a rare duplicate reply
+// beats silence.
+const RETRY_DELAYS_MS = [300, 1000];
+
+function isNetworkFailure(err: unknown): boolean {
+  return err instanceof TypeError && err.message === 'fetch failed';
+}
+
+/** The underlying reason (ECONNRESET, ENOTFOUND, …) — "fetch failed" alone says nothing. */
+function describeFailure(err: unknown): string {
+  const cause = (err as { cause?: { code?: string; message?: string } } | null)?.cause;
+  return cause?.code ?? cause?.message ?? (err instanceof Error ? err.message : String(err));
+}
+
+async function fetchWithRetry(url: string, init: () => RequestInit): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, init());
+    } catch (error) {
+      if (!isNetworkFailure(error) || attempt >= RETRY_DELAYS_MS.length) {
+        throw new CloudApiError(`WhatsApp Cloud API unreachable: ${describeFailure(error)}`, 0, undefined);
+      }
+      log.warn('WhatsApp Cloud API unreachable, retrying', { cause: describeFailure(error), retry: attempt + 1 });
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
 async function postToGraph(path: string, body: Record<string, unknown>): Promise<unknown> {
   const version = process.env.META_GRAPH_VERSION || DEFAULT_GRAPH_VERSION;
-  const res = await fetch(`https://graph.facebook.com/${version}/${path}`, {
+  const res = await fetchWithRetry(`https://graph.facebook.com/${version}/${path}`, () => ({
     method: 'POST',
     headers: {
       Authorization: `Bearer ${process.env.META_WA_ACCESS_TOKEN}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
+    // Fresh per attempt: a timeout signal can't be reused once it fires.
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  }));
   const json = (await res.json().catch(() => ({}))) as {
     error?: { message?: string; code?: number };
   };
