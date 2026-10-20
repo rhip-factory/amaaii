@@ -26,6 +26,12 @@ import {
   scanFreeText,
   parseCommand,
   looksLikeOffTopic,
+  extractSymptoms,
+  validJournalFields,
+  buildClarifyOptions,
+  bareSleepNumber,
+  matchClarifyOption,
+  JOURNAL_SCORE_STAGES,
   pregnancyStatus,
   generateJournalSummary as coreGenerateJournalSummary,
   generateRecommendations as coreGenerateRecommendations,
@@ -39,6 +45,9 @@ import type {
   JournalSummaryData,
   DangerSignResult,
   SymptomHistoryEntry,
+  ClarifyOption,
+  JournalFields,
+  PendingClarify,
 } from '@amaaii/core';
 
 interface JournalResponseSuccess {
@@ -49,6 +58,14 @@ interface JournalResponseSuccess {
    *  session has been closed and the caller should route the message
    *  normally (the 2026-10 simulation's "journal trap"). */
   passThrough?: boolean;
+  /** She picked the "I feel unwell"/"Pain N/10" option: the session is
+   *  closed and the caller should triage her message (passThrough too). */
+  unwell?: boolean;
+  /** Reply options for a "what did you mean?" question (buttons on Meta
+   *  WhatsApp, chips in the app, a numbered list elsewhere). */
+  options?: string[];
+  /** Her score answer also mentioned a symptom — worth a triage look. */
+  mentionsSymptom?: boolean;
 }
 
 type JournalChannel = 'whatsapp' | 'web';
@@ -56,6 +73,40 @@ type JournalChannel = 'whatsapp' | 'web';
 // Per-stage retry counts live in the session blob under this key, never
 // in the journals row itself.
 const ATTEMPTS_KEY = '__attempts';
+// An open "what did you mean?" question (core PendingClarify).
+const CLARIFY_KEY = '__clarify';
+
+interface AnswerRead {
+  fields: JournalFields | null;
+  clarify?: ClarifyOption[];
+  unwell?: boolean;
+  symptom?: boolean;
+}
+
+// The regex reading of a score answer, used as-is for short replies and
+// whenever the model can't be asked.
+function deterministicFields(stage: string, message: string): JournalFields | null {
+  switch (stage) {
+    case 'mood': return validJournalFields(stage, { mood: coreExtractNumber(message) });
+    case 'sleep': return validJournalFields(stage, parseSleepAnswer(message));
+    case 'baby_movement': return validJournalFields(stage, { count: coreExtractNumber(message) });
+    case 'water': return validJournalFields(stage, { glasses: coreExtractNumber(message) });
+    case 'appetite': return validJournalFields(stage, { appetite: parseAppetiteAnswer(message) });
+    default: return null;
+  }
+}
+
+// Every value in `base` appears, unchanged, in `reading`.
+function agreesWith(reading: JournalFields, base: JournalFields): boolean {
+  return (Object.keys(base) as (keyof JournalFields)[]).every((k) => reading[k] === base[k]);
+}
+
+function singleSmallNumber(message: string): number | null {
+  const nums = message.match(/\d+/g);
+  if (!nums || nums.length !== 1) return null;
+  const n = Number(nums[0]);
+  return n >= 1 && n <= 10 ? n : null;
+}
 
 interface JournalResponseError {
   error: true;
@@ -188,6 +239,62 @@ class JournalManager {
   }
 
   /**
+   * Reads a score-stage answer against the question she was asked: a pick
+   * from an open "what did you mean?" question first, then the regex for
+   * short replies, then the model (with the question) for anything longer
+   * or unreadable. A reply that fits more than one way gets options
+   * instead of a guess — once; a second unclear reply is left blank.
+   */
+  private async readAnswer(
+    userPhone: string,
+    stage: string,
+    message: string,
+    pending: PendingClarify | null,
+    canAi: boolean,
+    lang: string
+  ): Promise<AnswerRead> {
+    let clarifiedBefore = false;
+    if (pending && pending.stage === stage) {
+      const i = matchClarifyOption(message, pending.options);
+      if (i !== null) {
+        const picked = pending.options[i];
+        return picked.unwell ? { fields: null, unwell: true } : { fields: picked.fields ?? null };
+      }
+      clarifiedBefore = true;
+    }
+    const symptom = extractSymptoms(message).length > 0;
+    const bare = stage === 'sleep' && !clarifiedBefore ? bareSleepNumber(message) : null;
+    if (bare !== null) {
+      const clarify = buildClarifyOptions([{ quality: bare }, { hours: bare }], lang, bare);
+      if (clarify) return { fields: null, clarify, symptom };
+    }
+    const det = deterministicFields(stage, message);
+    const short = message.trim().split(/\s+/).length <= 5;
+    if (!canAi || (det && short)) return { fields: det, symptom };
+
+    const question = (await db.getLastBotMessage(userPhone).catch(() => null))?.response ?? null;
+    const ai = await llm.interpretJournalAnswer(stage, question, message);
+    if (!ai) return { fields: det, symptom };
+    const mentions = symptom || ai.symptom !== '';
+    const answer = validJournalFields(stage, ai.answer);
+    if (ai.status === 'clear') return { fields: answer ?? det, symptom: mentions };
+    if (ai.status === 'ambiguous') {
+      const readings = ai.readings
+        .map((r) => validJournalFields(stage, r))
+        .filter((r): r is JournalFields => r !== null);
+      // Readings that only add values she never gave ("5 hours" read as
+      // 3/10 + 5 hours) are not a real choice: keep what she said.
+      if (answer && readings.every((r) => agreesWith(r, answer))) return { fields: answer, symptom: mentions };
+      if (!clarifiedBefore) {
+        const clarify = buildClarifyOptions(readings, lang, singleSmallNumber(message));
+        if (clarify) return { fields: null, clarify, symptom: mentions };
+      }
+      return { fields: readings.length === 1 ? readings[0] : null, symptom: mentions };
+    }
+    return { fields: null, symptom: mentions };
+  }
+
+  /**
    * `opts.canAi` (default true, for direct callers/tests): with the optional
    * ai_responses consent declined, the llm.extract* fallbacks below are
    * skipped and only the deterministic parsers run — declining AI must
@@ -227,6 +334,36 @@ class JournalManager {
     // as '' — all 11 JournalStage values are handled below).
     let response = '';
     const journalUpdate: JournalPatch = {};
+    let mentionsSymptom = false;
+    let fields: JournalFields | null = null;
+
+    if (JOURNAL_SCORE_STAGES.has(stage)) {
+      const pending = (journalData[CLARIFY_KEY] as PendingClarify | undefined) ?? null;
+      const read = await this.readAnswer(userPhone, stage, message, pending, canAi, lang);
+      if (read.unwell) {
+        await db.deleteJournalSession(userPhone);
+        return { response: '', completed: false, passThrough: true, unwell: true };
+      }
+      if (read.clarify) {
+        const clarify: PendingClarify = { stage, options: read.clarify };
+        await db.upsertJournalSession(userPhone, {
+          currentStage: stage,
+          journalData: { ...journalData, [CLARIFY_KEY]: clarify },
+          journalId,
+          channel: dbSession.channel ?? 'whatsapp',
+        });
+        const answer = message.trim().replace(/\s+/g, ' ').slice(0, 60);
+        return {
+          response: t(lang, 'journal_clarify', { answer }),
+          options: read.clarify.map((o) => o.label),
+          nextStage: stage,
+          completed: false,
+          mentionsSymptom: !!read.symptom,
+        };
+      }
+      fields = read.fields;
+      mentionsSymptom = !!read.symptom;
+    }
 
     switch (stage) {
       case 'greeting':
@@ -258,13 +395,8 @@ class JournalManager {
       }
 
       case 'mood': {
-        let moodScore = coreExtractNumber(message);
-        if (!(moodScore && moodScore >= 1 && moodScore <= 10)) {
-          // Regex missed → ask the LLM to interpret.
-          const out = canAi ? await llm.extractMood(message) : null;
-          if (out && out.mood) moodScore = out.mood;
-        }
-        const moodValid = !!(moodScore && moodScore >= 1 && moodScore <= 10);
+        const moodScore = fields?.mood ?? null;
+        const moodValid = moodScore !== null;
         if (!moodValid && looksLikeOffTopic(message)) {
           passThrough = true;
           break;
@@ -310,22 +442,8 @@ class JournalManager {
       }
 
       case 'sleep': {
-        const parsed = parseSleepAnswer(message);
-        if (parsed.quality != null) journalUpdate.sleep_quality = parsed.quality;
-        if (parsed.hours != null) journalUpdate.sleep_hours = parsed.hours;
-        // LLM fallback if either signal is missing — covers phrasings
-        // like "really bad, only 3 hours" or Kiswahili input.
-        if (journalUpdate.sleep_quality == null || journalUpdate.sleep_hours == null) {
-          const out = canAi ? await llm.extractSleep(message) : null;
-          if (out) {
-            if (journalUpdate.sleep_quality == null && out.quality != null) {
-              journalUpdate.sleep_quality = out.quality;
-            }
-            if (journalUpdate.sleep_hours == null && out.hours != null) {
-              journalUpdate.sleep_hours = out.hours;
-            }
-          }
-        }
+        if (fields?.quality != null) journalUpdate.sleep_quality = fields.quality;
+        if (fields?.hours != null) journalUpdate.sleep_hours = fields.hours;
 
         if (journalUpdate.sleep_quality == null && journalUpdate.sleep_hours == null && looksLikeOffTopic(message)) {
           passThrough = true;
@@ -339,11 +457,7 @@ class JournalManager {
       }
 
       case 'baby_movement': {
-        let movementCount = coreExtractNumber(message);
-        if (movementCount === null) {
-          const out = canAi ? await llm.extractMovement(message) : null;
-          if (out && out.count != null) movementCount = out.count;
-        }
+        const movementCount = fields?.count ?? null;
         if (movementCount === null && looksLikeOffTopic(message)) {
           passThrough = true;
           break;
@@ -368,11 +482,7 @@ class JournalManager {
       }
 
       case 'water': {
-        let waterCount = coreExtractNumber(message);
-        if (waterCount === null) {
-          const out = canAi ? await llm.extractWater(message) : null;
-          if (out && out.glasses != null) waterCount = out.glasses;
-        }
+        const waterCount = fields?.glasses ?? null;
         if (waterCount !== null) {
           journalUpdate.water_intake = waterCount;
           const ack =
@@ -397,11 +507,7 @@ class JournalManager {
       }
 
       case 'appetite': {
-        let appetiteLevel: string | null = parseAppetiteAnswer(message);
-        if (appetiteLevel === null) {
-          const out = canAi ? await llm.extractAppetite(message) : null;
-          if (out && out.appetite) appetiteLevel = out.appetite;
-        }
+        const appetiteLevel: string | null = fields?.appetite ?? null;
         if (appetiteLevel === null && looksLikeOffTopic(message)) {
           passThrough = true;
           break;
@@ -464,7 +570,8 @@ class JournalManager {
       await db.createOrUpdateJournal(userPhone, journalUpdate, journalId);
     }
 
-    const mergedJournalData = { ...journalData, ...journalUpdate, [ATTEMPTS_KEY]: attempts };
+    // Any answer closes an open "what did you mean?" question.
+    const mergedJournalData = { ...journalData, ...journalUpdate, [ATTEMPTS_KEY]: attempts, [CLARIFY_KEY]: undefined };
 
     if (nextStage === 'completed') {
       await db.deleteJournalSession(userPhone);
@@ -477,7 +584,7 @@ class JournalManager {
       });
     }
 
-    return { response, nextStage, completed: nextStage === 'completed' };
+    return { response, nextStage, completed: nextStage === 'completed', mentionsSymptom };
   }
 
   async generateJournalSummary(

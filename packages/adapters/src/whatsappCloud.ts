@@ -120,6 +120,37 @@ export async function sendCloudText(to: string, message: string): Promise<unknow
 }
 
 /**
+ * A question with up to three reply buttons (Meta's limit; titles are cut
+ * at 20 characters, also Meta's). A tap comes back as an `interactive`
+ * message whose button title the webhook reads as her reply text.
+ */
+export async function sendCloudButtons(to: string, body: string, options: string[]): Promise<unknown> {
+  try {
+    const response = (await postToGraph(messagesPath(), {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: toMetaRecipient(to),
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        body: { text: body.slice(0, 1024) },
+        action: {
+          buttons: options.slice(0, 3).map((title, i) => ({
+            type: 'reply',
+            reply: { id: `opt_${i + 1}`, title: title.slice(0, 20) },
+          })),
+        },
+      },
+    })) as { messages?: { id?: string }[] };
+    log.info(`Buttons sent successfully. WAMID: ${response.messages?.[0]?.id}`);
+    return response;
+  } catch (error) {
+    log.error('Error sending WhatsApp buttons (Cloud API)', error);
+    throw error;
+  }
+}
+
+/**
  * Sends a sign-in code through an approved AUTHENTICATION template — the
  * only way to reach a user outside the 24-hour window, which is the normal
  * case for a PWA login (the user may never have messaged the bot). Meta

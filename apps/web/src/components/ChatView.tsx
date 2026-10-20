@@ -97,6 +97,7 @@ export default function ChatView({ initialPrefill }: ChatViewProps) {
           text: result.response,
           urgency: result.urgencyLevel,
           timestamp: new Date().toISOString(),
+          options: result.options,
         },
       ]);
     } catch (err) {
@@ -138,7 +139,7 @@ export default function ChatView({ initialPrefill }: ChatViewProps) {
           </div>
         )}
 
-        {messages.map((m) => (
+        {messages.map((m, i) => (
           <div key={m.id} className={`${styles.bubbleRow} ${styles[m.role]}`}>
             <div
               className={`${styles.bubble} ${m.urgency === "critical" ? styles.critical : ""} ${
@@ -151,6 +152,15 @@ export default function ChatView({ initialPrefill }: ChatViewProps) {
               {formatTime(m.timestamp)}
               {m.channel === "whatsapp" ? " · on WhatsApp" : ""}
             </span>
+            {m.options?.length && i === messages.length - 1 && !sending ? (
+              <div className={styles.replyOptions}>
+                {m.options.map((o) => (
+                  <button key={o} type="button" className={styles.suggest} onClick={() => send(o)}>
+                    {o}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
 

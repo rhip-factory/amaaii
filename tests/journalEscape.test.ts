@@ -22,12 +22,14 @@ const { __setClient, __resetClient } = require('@amaaii/adapters');
 let triage = '{"urgency":"low","reason":"ok"}';
 let reply = 'Here is some friendly advice.';
 let triageCalls = 0;
+let triageInput = '';
 function installStub(): void {
   const create = async (req: { messages: { role: string; content: string }[] }) => {
     const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
     let content = reply;
     if (system.includes('triage nurse')) {
       triageCalls += 1;
+      triageInput = req.messages.find((m) => m.role === 'user')?.content ?? '';
       content = triage;
     } else if (system.includes('STRICT JSON') || system.includes('Return JSON')) {
       content = '{}';
@@ -48,6 +50,7 @@ beforeEach(() => {
   triage = '{"urgency":"low","reason":"ok"}';
   reply = 'Here is some friendly advice.';
   triageCalls = 0;
+  triageInput = '';
   delete process.env.LLM_TRIAGE_RAISE;
   delete process.env.LLM_TRIAGE_MAX;
   installStub();
@@ -255,6 +258,31 @@ describe('raise-only AI triage', () => {
     const r = await say(phone, 'my tummy keeps going tight and hard every few minutes since lunch');
     expect(r.urgencyLevel).toBe('low');
     expect(triageCalls).toBe(0);
+  });
+
+  // Prod, 2026-10-20: "It was a 7" answering the sleep question was read
+  // as "pain rated 7/10" and paused the check-in with a HIGH escalation.
+  it('a journal score answer is not sent for triage', async () => {
+    const phone = await onboardedPhone();
+    triage = '{"urgency":"high","reason":"Pain rated 7/10"}';
+    await say(phone, 'journal', 'web');
+    await say(phone, '9', 'web');
+    await say(phone, 'None', 'web');
+    const r = await say(phone, 'It was a 7', 'web');
+    expect(r.urgencyLevel).toBe('low');
+    expect(r.response).not.toMatch(/healthcare provider TODAY/);
+    expect(triageCalls).toBe(0);
+  });
+
+  it('a free-text journal answer is triaged with the question she is answering', async () => {
+    const phone = await onboardedPhone();
+    await say(phone, 'journal');
+    await say(phone, '8');
+    await say(phone, 'my tummy keeps going tight and hard every few minutes');
+    expect(triageCalls).toBe(1);
+    expect(triageInput).toMatch(/Amaaii's last message/);
+    expect(triageInput).toMatch(/physical symptoms/i);
+    expect(triageInput).toMatch(/tight and hard/);
   });
 
   it('short messages are not sent for triage', async () => {

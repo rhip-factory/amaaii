@@ -80,6 +80,8 @@ export interface ChatResponse {
   response: string;
   urgencyLevel: Urgency;
   context?: unknown;
+  /** Reply options for a "what did you mean?" question, shown as chips. */
+  options?: string[];
 }
 
 export interface HistoryRow {
@@ -106,6 +108,8 @@ export interface ChatMessage {
   timestamp: string;
   /** Where the turn happened — history loaded from GET /conversations. */
   channel?: "whatsapp" | "web";
+  /** Tap-to-reply options (only on the newest bot message). */
+  options?: string[];
 }
 
 /** One row of GET /conversations (oldest first). */

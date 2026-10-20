@@ -7,7 +7,7 @@
 // whole rollback.
 
 import { sendViaTwilio } from './twilio';
-import { isCloudConfigured, sendCloudOtpTemplate, sendCloudText } from './whatsappCloud';
+import { isCloudConfigured, sendCloudButtons, sendCloudOtpTemplate, sendCloudText } from './whatsappCloud';
 
 export type WhatsAppProvider = 'twilio' | 'meta';
 export type SendImpl = (to: string, message: string) => Promise<unknown>;
@@ -38,6 +38,27 @@ let _impl: SendImpl = defaultSend;
 
 export async function sendWhatsAppMessage(to: string, message: string): Promise<unknown> {
   return _impl(to, message);
+}
+
+/**
+ * A question with reply options. Meta gets real reply buttons; Twilio (and
+ * a test seam) gets `fallbackText`, the same question as a numbered list,
+ * which is also what a failed button send falls back to.
+ */
+export async function sendWhatsAppButtons(
+  to: string,
+  body: string,
+  options: string[],
+  fallbackText: string
+): Promise<unknown> {
+  if (whatsappProvider() === 'meta' && _impl === defaultSend) {
+    try {
+      return await sendCloudButtons(to, body, options);
+    } catch {
+      return sendCloudText(to, fallbackText);
+    }
+  }
+  return sendWhatsAppMessage(to, fallbackText);
 }
 
 /**
