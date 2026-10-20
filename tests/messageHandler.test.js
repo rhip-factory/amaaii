@@ -19,7 +19,7 @@ process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
 
 const db = require('../apps/server/src/database');
-const tw = require('../packages/adapters/src/twilio');
+const tw = require('../packages/adapters/src/whatsapp');
 const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
 
 const sent = [];

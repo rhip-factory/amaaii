@@ -124,8 +124,8 @@ export default function PrivacyPage() {
               shared one) may appear, so a reply can still feel personal.
             </li>
             <li>
-              <strong>Twilio</strong> — delivers and receives your WhatsApp messages, and sends the
-              one-time codes you use to sign in.
+              <strong>Meta</strong> (WhatsApp) — delivers and receives your WhatsApp messages, and sends
+              the one-time codes you use to sign in.
             </li>
           </ul>
           <p className={styles.body}>
@@ -186,7 +186,7 @@ export default function PrivacyPage() {
           <p className={styles.body}>
             Amaaii huhifadhi taarifa zako za afya ili kukusaidia — hii ni lazima ili programu ifanye kazi.
             Matumizi ya AI kwa majibu ya kibinafsi ni hiari; ukikataa, bado utapata ukaguzi wa kila siku na
-            arifa za dharura. Taarifa zako zinaweza kuchakatwa na washirika wetu (OpenRouter, OpenAI, Twilio) nje ya
+            arifa za dharura. Taarifa zako zinaweza kuchakatwa na washirika wetu (OpenRouter, OpenAI, Meta) nje ya
             Kenya, Marekani. Unaweza kupakua, kubadilisha idhini yako, au kufuta akaunti yako wakati wowote
             kupitia Profaili.
           </p>

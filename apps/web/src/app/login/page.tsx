@@ -16,16 +16,14 @@ type Step = "phone" | "code";
 // — see the retryAfterSeconds handling below.
 const RESEND_COOLDOWN_SECONDS = 60;
 
-// Testing phase: OTP codes go out from the Twilio WhatsApp sandbox, which
-// only delivers to numbers that have first sent it the join phrase. Twilio
-// accepts a send to a number that hasn't joined and then drops it silently,
-// so the user sees no error, just a code that never arrives. Set to null
-// once we're on a real WhatsApp Business sender.
-const SANDBOX_JOIN: { phrase: string; display: string; waLink: string } | null = {
-  phrase: "join ride-call",
-  display: "+1 415 523 8886",
-  waLink: `https://wa.me/14155238886?text=${encodeURIComponent("join ride-call")}`,
-};
+// Join instructions for the Twilio WhatsApp sandbox, which only delivers to
+// numbers that have first sent it the join phrase (and silently drops sends
+// to any other number). Null since the move to the Meta Cloud API: codes go
+// out through an approved authentication template, which reaches any
+// WhatsApp number. If production is ever rolled back to WHATSAPP_PROVIDER=
+// twilio, restore { phrase: "join ride-call", display: "+1 415 523 8886",
+// waLink: "https://wa.me/14155238886?text=join%20ride-call" }.
+const SANDBOX_JOIN: { phrase: string; display: string; waLink: string } | null = null;
 
 export default function LoginPage() {
   const router = useRouter();

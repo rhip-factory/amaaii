@@ -1,6 +1,6 @@
 // P3-B: WhatsApp-channel consent-gate tests, mirroring
 // tests/messageHandler.test.js's style (handleIncomingMessage +
-// twilio.__setSendImpl seam). Covers the stateless consent-gate flow
+// whatsapp.__setSendImpl seam). Covers the stateless consent-gate flow
 // (packages/core/src/i18n.ts's consent_request/consent_reprompt/
 // consent_thanks + messageHandler.ts's handleConsentGate): a brand-new
 // phone is asked for consent BEFORE profile onboarding, "I AGREE"
@@ -18,7 +18,7 @@ process.env.DB_PATH = ':memory:';
 process.env.OPENAI_API_KEY = 'sk-test-dummy';
 
 const db = require('../apps/server/src/database');
-const tw = require('../packages/adapters/src/twilio');
+const tw = require('../packages/adapters/src/whatsapp');
 const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
 const { CONSENT_VERSION, deriveConsentState, hasActiveConsent } = require('@amaaii/core');
 
@@ -75,6 +75,16 @@ describe('WhatsApp consent gate — new user precedence', () => {
     const state = deriveConsentState(await db.getConsents(phone));
     expect(hasActiveConsent(state, 'data_processing')).toBe(true);
     expect(hasActiveConsent(state, 'ai_responses')).toBe(true);
+  });
+
+  it('the grant reply asks her to save the number as Amaaii, before the name prompt', async () => {
+    // Until Meta approves the display name (business verification), chats
+    // show a bare phone number; a saved contact is what shows "Amaaii".
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    const reply = await deliver(phone, 'I AGREE');
+    expect(reply).toMatch(/save this number in your contacts as \*Amaaii\*/);
+    expect(reply.indexOf('*Amaaii*')).toBeLessThan(reply.search(/what'?s your name/i));
   });
 
   it('case-insensitive / bare "agree" also counts', async () => {
