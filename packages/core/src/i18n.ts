@@ -334,11 +334,13 @@ const SW_MARKERS = new Set([
 const SW_VERB = /^(?:nina|nili|nime|nita|nisi|tuna|tume|tuli|wame|wali|wana|una|ume|uli)[a-z]{3,}$/;
 
 export function detectLanguage(message: string): Lang | null {
-  const words = (message || '').toLowerCase().match(/[a-z']+/g) || [];
-  if (words.length < 2) return null;
+  // Place names are not language: "Homa Bay" is a county, not "homa".
+  const words = (message || '').toLowerCase().replace(/\bhoma\s*bay\b/g, ' ').match(/[a-z']+/g) || [];
+  // A town name or a one-word answer says nothing about her language.
+  if (words.length < 3) return null;
   const sw = words.filter((w) => SW_MARKERS.has(w) || SW_VERB.test(w)).length;
   const ratio = sw / words.length;
-  if (ratio >= 0.35) return 'sw';
+  if (ratio >= 0.35 && sw >= 2) return 'sw';
   if (ratio <= 0.1) return 'en';
   return null;
 }

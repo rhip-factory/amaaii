@@ -119,6 +119,18 @@ describe('LLM-first onboarding', () => {
     expect(r.response).toMatch(/Which town or area/);
   });
 
+  it('an answer that also asks a question gets both: the field saved and the question answered', async () => {
+    const p = phone();
+    await consented(p);
+    await db.updateUser(p, { name: 'Faith' });
+    await say(p, 'hi');
+    reply = 'I am an automated assistant, not a person.';
+    const r = await say(p, "I'm 23. But is Amaaii a person or a bot?");
+    expect((await db.getUser(p)).age).toBe(23);
+    expect(r.response).toMatch(/automated assistant/);
+    expect(r.response).toMatch(/How far along/);
+  });
+
   it('a mother who joins after the birth goes straight to postpartum', async () => {
     const p = phone();
     await consented(p);

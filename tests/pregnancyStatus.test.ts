@@ -81,6 +81,10 @@ describe('detectLanguage', () => {
     expect(detectLanguage('Hello, a nurse at the clinic gave me this number')).toBe('en');
     expect(detectLanguage('Hello Amaaii, niko sawa leo. Hakuna bleeding, hakuna pain wala headache')).toBeNull();
     expect(detectLanguage('hi')).toBeNull();
+    // A town name is not a language (the pilot flipped an English-writing
+    // mother to Kiswahili on "HOMA BAY").
+    expect(detectLanguage('HOMA BAY')).toBeNull();
+    expect(detectLanguage('Niko Kisumu')).toBeNull();
   });
 });
 

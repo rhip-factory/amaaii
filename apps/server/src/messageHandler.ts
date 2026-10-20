@@ -1062,10 +1062,26 @@ async function handleOnboarding(
     fresh = (await userManager.updateUserProfile(phoneNumber, update as Record<string, unknown>)) ?? { ...user, ...update };
   }
 
+  // A question she asked along the way gets a short answer first — even
+  // when the same message also answered the field (the simulation's
+  // mothers asked "is this a person or a bot?" three times while
+  // onboarding carried on regardless).
+  const answerFirst = async (prompt: string): Promise<{ response: string; aiUsed: boolean }> => {
+    if (!opts.canAi || !message.includes('?')) return { response: prompt, aiUsed: false };
+    const answer = await getAmaaiiResponse(message, {
+      userName: fresh.name,
+      pregnancyWeek: fresh.pregnancy_week,
+      location: fresh.location,
+      currentContext: 'onboarding',
+      language: lang,
+    });
+    return { response: `${answer}\n\n${prompt}`, aiUsed: true };
+  };
+
   const stillMissing = missingSlots(fresh);
   if (stillMissing.length === 0) {
     const summary = userManager.formatUserSummary(fresh);
-    return { response: t(lang, 'location_done', { summary }) + appLine(lang), aiUsed: false };
+    return answerFirst(t(lang, 'location_done', { summary }) + appLine(lang));
   }
   const next = stillMissing[0];
   const askedCurrent = {
@@ -1075,20 +1091,7 @@ async function handleOnboarding(
     location: askedLocation,
   }[current];
   const retry = next === current && askedCurrent && Object.keys(update).length === 0;
-  const prompt = onboardingPrompt(next, fresh, lang, retry, update.name !== undefined);
-
-  // She asked something instead of answering: answer briefly, then ask again.
-  if (opts.canAi && !isConsentReply && Object.keys(update).length === 0 && message.includes('?')) {
-    const answer = await getAmaaiiResponse(message, {
-      userName: fresh.name,
-      pregnancyWeek: fresh.pregnancy_week,
-      location: fresh.location,
-      currentContext: 'onboarding',
-      language: lang,
-    });
-    return { response: `${answer}\n\n${prompt}`, aiUsed: true };
-  }
-  return { response: prompt, aiUsed: false };
+  return answerFirst(onboardingPrompt(next, fresh, lang, retry, update.name !== undefined));
 }
 
 function checkIfMentalHealth(message: string): boolean {
