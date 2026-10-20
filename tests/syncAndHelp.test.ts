@@ -130,6 +130,15 @@ describe('voice notes on the Twilio webhook', () => {
   });
 });
 
+describe('empty messages', () => {
+  it('an empty body never reaches the AI, on any path', async () => {
+    const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
+    reply = 'SHOULD NOT BE SENT';
+    await handleIncomingMessage('whatsapp:+254755000002', '   ', null);
+    expect(sent.at(-1)?.message).toMatch(/only read text messages/);
+  });
+});
+
 describe('cut-off replies', () => {
   it('trims to the last full sentence', () => {
     expect(trimToLastSentence('Rest when you can. Drink water often. If the pain gets worse, go to')).toBe('Rest when you can. Drink water often.');

@@ -847,6 +847,12 @@ export async function handleIncomingMessage(
   profileName: string | null
 ): Promise<void> {
   try {
+    // An empty body (a media message on any path) must never reach the
+    // brain — the AI would answer a question nobody asked.
+    if (!String(message ?? '').trim()) {
+      await handleUnsupportedMedia(from);
+      return;
+    }
     const { response, urgencyLevel } = await processMessage(from, message, profileName);
 
     await sendWhatsAppMessage(from, response);
