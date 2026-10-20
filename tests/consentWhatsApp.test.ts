@@ -21,6 +21,19 @@ const db = require('../apps/server/src/database');
 const tw = require('../packages/adapters/src/whatsapp');
 const { handleIncomingMessage } = require('../apps/server/src/messageHandler');
 const { CONSENT_VERSION, deriveConsentState, hasActiveConsent } = require('@amaaii/core');
+// A stub model, so these tests never wait on a real network call (the
+// dummy key above would only fail slowly).
+const { __setClient } = require('@amaaii/adapters');
+__setClient({
+  chat: {
+    completions: {
+      create: async () => ({
+        id: 'stub', object: 'chat.completion', created: 0, model: 'stub',
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'A short stub answer.', refusal: null }, logprobs: null }],
+      }),
+    },
+  },
+} as never);
 
 const sent: { to: string; message: string }[] = [];
 

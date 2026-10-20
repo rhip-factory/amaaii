@@ -34,6 +34,7 @@ describe('classifyConsentReply', () => {
   const neverGrant = [
     "I won't agree", 'I refuse to agree', 'I agree?', 'Agree? No.', 'I cannot agree to this',
     "I agree but I won't let you share it", 'Siwezi kukubali', "I didn't agree", 'Do you think I should agree?',
+    'I agree if you keep it private', "I'd agree", "I agree. Actually I don't agree.", 'I agree. I changed my mind.',
   ];
 
   for (const m of grant) it(`grant: ${m}`, () => expect(classifyConsentReply(m)).toBe('grant'));

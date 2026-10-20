@@ -235,8 +235,12 @@ const CONSENT_DECLINE = /^(?:stop|sitaki|unsubscribe|no|hapana|i\s+do\s+not\s+ag
 // Fail closed: any of these anywhere in the SENTENCE that carries the agree
 // word blocks the grant ("I agree but I won't…", "siwezi kukubali").
 const CONSENT_NEGATION = /\b(?:not|no|never|nor|cannot|refuse[sd]?|unable|without|hapana|sikubali|sitaki|siwezi|sijakubali|sijaelewa|sielewi)\b|n't\b|n’t\b/;
-// Words before the agree word in its clause that make it conditional.
-const CONSENT_CONDITIONAL = /\b(?:before|if|after|once|when|unless|will|would|should|could|can|may|might|do|does|did|kabla|kama|ikiwa|nikiandika|nikisema|nitakuwa|nita)\b/;
+// Anywhere in the agree word's clause, these make it conditional
+// ("before I agree", "I agree if you…", "I'd agree").
+const CONSENT_CONDITIONAL = /\b(?:before|if|after|once|when|unless|provided|will|would|should|could|can|may|might|do|does|did|kabla|kama|ikiwa|nikiandika|nikisema|nitakuwa|nita)\b|'d\b/;
+// A retraction anywhere in the message cancels a yes elsewhere in it
+// ("I agree. Actually I don't agree.").
+const CONSENT_RETRACTION = /\b(?:don'?t|do\s+not|not|never|won'?t|refuse)\s+(?:\w+\s+){0,2}(?:agree|accept|consent)\b|\bsikubali\b|\bsijakubali\b|\bchanged\s+my\s+mind\b|\btake\s+it\s+back\b|\bnot\s+anymore\b/;
 const CONSENT_QUESTION_WORDS = /\b(?:what|why|how|who|where|which|explain|understand|nini|kwa\s*nini|vipi|nani|wapi|lini|sielewi|sijaelewa|eleza|maana)\b/;
 
 // Sentences end at . ! ? or a newline; the '?' stays with its sentence.
@@ -264,13 +268,16 @@ export function classifyConsentReply(message: string): ConsentReply {
   if (CONSENT_DECLINE.test(flat)) return 'decline';
   if (CONSENT_BARE_YES.test(flat)) return 'grant';
 
+  if (CONSENT_RETRACTION.test(text)) {
+    return hasQuestionMark || CONSENT_QUESTION_WORDS.test(text) ? 'question' : 'unclear';
+  }
   for (const sentence of consentSentences(text)) {
     if (!CONSENT_AFFIRM.test(sentence) || CONSENT_NEGATION.test(sentence)) continue;
     for (const clause of consentClauses(sentence)) {
       const m = clause.match(CONSENT_AFFIRM);
       if (!m || m.index == null) continue;
       if (clause.includes('?')) continue; // "I agree?" / "Agree?" is not a yes
-      if (CONSENT_CONDITIONAL.test(clause.slice(0, m.index))) continue;
+      if (CONSENT_CONDITIONAL.test(clause)) continue;
       if (CONSENT_QUESTION_WORDS.test(clause)) continue;
       return 'grant';
     }
