@@ -122,7 +122,7 @@ const DELIVERY_ASK_MARKERS = [t('en', 'delivery_ask').slice(0, 40), t('sw', 'del
 
 // When was the baby born? "yesterday"/"jana" and "N days ago"/"siku N"
 // deterministically; otherwise the extraction model; otherwise today.
-async function birthDateFrom(message: string): Promise<string> {
+async function birthDateFrom(message: string, canAi: boolean): Promise<string> {
   const now = new Date();
   const dayMs = 24 * 60 * 60 * 1000;
   const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -131,6 +131,7 @@ async function birthDateFrom(message: string): Promise<string> {
   const ago = lower.match(/\b(\d{1,2})\s*(?:days?\s+ago|siku\s+(?:zilizopita|iliyopita))\b/) || lower.match(/\bsiku\s+(\d{1,2})\s+zilizopita\b/);
   if (ago) return iso(new Date(now.getTime() - parseInt(ago[1], 10) * dayMs));
   if (/\b(?:today|leo|this\s+morning|asubuhi\s+hii)\b/.test(lower)) return iso(now);
+  if (!canAi) return iso(now);
   const out = await llm.extractOnboardingSlots(message, ['week']).catch(() => null);
   if (out?.deliveryDate) {
     const days = Math.floor((now.getTime() - Date.parse(`${out.deliveryDate}T00:00:00Z`)) / dayMs);
@@ -448,37 +449,49 @@ export async function processMessage(
   const profileUpdate = earlyDanger.urgencyLevel === 'low' || earlyDanger.urgencyLevel === 'moderate'
     ? parseProfileUpdate(message)
     : null;
+  // Only a message the rules call low may end here. With any symptom in
+  // it, the update is still applied but the turn goes on to normal
+  // routing (AI reply + raise-only triage), with the confirmation on top.
+  const quietTurn = earlyDanger.urgencyLevel === 'low';
   if (profileUpdate?.kind === 'language') {
     if (profileUpdate.lang !== lang) {
       await userManager.updateUserProfile(from, { language: profileUpdate.lang });
       user.language = profileUpdate.lang;
       lang = profileUpdate.lang;
     }
-    if (profileUpdate.whole) {
+    if (profileUpdate.whole && quietTurn) {
       response = t(lang, lang === 'sw' ? 'lang_set_sw' : 'lang_set_en');
       handled = true;
     }
   } else if (profileUpdate?.kind === 'name') {
     await userManager.updateUserProfile(from, { name: profileUpdate.name });
     user.name = profileUpdate.name;
-    response = t(lang, 'profile_name_updated', { name: profileUpdate.name });
-    handled = true;
+    if (quietTurn) {
+      response = t(lang, 'profile_name_updated', { name: profileUpdate.name });
+      handled = true;
+    } else {
+      profileNote = t(lang, 'profile_name_updated', { name: profileUpdate.name });
+    }
   } else if (profileUpdate?.kind === 'week') {
     const edd = calculateEDDFromWeeks(profileUpdate.weeks);
     await userManager.updateUserProfile(from, { pregnancy_week: profileUpdate.weeks, edd });
     user.pregnancy_week = profileUpdate.weeks;
     user.edd = edd;
-    response = t(lang, 'profile_week_updated', { weeks: profileUpdate.weeks });
-    handled = true;
+    if (quietTurn) {
+      response = t(lang, 'profile_week_updated', { weeks: profileUpdate.weeks });
+      handled = true;
+    } else {
+      profileNote = t(lang, 'profile_week_updated', { weeks: profileUpdate.weeks });
+    }
   } else if (profileUpdate?.kind === 'birth' && !user.delivery_date) {
     const status = pregnancyStatus(user, new Date());
     // A birth before ~22 weeks isn't a "baby arrived" update this flow
     // should make on its own; leave that to the AI and a health worker.
     if (status.phase === 'pregnant' && status.week >= 22) {
-      const deliveryDate = await birthDateFrom(message);
+      const deliveryDate = await birthDateFrom(message, canUseAi(await loadConsentState(from)));
       await userManager.updateUserProfile(from, { delivery_date: deliveryDate });
       user.delivery_date = deliveryDate;
-      if (profileUpdate.whole) {
+      if (profileUpdate.whole && quietTurn) {
         response = t(lang, 'delivery_congrats');
         handled = true;
       } else {
@@ -585,6 +598,7 @@ export async function processMessage(
         ? dangerRepeatCopy(level, lang)
         : dangerCopy(level, lang);
       if (journalNote) response += `\n\n${journalNote}`;
+      if (profileNote) response += `\n\n${profileNote}`;
       conversationContext = 'danger_sign_detected';
       if (symptoms.length > 0) {
         await db.saveSymptoms(from, symptoms, mood, level);
@@ -988,7 +1002,9 @@ async function handleOnboarding(
 
     const words = message.trim().split(/\s+/).filter(Boolean).length;
     const currentFilled = Object.keys(update).length > 0;
-    if ((!currentFilled && words >= 1) || words >= 5) {
+    // The model only sees her words with the optional ai_responses consent;
+    // without it, onboarding runs on the deterministic parsers alone.
+    if (opts.canAi && ((!currentFilled && words >= 1) || words >= 5)) {
       const out = await llm.extractOnboardingSlots(message, missing).catch(() => null);
       if (out) {
         const proposed = slotsFromLlm(out, missing, current, message, now);

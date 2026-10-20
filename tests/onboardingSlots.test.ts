@@ -21,6 +21,7 @@ const { __setClient, __resetClient } = require('@amaaii/adapters');
 let slots = '{}';
 let reply = 'A friendly answer.';
 let lastReplyRequest: { messages: { role: string; content: string }[] } | null = null;
+let slotCalls = 0;
 
 beforeAll(async () => {
   await db.initializeDatabase();
@@ -30,10 +31,14 @@ beforeEach(() => {
   slots = '{}';
   reply = 'A friendly answer.';
   lastReplyRequest = null;
+  slotCalls = 0;
   const create = async (req: { messages: { role: string; content: string }[] }) => {
     const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
     let content = reply;
-    if (system.includes('pull out profile facts')) content = slots;
+    if (system.includes('pull out profile facts')) {
+      slotCalls += 1;
+      content = slots;
+    }
     else if (system.includes('STRICT JSON')) content = '{}';
     else lastReplyRequest = req;
     return {
@@ -212,5 +217,30 @@ describe('the AI sees where she is now and what came before', () => {
     ], new Date('2026-10-20T08:00:00Z'));
     expect(lines.join('\n')).toMatch(/10 days ago/);
     expect(lines.join('\n')).toMatch(/Fever/);
+  });
+});
+
+describe('consent and safety edges (security review)', () => {
+  it('without the optional ai_responses consent, onboarding never sends her words to the model', async () => {
+    const p = phone();
+    await db.createUser(p, { name: 'Halima' });
+    await db.recordConsent(p, 'data_processing', true, CONSENT_VERSION);
+    slots = '{"age":27}';
+    await say(p, 'hi');
+    await say(p, 'mimi ni mama wa watoto wawili na nina furaha');
+    expect(slotCalls).toBe(0);
+    // The deterministic path still works.
+    await say(p, '27');
+    expect((await db.getUser(p)).age).toBe(27);
+  });
+
+  it('a birth update that also mentions a symptom still goes through normal routing', async () => {
+    const p = await onboarded(new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10));
+    reply = 'Back pain after birth is common; rest when you can.';
+    const r = await say(p, 'Nimejifungua jana, mgongo unauma');
+    expect((await db.getUser(p)).delivery_date).toBeTruthy();
+    expect(r.response).toMatch(/Hongera|Congratulations/);
+    expect(r.response).toMatch(/Back pain after birth/);
+    expect(r.context).not.toBe('profile_update');
   });
 });

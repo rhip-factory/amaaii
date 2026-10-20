@@ -181,7 +181,9 @@ export type PregnancyStatus =
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function dayDiff(later: Date, earlier: string): number | null {
+function dayDiff(later: Date, earlier: unknown): number | null {
+  // Defensive: these come from DB columns a client can write.
+  if (typeof earlier !== 'string') return null;
   const d = new Date(`${earlier.slice(0, 10)}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
   const today = Date.UTC(later.getUTCFullYear(), later.getUTCMonth(), later.getUTCDate());

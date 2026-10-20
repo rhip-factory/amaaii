@@ -1093,6 +1093,18 @@ export function createApp(opts: CreateAppOptions = {}): Express {
       if (updates.language !== undefined) {
         updates.language = pickLang(String(updates.language));
       }
+      // Dates feed pregnancyStatus on every read (GET /me, provider views),
+      // so only plausible ISO dates are stored.
+      for (const [key, minDays, maxDays] of [['edd', -300, 14], ['delivery_date', 0, 365]] as const) {
+        if (updates[key] === undefined) continue;
+        const v = updates[key];
+        const ms = typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? Date.parse(`${v}T00:00:00Z`) : NaN;
+        const daysAgo = Math.floor((Date.now() - ms) / 86400000);
+        if (Number.isNaN(ms) || daysAgo < minDays || daysAgo > maxDays) {
+          res.status(400).json({ error: `${key} must be a YYYY-MM-DD date in a plausible range` });
+          return;
+        }
+      }
       // The week is derived from edd on every read (core pregnancyStatus),
       // so a week typed on the Profile screen must move the edd too — or
       // the next read would silently put the old week back.
