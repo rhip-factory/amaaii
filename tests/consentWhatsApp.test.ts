@@ -235,3 +235,13 @@ describe('WhatsApp consent gate — questions and refusals never grant', () => {
     expect(hasActiveConsent(state, 'data_processing')).toBe(true);
   });
 });
+
+describe('WhatsApp consent gate — a yes inside a longer message', () => {
+  it('"I AGREE. But who will see my messages?" grants (the 2026-10 re-run looped on this)', async () => {
+    const phone = nextPhone();
+    await deliver(phone, 'Hi');
+    await deliver(phone, 'I AGREE. But who will see my messages?');
+    const state = deriveConsentState(await db.getConsents(phone));
+    expect(hasActiveConsent(state, 'data_processing')).toBe(true);
+  });
+});
