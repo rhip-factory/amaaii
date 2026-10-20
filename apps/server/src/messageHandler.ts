@@ -64,10 +64,22 @@ const CONSENT_REPROMPT_MARKERS = ['please reply with the word *AGREE*', 'tafadha
 // per-request in tests/dev without restarting the process. The /privacy
 // page itself ships in P3-D — this only wires the mechanism (a 404 on
 // that path today is expected and fine).
-function privacyNoticeUrl(): string {
+/** The PWA's public origin (PUBLIC_BASE_URL), or null when unset. */
+export function publicBaseUrl(): string | null {
   const base = process.env.PUBLIC_BASE_URL;
+  return base ? base.replace(/\/+$/, '') : null;
+}
+
+function privacyNoticeUrl(): string {
+  const base = publicBaseUrl();
   if (!base) return 'the Amaaii app';
-  return `${base.replace(/\/+$/, '')}/privacy`;
+  return `${base}/privacy`;
+}
+
+/** "📱 The Amaaii app: <url> …" — only when the app has a public URL. */
+function appLine(lang: string): string {
+  const url = publicBaseUrl();
+  return url ? `\n\n${t(lang, 'help_app_line', { appUrl: url })}` : '';
 }
 
 async function loadConsentState(phoneNumber: string): Promise<ConsentState> {
@@ -381,6 +393,7 @@ export async function processMessage(
           dangerSigns: earlyDanger.detectedSigns || [],
           urgencyLevel: earlyDanger.urgencyLevel,
           context: 'consent_gate',
+          channel,
         });
         return { response: gateResponse, urgencyLevel: earlyDanger.urgencyLevel, context: 'consent_gate' };
       }
@@ -429,6 +442,7 @@ export async function processMessage(
       dangerSigns: onboardingTriage.detectedSigns || [],
       urgencyLevel: onboardingTriage.urgencyLevel,
       context: conversationContext,
+      channel,
     });
     return { response, urgencyLevel: onboardingTriage.urgencyLevel, context: conversationContext, aiUsed };
   }
@@ -531,7 +545,8 @@ export async function processMessage(
     const session = journalSession ?? await journalManager.startJournalSession(from, user, channel);
     // processJournalResponse only returns the {error} shape when there
     // is no active session in the DB — we just created/fetched one.
-    const result = await journalManager.processJournalResponse(from, message, session.currentStage) as {
+    const journalAi = canUseAi(await loadConsentState(from));
+    const result = await journalManager.processJournalResponse(from, message, session.currentStage, { canAi: journalAi }) as {
       response: string;
       passThrough?: boolean;
     };
@@ -543,7 +558,7 @@ export async function processMessage(
       handled = true;
       // A free-text journal answer the rules missed may still be an
       // emergency ("baby has been quiet all day"): second opinion, raise-only.
-      if (canUseAi(await loadConsentState(from))) {
+      if (journalAi) {
         const raised = await llmTriageRaise(message, earlyDanger.urgencyLevel, user.pregnancy_week);
         if (raised) {
           await journalManager.interruptForDanger(from, message, raised);
@@ -558,6 +573,10 @@ export async function processMessage(
 
   if (handled) {
     // Journal turn (or cancel) — nothing more to route.
+  } else if (command === 'help') {
+    // The copy has always said 'Type "help"' — now there is a help.
+    response = t(lang, 'help_menu') + appLine(lang);
+    conversationContext = 'help';
   } else if (command === 'summary' || command === 'weekly_summary') {
     if (command === 'weekly_summary') {
       response = await journalManager.getWeeklySummary(from);
@@ -636,6 +655,8 @@ export async function processMessage(
           language: lang,
           trendLine,
           medicalHistory: mh,
+          appUrl: publicBaseUrl(),
+          channel,
         });
         aiUsed = true;
         captureMedicalHistory(from, message);
@@ -704,6 +725,7 @@ export async function processMessage(
     dangerSigns: triage.detectedSigns || [],
     urgencyLevel: triage.urgencyLevel || 'low',
     context: conversationContext,
+    channel,
   };
 
   await db.saveConversation(from, message, response, analysisData);
@@ -773,6 +795,51 @@ export async function sendCheckinFollowup(payload: CheckinFollowupPayload): Prom
 
 const CHECKIN_FOLLOWUP_DELAY_MS = 3600000; // 1 hour — unchanged from the old setTimeout.
 
+/**
+ * Enqueue the 1-hour "were you able to see someone?" follow-up for a
+ * high/critical turn. Shared by the WhatsApp entry point and (since
+ * 2026-10) POST /chat, so an escalation in the app gets the same nudge on
+ * WhatsApp. Never throws — a missed nudge must not break the reply.
+ */
+export async function scheduleEscalationFollowup(from: string, urgencyLevel: string): Promise<void> {
+  if (urgencyLevel !== 'high' && urgencyLevel !== 'critical') return;
+  const now = new Date();
+  const runAt = new Date(now.getTime() + CHECKIN_FOLLOWUP_DELAY_MS).toISOString();
+  // Dedupe key buckets by wall-clock hour: if the same user sends
+  // several HIGH/CRITICAL messages within one hour, only the FIRST
+  // schedules a follow-up. Without this, an anxious user re-tripping
+  // danger signs repeatedly would pile up several duplicate "how are
+  // you feeling" nudges an hour later.
+  const hourBucket = now.toISOString().slice(0, 13); // YYYY-MM-DDTHH
+  const dedupeKey = `${CHECKIN_FOLLOWUP_JOB_TYPE}:${from}:${hourBucket}`;
+  try {
+    await db.enqueueJob({
+      type: CHECKIN_FOLLOWUP_JOB_TYPE,
+      payload: { phone: from },
+      runAt,
+      dedupeKey,
+    });
+  } catch (err) {
+    log.error('Failed to enqueue checkin_followup job', err);
+  }
+}
+
+/**
+ * A voice note, photo or other non-text message. Transport-neutral (the
+ * Twilio webhook and the Meta webhook both call it): reply in her
+ * language with the "please type" copy, which deliberately keeps the
+ * go-to-a-facility danger line — a voice note might be an emergency.
+ */
+export async function handleUnsupportedMedia(from: string): Promise<void> {
+  const user = await db.getUser(from).catch(() => undefined);
+  const reply = t(user?.language, 'unsupported_message_type');
+  await sendWhatsAppMessage(from, reply);
+  if (user) {
+    await db.saveConversation(from, '[media]', reply, { context: 'unsupported_media', urgencyLevel: 'low', dangerSigns: [], channel: 'whatsapp' })
+      .catch((err) => log.warn('Could not log unsupported media turn', { error: err instanceof Error ? err.message : String(err) }));
+  }
+}
+
 // Twilio WhatsApp transport: process + send + schedule follow-up.
 export async function handleIncomingMessage(
   from: string,
@@ -787,34 +854,7 @@ export async function handleIncomingMessage(
 
     // Durable follow-up for high-risk cases (P4-A — see the job/handler
     // pair above; this used to be an in-process setTimeout).
-    if (urgencyLevel === 'high' || urgencyLevel === 'critical') {
-      const now = new Date();
-      const runAt = new Date(now.getTime() + CHECKIN_FOLLOWUP_DELAY_MS).toISOString();
-      // Dedupe key buckets by wall-clock hour: if the same user sends
-      // several HIGH/CRITICAL messages within one hour, only the FIRST
-      // schedules a follow-up. Without this, an anxious user re-tripping
-      // danger signs repeatedly would pile up several duplicate "how are
-      // you feeling" nudges an hour later — the old setTimeout had no
-      // such guard (every qualifying message scheduled its own timer);
-      // this is a deliberate improvement made possible by having a real
-      // queue to dedupe against, not a behavior preserved from before.
-      const hourBucket = now.toISOString().slice(0, 13); // YYYY-MM-DDTHH
-      const dedupeKey = `${CHECKIN_FOLLOWUP_JOB_TYPE}:${from}:${hourBucket}`;
-      try {
-        await db.enqueueJob({
-          type: CHECKIN_FOLLOWUP_JOB_TYPE,
-          payload: { phone: from },
-          runAt,
-          dedupeKey,
-        });
-      } catch (err) {
-        // Never let a scheduling failure take down the primary reply
-        // path — the user already has their immediate response; a
-        // missed follow-up nudge is degraded service, not a broken
-        // conversation.
-        log.error('Failed to enqueue checkin_followup job', err);
-      }
-    }
+    await scheduleEscalationFollowup(from, urgencyLevel);
   } catch (error) {
     log.error('Error in message handler', error);
     try {
@@ -1025,7 +1065,7 @@ async function handleOnboarding(
   const stillMissing = missingSlots(fresh);
   if (stillMissing.length === 0) {
     const summary = userManager.formatUserSummary(fresh);
-    return { response: t(lang, 'location_done', { summary }), aiUsed: false };
+    return { response: t(lang, 'location_done', { summary }) + appLine(lang), aiUsed: false };
   }
   const next = stillMissing[0];
   const askedCurrent = {

@@ -67,6 +67,10 @@ describe('sw.js API_GET_PATHS (P2-F: /insights bypass)', () => {
     });
   });
 
+  it('bypasses SW caching for GET /conversations (shared WhatsApp + app chat history)', () => {
+    expect(paths.some((re) => re.test('/conversations'))).toBe(true);
+  });
+
   it('does not bypass ordinary page/shell routes', () => {
     ['/', '/home', '/journal', '/chat', '/profile', '/login', '/offline'].forEach((p) => {
       expect(paths.some((re) => re.test(p))).toBe(false);

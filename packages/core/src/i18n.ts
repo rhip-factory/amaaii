@@ -51,13 +51,13 @@ export const STRINGS: Record<Lang, StringDict> = {
 
     // Consent — web /chat (PWA) copy. Returned alongside consentRequired:
     // true instead of processing the message.
-    web_consent_required: "You need to accept Amaaii's data consent before I can chat with you. Please open Settings in the app and grant consent to continue — I'll still flag any urgent symptoms you mention.",
+    web_consent_required: "You need to accept Amaaii's data consent before I can chat with you. Please accept it on the consent screen (also under Profile → Privacy & data) to continue — I'll still flag any urgent symptoms you mention.",
 
     // AI declined (ai_responses purpose not active) — deterministic
     // stand-in for what would have been an AI reply. Danger detection and
     // journaling are unaffected; this string only replaces the
     // getAmaaiiResponse() call site.
-    ai_off_reply: "AI-powered replies are turned off. You can turn them on in Settings. I can still help you track your check-ins and will always flag urgent symptoms.",
+    ai_off_reply: "AI-powered replies are turned off. You can turn them on in the Amaaii app under Profile → Privacy & data. I can still help you track your check-ins and will always flag urgent symptoms.",
 
     // Journal
     journal_greeting: "Let's do your daily check-in! 📝\n\nFirst, how are you feeling emotionally today? (Rate 1-10, where 1 is very low and 10 is excellent)",
@@ -111,6 +111,8 @@ export const STRINGS: Record<Lang, StringDict> = {
     journal_mood_skip: "No problem, we'll skip the mood rating today.",
     journal_water_skip: "No problem, I'll leave water blank today.",
     journal_none_today: "You haven't done a check-in today yet. Type *journal* to start one!",
+    help_menu: "Here's what I can do 💚\n\n• Ask me anything about your pregnancy, your baby or how you feel\n• *journal* — a 2-minute daily check-in (type *stop* to end it)\n• *journal summary* / *weekly summary* — see your check-ins\n• *doctor report* — a summary to show your nurse\n• *Kiswahili* or *English* — change language\n• Tell me changes, e.g. \"I'm 28 weeks\", \"my name is …\", \"I gave birth\"\n\n⚠️ Heavy bleeding, a severe headache, fits, or baby not moving: go to the nearest health facility now.",
+    help_app_line: "📱 The Amaaii app has your check-ins, charts and profile: {appUrl} — sign in with this WhatsApp number. Our chats show up there too.",
     lang_set_sw: "Sawa! Kuanzia sasa nitakuandikia kwa Kiswahili. 💚 (Ukitaka Kiingereza, andika \"English\".)",
     lang_set_en: "Okay! I'll write to you in English from now on. 💚 (For Kiswahili, just type \"Kiswahili\".)",
     profile_name_updated: "Done — I'll call you {name} from now on. 💚",
@@ -176,9 +178,9 @@ export const STRINGS: Record<Lang, StringDict> = {
     consent_declined: "Sawa, hakuna shida — sitakusajili wala kutumia ujumbe wako kukusaidia. 💚 Bado nitakuambia kila wakati ujumbe ukionekana kuwa dalili ya hatari. Ukibadilisha nia, Jibu *NAKUBALI* kuendelea.",
     consent_thanks: "✅ Asante — umekamilisha faragha.\n\n📇 Tafadhali hifadhi namba hii kwenye simu yako kama *Amaaii*, ili ujue kila wakati kwamba ujumbe unatoka kwetu.\n\nSasa hebu tukujue kidogo.",
 
-    web_consent_required: "Unahitaji kukubali idhini ya matumizi ya data ya Amaaii kabla sijazungumza nawe. Tafadhali fungua Mipangilio kwenye programu na utoe idhini ili kuendelea — bado nitakuarifu kuhusu dalili za hatari unazotaja.",
+    web_consent_required: "Unahitaji kukubali idhini ya matumizi ya data ya Amaaii kabla sijazungumza nawe. Tafadhali ikubali kwenye ukurasa wa idhini (pia chini ya Wasifu → Faragha na data) ili kuendelea — bado nitakuarifu kuhusu dalili za hatari unazotaja.",
 
-    ai_off_reply: "Majibu ya AI yamezimwa. Unaweza kuyawasha kwenye Mipangilio. Bado ninaweza kukusaidia kufuatilia ukaguzi wako na daima nitakuarifu kuhusu dalili za hatari.",
+    ai_off_reply: "Majibu ya AI yamezimwa. Unaweza kuyawasha kwenye programu ya Amaaii chini ya Wasifu → Faragha na data. Bado ninaweza kukusaidia kufuatilia ukaguzi wako na daima nitakuarifu kuhusu dalili za hatari.",
 
     // Journal
     journal_greeting: "Hebu tufanye ukaguzi wako wa kila siku! 📝\n\nKwanza, unajisikiaje kihisia leo? (Kadiri 1-10, ambapo 1 ni chini sana na 10 ni bora kabisa)",
@@ -232,6 +234,8 @@ export const STRINGS: Record<Lang, StringDict> = {
     journal_mood_skip: "Sawa, tutaruka kipimo cha hisia leo.",
     journal_water_skip: "Sawa, nitaacha maji wazi leo.",
     journal_none_today: "Bado hujafanya jarida la leo. Andika *jarida* kuanza!",
+    help_menu: "Haya ndiyo ninayoweza kufanya 💚\n\n• Niulize lolote kuhusu ujauzito wako, mtoto wako au unavyojisikia\n• *jarida* — ukaguzi wa kila siku wa dakika 2 (andika *acha* kusimamisha)\n• *journal summary* / *weekly summary* — ona majarida yako\n• *doctor report* — muhtasari wa kumwonyesha nesi\n• *Kiswahili* au *English* — badilisha lugha\n• Niambie mabadiliko, mfano \"niko wiki 28\", \"jina langu ni …\", \"nimejifungua\"\n\n⚠️ Damu nyingi, maumivu makali ya kichwa, degedege, au mtoto hachezi: nenda kituo cha afya cha karibu sasa hivi.",
+    help_app_line: "📱 Programu ya Amaaii ina majarida, chati na wasifu wako: {appUrl} — ingia kwa namba hii ya WhatsApp. Mazungumzo yetu yanaonekana huko pia.",
     lang_set_sw: "Sawa! Kuanzia sasa nitakuandikia kwa Kiswahili. 💚 (Ukitaka Kiingereza, andika \"English\".)",
     lang_set_en: "Okay! I'll write to you in English from now on. 💚 (For Kiswahili, just type \"Kiswahili\".)",
     profile_name_updated: "Sawa — nitakuita {name} kuanzia sasa. 💚",

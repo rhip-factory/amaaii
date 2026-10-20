@@ -47,7 +47,13 @@ export default function HomePage() {
                   : `Day ${me.user.postpartum_days} with your baby. 💚`
                 : week
                   ? `Week ${week} of your journey.`
-                  : "Tell me about your pregnancy to personalize this page."}
+                  : (
+                    <Link href="/profile">
+                      {isSw
+                        ? "Niambie mimba yako ina wiki ngapi (Wasifu) ili ukurasa huu ukufae →"
+                        : "Add how many weeks pregnant you are (Profile) to personalize this page →"}
+                    </Link>
+                  )}
               {stale && (
                 <span className={styles.staleNote}>
                   {" "}

@@ -24,7 +24,7 @@ import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 import { markReadWithTyping, sendWhatsAppMessage, whatsappProvider } from '@amaaii/adapters';
 import { t } from '@amaaii/core';
-import { handleIncomingMessage } from './messageHandler';
+import { handleIncomingMessage, handleUnsupportedMedia } from './messageHandler';
 import { getUser } from './database';
 import { log } from './logger';
 
@@ -152,9 +152,9 @@ export function __resetSeenMessages(): void {
   seenMessageIds.clear();
 }
 
+// Shared with the Twilio webhook (messageHandler.ts#handleUnsupportedMedia).
 async function replyUnsupported(from: string): Promise<void> {
-  const user = await getUser(from).catch(() => undefined);
-  await sendWhatsAppMessage(from, t(user?.language, 'unsupported_message_type'));
+  await handleUnsupportedMedia(from);
 }
 
 export async function processCloudWebhook(body: unknown): Promise<void> {

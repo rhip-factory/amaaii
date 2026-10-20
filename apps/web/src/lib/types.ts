@@ -104,6 +104,20 @@ export interface ChatMessage {
   text: string;
   urgency?: Urgency;
   timestamp: string;
+  /** Where the turn happened — history loaded from GET /conversations. */
+  channel?: "whatsapp" | "web";
+}
+
+/** One row of GET /conversations (oldest first). */
+export interface ConversationTurn {
+  id: number;
+  /** SQLite UTC timestamp, "YYYY-MM-DD HH:MM:SS". */
+  at: string;
+  channel: "whatsapp" | "web";
+  /** null for system-initiated turns (the 1-hour follow-up). */
+  message: string | null;
+  response: string | null;
+  urgencyLevel: Urgency | null;
 }
 
 // --- Structured journal check-in form (P2-C) --------------------------------

@@ -17,6 +17,7 @@ import type {
   ConsentGrants,
   ConsentPurpose,
   ConsentResponse,
+  ConversationTurn,
   DeleteAccountResponse,
   HistoryResponse,
   InsightsResponse,
@@ -112,6 +113,12 @@ export async function fetchMe(): Promise<CachedResult<MeResponse>> {
 export async function updateMe(updates: ProfileUpdate): Promise<{ user: MeUser }> {
   const res = await authedFetch("/me", { method: "PUT", body: JSON.stringify(updates) });
   return parseJsonOrThrow<{ user: MeUser }>(res);
+}
+
+// The chat history both surfaces share (WhatsApp + this app), oldest first.
+export async function fetchConversations(limit = 50): Promise<{ turns: ConversationTurn[] }> {
+  const res = await authedFetch(`/conversations?limit=${limit}`);
+  return parseJsonOrThrow<{ turns: ConversationTurn[] }>(res);
 }
 
 export async function fetchHistory(): Promise<HistoryResponse> {
