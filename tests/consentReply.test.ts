@@ -29,9 +29,16 @@ describe('classifyConsentReply', () => {
     'Okay I have read it. Before I say I agree, please who owns Amaaii?',
   ];
   const unclear = ['no thanks', 'still not sure', 'ok', 'hello'];
+  // Fail closed: a refusal, a negation anywhere in the sentence, or a "?" on
+  // the agree clause never grants.
+  const neverGrant = [
+    "I won't agree", 'I refuse to agree', 'I agree?', 'Agree? No.', 'I cannot agree to this',
+    "I agree but I won't let you share it", 'Siwezi kukubali', "I didn't agree", 'Do you think I should agree?',
+  ];
 
   for (const m of grant) it(`grant: ${m}`, () => expect(classifyConsentReply(m)).toBe('grant'));
   for (const m of decline) it(`decline: ${m}`, () => expect(classifyConsentReply(m)).toBe('decline'));
   for (const m of question) it(`question: ${m}`, () => expect(classifyConsentReply(m)).toBe('question'));
   for (const m of unclear) it(`unclear: ${m}`, () => expect(classifyConsentReply(m)).toBe('unclear'));
+  for (const m of neverGrant) it(`never grants: ${m}`, () => expect(classifyConsentReply(m)).not.toBe('grant'));
 });
