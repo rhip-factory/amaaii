@@ -47,8 +47,10 @@ export const ACTION_PROMPTS: ActionPrompt[] = [
   { marker: '*nakubali*', lang: 'sw', actions: ['agree'] },
   { marker: "here's what i can do", lang: 'en', actions: ['start_journal', 'weekly_summary', 'doctor_report'] },
   { marker: 'haya ndiyo ninayoweza kufanya', lang: 'sw', actions: ['start_journal', 'weekly_summary', 'doctor_report'] },
-  { marker: 'tap *start journal*', lang: 'en', actions: ['start_journal'] },
-  { marker: 'bonyeza *anza jarida*', lang: 'sw', actions: ['start_journal'] },
+  // Any bold mention: the AI writes "tapping *Start journal*" or
+  // "bonyeza kitufe cha *Anza jarida*" as often as the canned phrase.
+  { marker: '*start journal*', lang: 'en', actions: ['start_journal'] },
+  { marker: '*anza jarida*', lang: 'sw', actions: ['start_journal'] },
   { marker: 'tap *help*', lang: 'en', actions: ['help'] },
   { marker: 'bonyeza *msaada*', lang: 'sw', actions: ['help'] },
   { marker: 'tap *none*', lang: 'en', actions: ['none'] },
@@ -71,14 +73,24 @@ export interface ActionButtons {
   lang: Lang;
 }
 
-/** The reply buttons a finished reply should carry, in the order its
- *  prompts appear (max 3), or null when it asks for nothing. */
-export function actionButtonsFor(text: string): ActionButtons | null {
-  const lower = text.toLowerCase();
-  const hits = ACTION_PROMPTS
+function promptHits(text: string): { p: ActionPrompt; at: number }[] {
+  // The AI reply may bold with **…** where the canned copy uses *…*.
+  const lower = text.toLowerCase().replace(/\*\*/g, '*');
+  return ACTION_PROMPTS
     .map((p) => ({ p, at: lower.indexOf(p.marker) }))
     .filter((h) => h.at >= 0)
     .sort((a, b) => a.at - b.at);
+}
+
+/** Whether `text` (e.g. Amaaii's last message) invited her to start a check-in. */
+export function offersJournal(text: string): boolean {
+  return promptHits(text).some(({ p }) => p.actions.includes('start_journal'));
+}
+
+/** The reply buttons a finished reply should carry, in the order its
+ *  prompts appear (max 3), or null when it asks for nothing. */
+export function actionButtonsFor(text: string): ActionButtons | null {
+  const hits = promptHits(text);
   if (!hits.length) return null;
   const options: string[] = [];
   for (const { p } of hits) {

@@ -26,11 +26,14 @@ const {
   MAX_ACTION_BUTTONS,
   actionButtonsFor,
   withButtonHint,
+  isGoAhead,
   t,
 } = require('@amaaii/core');
 const { __setClient, __resetClient } = require('@amaaii/adapters');
 
 const sent: { to: string; message: string }[] = [];
+let reply = 'A friendly answer.';
+let lastSystem = '';
 
 beforeAll(async () => {
   await db.initializeDatabase();
@@ -38,9 +41,13 @@ beforeAll(async () => {
 
 beforeEach(() => {
   sent.length = 0;
+  reply = 'A friendly answer.';
+  lastSystem = '';
   const create = async (req: { messages: { role: string; content: string }[] }) => {
     const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
-    const content = system.includes('STRICT JSON') || system.includes('Return JSON') ? '{}' : 'A friendly answer.';
+    const json = system.includes('STRICT JSON') || system.includes('Return JSON');
+    if (!json) lastSystem = system;
+    const content = json ? '{}' : reply;
     return {
       id: 'x', object: 'chat.completion', created: 0, model: 'stub',
       choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content, refusal: null }, logprobs: null }],
@@ -285,5 +292,54 @@ describe('delivery', () => {
     await wa.sendWhatsAppButtons('whatsapp:+254700000001', 'Q?', ['None'], 'Q?\n\n(Reply with: *None*)');
     expect(bodies()).toHaveLength(1);
     expect(bodies()[0]).toMatchObject({ type: 'interactive', interactive: { body: { text: 'Q?' } } });
+  });
+});
+
+// Prod, 2026-10-21: "How do I start a journal?" got "just type **journal**"
+// with no button, and "Prompt me" got the mood question from the AI itself,
+// so no check-in was open and nothing she answered would have been saved.
+describe('starting a check-in from a conversation', () => {
+  it.each(['Prompt me', "Let's start", 'ok start', "Yes let's do it", 'Tuanze', 'Niko tayari', 'ask me', "I'm ready", 'Go ahead please'])(
+    '"%s" is a go-ahead', (m) => expect(isGoAhead(m)).toBe(true));
+  it.each(['yes', 'ok', 'Thanks', 'Will do', 'sawa', 'prompt me about food', 'start bleeding'])(
+    '"%s" is not', (m) => expect(isGoAhead(m)).toBe(false));
+
+  it('asking how to start gets the button, and "Prompt me" then opens the real check-in', async () => {
+    const p = await onboarded();
+    reply = 'Happy to help, Joy. To start your journal, just type **journal** here in this chat.';
+    const how = await say(p, 'How do I start a journal?');
+    expect(how.response).toMatch(/Tap \*Start journal\* to begin your check-in\.$/);
+    expect(how.response).not.toMatch(/Don't forget/);
+    expect(how.buttons?.options).toEqual(['Start journal']);
+    expect(lastSystem).toMatch(/NEVER ask its questions yourself/);
+
+    const go = await say(p, 'Prompt me');
+    expect(go.context).toBe('journaling');
+    expect(go.response).toMatch(/how are you feeling emotionally today/);
+    expect(await db.getJournalSession(p)).toBeTruthy();
+  });
+
+  it('an AI reply that already says "tap **Start journal**" gets the button once, with no extra line', async () => {
+    const p = await onboarded();
+    reply = 'Sure! Tap **Start journal** and I will ask you a few questions.';
+    const r = await say(p, 'What is the journal for?');
+    expect(r.response).toBe(reply);
+    expect(r.buttons?.options).toEqual(['Start journal']);
+  });
+
+  it.each([
+    ['you can start it by tapping *Start journal* just below my reply.', ['Start journal']],
+    ['Bonyeza kitufe cha *Anza jarida* hapa chini.', ['Anza jarida']],
+  ])('the AI\'s own wording still gets the button: %s', (text, options) => {
+    expect(actionButtonsFor(text)?.options).toEqual(options);
+  });
+
+  it('a go-ahead with no invitation, or a bare "ok" after one, goes to the AI', async () => {
+    const p = await onboarded();
+    expect((await say(p, 'Prompt me')).context).toBe('general');
+    const q = await onboarded();
+    reply = 'Rest when you can. Have you seen a nurse?';
+    await say(q, 'My back hurts a bit');
+    expect((await say(q, 'ok')).context).toBe('general');
   });
 });

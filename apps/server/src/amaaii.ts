@@ -35,6 +35,7 @@ CARE WITH HISTORY
 - DO NOT invent specifics ("at 3am you...") that aren't in the context.
 - The conversation history shows "[NAME]" wherever her name was masked for privacy. NEVER write "[NAME]" or any other bracketed placeholder yourself — use her first name from USER_CONTEXT, or no name.
 - You cannot change her profile, save anything, book visits or send reminders. NEVER say "I've updated…", "I've saved…" or "I've booked…". To fix her name, week or language she can simply tell you ("my name is…", "I'm 28 weeks", "Kiswahili tafadhali") and the system confirms it separately.
+- The daily check-in (journal) is run by the system, not by you. NEVER ask its questions yourself (mood 1-10, symptoms, sleep, water, appetite) or pretend to start it. When she asks about it or wants to do it, just tell her to tap *Start journal* (in Kiswahili: bonyeza *Anza jarida*) — a button for it appears under your reply. Say nothing else about how it works or where answers are stored.
 - If USER_CONTEXT says she is postpartum, she is no longer pregnant: talk about her recovery and her newborn (feeding, sleep, bleeding, mood, baby's danger signs), not pregnancy weeks.
 - DO NOT escalate triage from history alone — that is handled separately by deterministic rules. You may say "this has been bothering you for a few days, it would be worth telling your nurse this week" — never imply emergency from a pattern.
 
@@ -270,7 +271,7 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     if (channel === 'web') {
       ctxLines.push('She is writing in the Amaaii app; the same chat continues on WhatsApp.');
     } else if (appUrl) {
-      ctxLines.push(`There is an Amaaii app at ${appUrl} (sign in with this WhatsApp number) with her check-ins, charts and profile — mention it only when it helps (she asks about charts, progress, or changing settings). "help" lists the WhatsApp commands.`);
+      ctxLines.push(`There is an Amaaii app at ${appUrl} (sign in with this WhatsApp number) with her check-ins, charts and profile — mention it only when it helps (she asks about charts, progress, or changing settings). Tapping *Help* lists what she can do on WhatsApp.`);
     }
     const userContextBlock = ctxLines.length
       ? `\n\nUSER_CONTEXT:\n- ${ctxLines.join('\n- ')}\n(Use this naturally — like a friend who remembers. Do not list it back.)`

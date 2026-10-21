@@ -17,6 +17,8 @@ import {
   dangerRepeatCopy,
   escalationVariant,
   parseCommand,
+  isGoAhead,
+  offersJournal,
   isJournalSessionStale,
   parseProfileUpdate,
   pregnancyStatus,
@@ -49,6 +51,8 @@ import { recordAuditSafe, auditDangerEscalation } from './audit';
 // between turns.
 // Fixed openings rather than the whole string, so a reminder sent before
 // the copy changed ("Type 'journal'" became "Tap *Start journal*") counts.
+const JOURNAL_WORDS = /\b(?:journal|jarida|check-?\s?in|ukaguzi)\b/i;
+
 const JOURNAL_REMINDER_MARKERS = [
   "Don't forget to do your daily journal!",
   'Usisahau kufanya jarida lako la kila siku!',
@@ -569,7 +573,11 @@ export async function processMessage(
   }
   if (handled) conversationContext = 'profile_update';
 
-  const command = handled ? null : parseCommand(message);
+  let command = handled ? null : parseCommand(message);
+  if (!command && !handled && earlyDanger.urgencyLevel === 'low' && isGoAhead(message)) {
+    const lastBot = await db.getLastBotMessage(from);
+    if (lastBot?.response && offersJournal(lastBot.response)) command = 'journal';
+  }
   let journalNote = '';
   let replyOptions: string[] | null = null;
   // She chose "I feel unwell"/"Pain N/10" in the check-in: always triage.
@@ -751,6 +759,11 @@ export async function processMessage(
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
 
+      // She asked about the check-in ("How do I start a journal?"): give
+      // her the button, whatever the model wrote.
+      if (JOURNAL_WORDS.test(message) && !offersJournal(response)) {
+        response += `\n\n${t(lang, 'journal_start_hint')}`;
+      }
       if (profileNote) response = `${profileNote}\n\n${response}`;
       // Due date passed with no birth recorded: ask once.
       const askedDelivery = conversationHistory.some((turn) =>
@@ -766,7 +779,7 @@ export async function processMessage(
         // journaled today AND no recent bot turn already nudged them
         // (in either language).
         const todaysJournal = await db.getTodaysJournal(from);
-        if (!todaysJournal) {
+        if (!todaysJournal && !offersJournal(response)) {
           const remindedRecently = (conversationHistory || []).some((turn) => {
             const resp = turn.response;
             return !!resp && JOURNAL_REMINDER_MARKERS.some((m) => resp.includes(m));

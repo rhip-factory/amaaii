@@ -159,6 +159,7 @@ export const STRINGS: Record<Lang, StringDict> = {
 
     // Reminder + reminder-marker (kept identical so detection works)
     journal_reminder: "💡 Don't forget to do your daily journal! Tap *Start journal* to begin.",
+    journal_start_hint: "📝 Tap *Start journal* to begin your check-in.",
 
     // Danger sign canned escalations. Direct, command-tone, with concrete
     // numbers — no hedging language ("could be"), because a hedged
@@ -310,6 +311,7 @@ export const STRINGS: Record<Lang, StringDict> = {
     heads_up_symptoms: "Asante kwa kuongeza hilo — nimezingatia **{list}**. Inafaa kutaja katika ziara yako ijayo.\n\n",
 
     journal_reminder: "💡 Usisahau kufanya jarida lako la kila siku! Bonyeza *Anza jarida* kuanza.",
+    journal_start_hint: "📝 Bonyeza *Anza jarida* kuanza ukaguzi wako.",
 
     // Danger sign canned escalations — Kiswahili, command tone, no hedging.
     danger_critical: "🚨 HARAKA SANA — Hii ni dharura. Usalama wako na wa mtoto ni wa kwanza.\n\nNENDA HOSPITALI SASA HIVI:\n1. Kituo cha afya cha karibu zaidi — ondoka mara moja\n2. Piga 999 kwa gari la wagonjwa, au mwombe yeyote akupeleke\n3. Usisubiri. Usijiendeshe gari mwenyewe iwezekanavyo\n\nKama ni shida ya kiakili au unahisi kujidhuru, piga Befrienders Kenya 0722 178 177.\n\nNenda sasa hivi. Niarifu ukifika salama. 💚",
