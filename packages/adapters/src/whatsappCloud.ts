@@ -124,6 +124,9 @@ export async function sendCloudText(to: string, message: string): Promise<unknow
  * at 20 characters, also Meta's). A tap comes back as an `interactive`
  * message whose button title the webhook reads as her reply text.
  */
+/** Meta's limit on an interactive message's body text. */
+export const CLOUD_BUTTON_BODY_MAX = 1024;
+
 export async function sendCloudButtons(to: string, body: string, options: string[]): Promise<unknown> {
   try {
     const response = (await postToGraph(messagesPath(), {
@@ -133,7 +136,7 @@ export async function sendCloudButtons(to: string, body: string, options: string
       type: 'interactive',
       interactive: {
         type: 'button',
-        body: { text: body.slice(0, 1024) },
+        body: { text: body.slice(0, CLOUD_BUTTON_BODY_MAX) },
         action: {
           buttons: options.slice(0, 3).map((title, i) => ({
             type: 'reply',
