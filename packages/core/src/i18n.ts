@@ -22,16 +22,24 @@ export const STRINGS: Record<Lang, StringDict> = {
     age_prompt_again: "Thank you {name}! 💚 To provide you with the best support, could you tell me your age?",
     age_prompt_retry: "Sorry, I didn't get your age. How old are you? Just the number is fine, e.g. 24.",
     age_prompt_profile: "Nice to meet you, {name}! 💚 (If you'd like me to call you something else, just say \"call me …\".) How old are you?",
-    location_prompt_again: "Which town or area do you live in? (e.g. Kibera, Nakuru, Kisumu) It helps me point you to the nearest clinic.",
-    postpartum_thanks: "Congratulations on your baby! 💚 I'll support you through these early weeks.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
+    location_prompt_again: "Which town or area do you live in? (e.g. Kibera, Nakuru, Kisumu) It helps me point you to the nearest clinic. If you'd rather not say, tap *Skip*.",
+    postpartum_thanks: "Congratulations on your baby! 💚 I'll support you through these early weeks.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed. You can also tap *Skip*.)",
     // "at week {weeks}" rather than "{weeks} weeks along" so the copy stays
     // grammatical for every value the parser can now produce — the old
     // wording rendered "You're 1 weeks along", and week 0 is valid too.
-    week_thanks: "Great! You're at week {weeks}. 🤰\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
-    week_lmp_thanks: "Based on your last period, you're at about week {weeks}. Your expected delivery date is around {edd}.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed)",
+    week_thanks: "Great! You're at week {weeks}. 🤰\n\nWhere are you located? (This helps me suggest nearby health facilities when needed. You can also tap *Skip*.)",
+    week_lmp_thanks: "Based on your last period, you're at about week {weeks}. Your expected delivery date is around {edd}.\n\nWhere are you located? (This helps me suggest nearby health facilities when needed. You can also tap *Skip*.)",
     week_prompt_again: "I didn't catch that — no problem! Any of these works:\n• Weeks: \"22\" or \"22 weeks\"\n• Months: \"5 months\"\n• Your last period: \"22 March\"\n• Not sure? Your clinic card (the mother & child booklet) has your due date written on it.\nIf your baby is already born, tell me when.",
     location_done: "Perfect! I now have your basic information:\n{summary}\n\nYou can:\n• Share how you're feeling today\n• Ask me any pregnancy questions\n• Tell me about any symptoms you're experiencing\n• Tap *Start journal* for a 2-minute daily check-in\n• Tap *Help* to see what I can do\n\nHow are you feeling today? 💚",
     welcome_back: "Welcome back {name}! How can I help you today?",
+    name_prompt_retry: "Sorry, I didn't catch your name. What should I call you? Any name you like is fine.",
+    // She asked why we need her details: answered without the AI.
+    onboarding_why: "Fair question 💚 I ask your name, age and how far along you are so my advice fits you and your stage of pregnancy, and your town only so I can point you to a nearby clinic if you ever need one. Your answers stay private: your clinic doesn't see them unless you choose to share.",
+    // She asked for help before signing up (AI replies off): acknowledged,
+    // with the danger line, before the next question.
+    onboarding_help_no_ai: "I'm sorry you're not feeling well 💚 I'll help you as soon as I know a little about you. It's just a few quick questions. If you have heavy bleeding, a severe headache or blurred vision, fits, severe belly pain, or your baby has stopped moving, go to the nearest health facility now.",
+    // She declined to share her location.
+    location_declined: "No problem, you don't have to share where you live. 💚 We will never come looking for you; your town is only used to point you to a nearby clinic if you ever need one. You can add it later in the app under Profile.",
 
     // Consent (P3-B, Kenya DPA) — asked BEFORE profile onboarding for a
     // brand-new WhatsApp user (or a returning user whose consent lapsed).
@@ -58,7 +66,13 @@ export const STRINGS: Record<Lang, StringDict> = {
     // stand-in for what would have been an AI reply. Danger detection and
     // journaling are unaffected; this string only replaces the
     // getAmaaiiResponse() call site.
-    ai_off_reply: "AI-powered replies are turned off. You can turn them on in the Amaaii app under Profile → Privacy & data. I can still help you track your check-ins and will always flag urgent symptoms.",
+    ai_off_reply: "I can't write you a personal answer, because AI replies are turned off. 💚 If it's urgent (heavy bleeding, a severe headache or blurred vision, fits, severe belly pain, fever, or your baby moving less), go to the nearest health facility now. Otherwise, note it down for your next clinic visit. Tap *Turn on AI replies* and I'll answer you properly.",
+    // After onboarding, for a mother who left AI replies off (app sign-up
+    // leaves the box unticked).
+    ai_off_hint: "🤖 AI replies are off, so I can only give general guidance. Tap *Turn on AI replies* for answers written for you.",
+    ai_on_thanks: "✅ AI replies are on. You can turn them off any time in the app (Profile → Privacy & data).",
+    ai_on_ask: "✅ AI replies are on. You can turn them off any time in the app (Profile → Privacy & data). What would you like to ask? 💚",
+    ai_already_on: "AI replies are already on. 💚 What would you like to ask?",
 
     // Journal
     journal_greeting: "Let's do your daily check-in! 📝\n\nFirst, how are you feeling emotionally today? (Rate 1-10, where 1 is very low and 10 is excellent)",
@@ -155,6 +169,8 @@ export const STRINGS: Record<Lang, StringDict> = {
     btn_lang_sw: "Kiswahili",
     btn_lang_en: "English",
     btn_resume: "Resume check-in",
+    btn_skip: "Skip",
+    btn_ai_on: "Turn on AI replies",
     btn_restart: "Restart check-in",
     buttons_text_hint: "(Reply with: {options})",
     opt_sleep_quality: "Sleep {n}/10",
@@ -223,13 +239,17 @@ export const STRINGS: Record<Lang, StringDict> = {
     age_prompt_again: "Asante {name}! 💚 Ili nikupe msaada bora, je, una umri gani?",
     age_prompt_retry: "Samahani, sikupata umri wako. Una miaka mingapi? Nambari tu inatosha, mfano 24.",
     age_prompt_profile: "Nimefurahi kukujua, {name}! 💚 (Kama ungependa nikuite jina lingine, sema \"niite …\".) Una miaka mingapi?",
-    location_prompt_again: "Unaishi mji au eneo gani? (mfano Kibera, Nakuru, Kisumu) Inanisaidia kukuelekeza kliniki ya karibu.",
-    postpartum_thanks: "Hongera kwa mtoto wako! 💚 Nitakusaidia katika wiki hizi za mwanzo.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika)",
-    week_thanks: "Vizuri! Una wiki {weeks} za ujauzito. 🤰\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika)",
-    week_lmp_thanks: "Kulingana na hedhi yako ya mwisho, una takriban wiki {weeks} za ujauzito. Tarehe ya kujifungua inakadiriwa kuwa karibu na {edd}.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu)",
+    location_prompt_again: "Unaishi mji au eneo gani? (mfano Kibera, Nakuru, Kisumu) Inanisaidia kukuelekeza kliniki ya karibu. Kama hutaki kusema, bonyeza *Ruka*.",
+    postpartum_thanks: "Hongera kwa mtoto wako! 💚 Nitakusaidia katika wiki hizi za mwanzo.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika. Unaweza pia kubonyeza *Ruka*.)",
+    week_thanks: "Vizuri! Una wiki {weeks} za ujauzito. 🤰\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu inapohitajika. Unaweza pia kubonyeza *Ruka*.)",
+    week_lmp_thanks: "Kulingana na hedhi yako ya mwisho, una takriban wiki {weeks} za ujauzito. Tarehe ya kujifungua inakadiriwa kuwa karibu na {edd}.\n\nUko wapi? (Hii itanisaidia kukupendekeza vituo vya afya vya karibu. Unaweza pia kubonyeza *Ruka*.)",
     week_prompt_again: "Sikuelewa — hakuna shida! Mojawapo ya haya inafaa:\n• Wiki: \"22\" au \"wiki 22\"\n• Miezi: \"miezi 5\"\n• Hedhi ya mwisho: \"22 Machi\"\n• Hujui? Kadi yako ya kliniki (kitabu cha mama na mtoto) ina tarehe ya kujifungua.\nKama mtoto ameshazaliwa, niambie lini.",
     location_done: "Vizuri! Sasa nina taarifa zako za msingi:\n{summary}\n\nUnaweza:\n• Kushiriki unavyojisikia leo\n• Kuniuliza maswali yoyote ya ujauzito\n• Kuniambia kuhusu dalili zozote unazoona\n• Bonyeza *Anza jarida* kwa ukaguzi wa kila siku wa dakika 2\n• Bonyeza *Msaada* kuona ninayoweza kufanya\n\nUnajisikiaje leo? 💚",
     welcome_back: "Karibu tena {name}! Ninawezaje kukusaidia leo?",
+    name_prompt_retry: "Samahani, sikupata jina lako. Nikuite nani? Jina lolote unalopenda linafaa.",
+    onboarding_why: "Swali zuri 💚 Nauliza jina, umri na muda wa mimba yako ili ushauri wangu ukufae wewe na hatua ya ujauzito wako, na mji wako ili tu nikuelekeze kliniki ya karibu ukihitaji. Majibu yako ni siri: kliniki yako haiyaoni isipokuwa uchague kuyashiriki.",
+    onboarding_help_no_ai: "Pole kwa kutojisikia vizuri 💚 Nitakusaidia punde nikikujua kidogo. Ni maswali machache tu ya haraka. Kama una damu nyingi, maumivu makali ya kichwa au kuona ukungu, degedege, maumivu makali ya tumbo, au mtoto ameacha kucheza, nenda kituo cha afya cha karibu sasa hivi.",
+    location_declined: "Hakuna shida, si lazima useme unakoishi. 💚 Hatutakuja kukutafuta kamwe; mji wako unatumika tu kukuelekeza kliniki ya karibu ukihitaji. Unaweza kuuongeza baadaye kwenye programu chini ya Wasifu.",
 
     // Consent (P3-B, Kenya DPA) — Kiswahili variants of the EN copy above.
     consent_request: "Kabla hatujaanza, ninahitaji ruhusa yako kuhifadhi na kutumia ujumbe wako ili nikusaidie 💚 Amaaii huhifadhi mazungumzo na taarifa zako za afya kwa usalama, hukupa huduma ya kibinafsi, na hugundua dalili za hatari moja kwa moja — hata kabla hujamaliza kujisajili. Soma taarifa yetu ya faragha: {url}\n\nBonyeza *NAKUBALI* kuendelea, au jibu *SITAKI* kama hutaki.",
@@ -241,7 +261,11 @@ export const STRINGS: Record<Lang, StringDict> = {
 
     web_consent_required: "Unahitaji kukubali idhini ya matumizi ya data ya Amaaii kabla sijazungumza nawe. Tafadhali ikubali kwenye ukurasa wa idhini (pia chini ya Wasifu → Faragha na data) ili kuendelea — bado nitakuarifu kuhusu dalili za hatari unazotaja.",
 
-    ai_off_reply: "Majibu ya AI yamezimwa. Unaweza kuyawasha kwenye programu ya Amaaii chini ya Wasifu → Faragha na data. Bado ninaweza kukusaidia kufuatilia ukaguzi wako na daima nitakuarifu kuhusu dalili za hatari.",
+    ai_off_reply: "Siwezi kukuandikia jibu lako binafsi, kwa sababu majibu ya AI yamezimwa. 💚 Kama ni dharura (damu nyingi, maumivu makali ya kichwa au kuona ukungu, degedege, maumivu makali ya tumbo, homa, au mtoto anacheza kidogo), nenda kituo cha afya cha karibu sasa hivi. La sivyo, liandike kwa ajili ya ziara yako ijayo kliniki. Bonyeza *Washa majibu ya AI* nikujibu vizuri.",
+    ai_off_hint: "🤖 Majibu ya AI yamezimwa, kwa hivyo naweza kutoa ushauri wa jumla tu. Bonyeza *Washa majibu ya AI* upate majibu yaliyoandikwa kwa ajili yako.",
+    ai_on_thanks: "✅ Majibu ya AI yamewashwa. Unaweza kuyazima wakati wowote kwenye programu (Wasifu → Faragha na data).",
+    ai_on_ask: "✅ Majibu ya AI yamewashwa. Unaweza kuyazima wakati wowote kwenye programu (Wasifu → Faragha na data). Ungependa kuuliza nini? 💚",
+    ai_already_on: "Majibu ya AI tayari yamewashwa. 💚 Ungependa kuuliza nini?",
 
     // Journal
     journal_greeting: "Hebu tufanye ukaguzi wako wa kila siku! 📝\n\nKwanza, unajisikiaje kihisia leo? (Kadiri 1-10, ambapo 1 ni chini sana na 10 ni bora kabisa)",
@@ -334,6 +358,8 @@ export const STRINGS: Record<Lang, StringDict> = {
     btn_lang_sw: "Kiswahili",
     btn_lang_en: "English",
     btn_resume: "Endelea na jarida",
+    btn_skip: "Ruka",
+    btn_ai_on: "Washa majibu ya AI",
     btn_restart: "Anza upya",
     buttons_text_hint: "(Jibu kwa: {options})",
     opt_sleep_quality: "Usingizi {n}/10",

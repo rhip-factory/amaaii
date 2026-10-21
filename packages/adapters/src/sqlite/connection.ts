@@ -73,6 +73,7 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
           anc_visits INTEGER DEFAULT 0,
           language TEXT DEFAULT 'en',
           delivery_date DATE,
+          location_declined INTEGER DEFAULT 0,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -99,6 +100,13 @@ export function initializeSchema(db: sqlite3.Database): Promise<void> {
         if (!hasDelivery) {
           db.run(`ALTER TABLE users ADD COLUMN delivery_date DATE`, (e) => {
             if (e) log.error('Error adding users.delivery_date column', e);
+          });
+        }
+        // location_declined: she chose not to say where she lives, so
+        // onboarding stops asking (and nothing she said is saved as a place).
+        if (!(rows || []).some((r) => r.name === 'location_declined')) {
+          db.run(`ALTER TABLE users ADD COLUMN location_declined INTEGER DEFAULT 0`, (e) => {
+            if (e) log.error('Error adding users.location_declined column', e);
           });
         }
         // The current week is derived from edd on every read now; rows
