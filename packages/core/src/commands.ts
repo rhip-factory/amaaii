@@ -12,7 +12,9 @@ export type ChatCommand =
   | 'weekly_summary'
   | 'doctor_report'
   | 'cancel'
-  | 'help';
+  | 'help'
+  | 'resume'
+  | 'restart';
 
 const COMMANDS: Record<ChatCommand, string[]> = {
   journal: [
@@ -36,6 +38,15 @@ const COMMANDS: Record<ChatCommand, string[]> = {
     'stop', 'cancel', 'exit', 'quit', 'end', 'later', 'not now', 'skip', 'acha', 'sitisha',
     'baadaye', 'sitaki', 'stop journal', 'cancel journal', 'end journal', 'skip journal',
     'stop check in', 'stop check-in', 'acha jarida', 'sitisha jarida', 'sitaki jarida',
+  ],
+  resume: [
+    'resume', 'resume check-in', 'resume check in', 'resume checkin', 'resume journal', 'continue',
+    'continue check-in', 'continue check in', 'continue journal', 'carry on', 'endelea',
+    'endelea na jarida', 'endelea na ukaguzi',
+  ],
+  restart: [
+    'restart', 'restart check-in', 'restart check in', 'restart checkin', 'restart journal',
+    'start over', 'start again', 'anza upya', 'anza jarida upya', 'anza tena',
   ],
   help: [
     'help', 'menu', 'msaada', 'commands', 'options', 'what can you do', 'unaweza kufanya nini',
@@ -70,6 +81,17 @@ export function parseCommand(message: string): ChatCommand | null {
     return 'cancel';
   }
   return null;
+}
+
+// "Prompt me", "let's start", "tuanze" — a go-ahead, which starts the
+// check-in when Amaaii's last message invited her to (prod, 2026-10-21: the
+// AI answered "Prompt me" by asking the mood question itself, so nothing
+// was saved). A bare "yes"/"ok" is not one: the invitation is often the
+// tail of an AI reply that asked her something else.
+const GO_AHEAD = /^(?:(?:yes|yeah|yep|ok|okay|sure|sawa|ndiyo|ndio|haya|poa|alright|please|pls|tafadhali)\s+)*(?:let'?s\s+(?:go|do\s+it|start|begin)|lets\s+(?:go|do\s+it|start|begin)|go\s+ahead|start(?:\s+it)?|begin|prompt\s+me|ask\s+me|i'?m\s+ready|im\s+ready|ready|tuanze|anza|niulize|niko\s+tayari|do\s+it)(?:\s+(?:please|pls|tafadhali|now|sasa))*$/;
+
+export function isGoAhead(message: string): boolean {
+  return GO_AHEAD.test(normalizeCommandText(message));
 }
 
 /** A journal session left untouched this long is abandoned: the next

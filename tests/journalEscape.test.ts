@@ -113,8 +113,9 @@ describe('getting out of a check-in', () => {
     const r = await say(phone, 'how do I get the app on my phone?');
     expect(r.context).not.toBe('journaling');
     expect(r.response).toMatch(/Here is some friendly advice/);
-    expect(r.response).toMatch(/paused your daily check-in/i);
-    expect(await db.getJournalSession(phone)).toBeNull();
+    expect(r.response).toMatch(/Your check-in is paused\. So far: nothing yet\. Next: your mood\./);
+    expect(r.buttons?.options).toEqual(['Resume check-in', 'Restart check-in', 'Stop check-in']);
+    expect((await db.getJournalSession(phone))?.journalData.__paused).toBe(true);
   });
 
   it('two unclear mood answers skip the rating instead of looping', async () => {
@@ -136,7 +137,9 @@ describe('getting out of a check-in', () => {
     try {
       const r = await say(phone, 'Is it okay to eat eggs every day?');
       expect(r.context).not.toBe('journaling');
-      expect(await db.getJournalSession(phone)).toBeNull();
+      // Paused (or closed, when the 7 hours crossed midnight in Nairobi).
+      const s = await db.getJournalSession(phone);
+      expect(s === null || s.journalData.__paused === true).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -153,14 +156,15 @@ describe('getting out of a check-in', () => {
 });
 
 describe('danger signs interrupt a check-in', () => {
-  it('CRITICAL at the mood stage escalates with real urgency, audits, and ends the session', async () => {
+  it('CRITICAL at the mood stage escalates with real urgency, audits, and pauses the check-in', async () => {
     const phone = await onboardedPhone();
     await say(phone, 'journal');
     const r = await say(phone, 'I am bleeding heavily and soaked two pads');
     expect(r.urgencyLevel).toBe('critical');
     expect(r.response).toMatch(/URGENT/);
     expect(r.response).toMatch(/pause the journal/i);
-    expect(await db.getJournalSession(phone)).toBeNull();
+    expect(r.response).not.toMatch(/Resume check-in/);
+    expect((await db.getJournalSession(phone))?.journalData.__paused).toBe(true);
     const audit = await db.listAuditForUser(phone);
     expect(audit.some((e: { action: string }) => e.action === 'danger_escalation')).toBe(true);
   });
@@ -171,7 +175,7 @@ describe('danger signs interrupt a check-in', () => {
     await db.upsertJournalSession(phone, { currentStage: 'water', journalData: {}, journalId: null });
     const r = await say(phone, 'nina homa ya 38.5 tangu jana');
     expect(r.urgencyLevel).toBe('high');
-    expect(await db.getJournalSession(phone)).toBeNull();
+    expect((await db.getJournalSession(phone))?.journalData.__paused).toBe(true);
   });
 
   it('a repeat escalation in the same episode gets the shorter copy, still HIGH', async () => {

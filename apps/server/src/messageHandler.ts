@@ -17,6 +17,10 @@ import {
   dangerRepeatCopy,
   escalationVariant,
   parseCommand,
+  isGoAhead,
+  offersJournal,
+  offeredActions,
+  checkinStageLabel,
   isJournalSessionStale,
   parseProfileUpdate,
   pregnancyStatus,
@@ -49,6 +53,8 @@ import { recordAuditSafe, auditDangerEscalation } from './audit';
 // between turns.
 // Fixed openings rather than the whole string, so a reminder sent before
 // the copy changed ("Type 'journal'" became "Tap *Start journal*") counts.
+const JOURNAL_WORDS = /\b(?:journal|jarida|check-?\s?in|ukaguzi)\b/i;
+
 const JOURNAL_REMINDER_MARKERS = [
   "Don't forget to do your daily journal!",
   'Usisahau kufanya jarida lako la kila siku!',
@@ -569,24 +575,40 @@ export async function processMessage(
   }
   if (handled) conversationContext = 'profile_update';
 
-  const command = handled ? null : parseCommand(message);
+  let command = handled ? null : parseCommand(message);
+  if (!command && !handled && earlyDanger.urgencyLevel === 'low' && isGoAhead(message)) {
+    // "Prompt me" / "let's go" right after Amaaii offered the check-in.
+    const lastBot = await db.getLastBotMessage(from);
+    const offered = lastBot?.response ? offeredActions(lastBot.response) : [];
+    if (offered.includes('resume')) command = 'resume';
+    else if (offered.includes('start_journal')) command = 'journal';
+  }
   let journalNote = '';
   let replyOptions: string[] | null = null;
   // She chose "I feel unwell"/"Pain N/10" in the check-in: always triage.
   let forceTriage = false;
+  const now = new Date();
   let journalSession = handled ? null : await journalManager.getJournalSession(from);
-  if (journalSession && isJournalSessionStale(journalSession.updatedAt, new Date())) {
+  if (journalSession && !journalManager.isResumable(journalSession, now)) {
+    // An earlier day's unfinished check-in: its answers stay as an
+    // incomplete entry, and today starts fresh.
     await journalManager.cancelJournal(from);
     journalSession = null;
   }
-  if (journalSession && journalSession.channel !== channel) {
-    // Another channel's half-done check-in never swallows this message.
-    // "journal" here takes the session over; anything else leaves it be.
-    if (command === 'journal') await journalManager.cancelJournal(from);
-    journalSession = null;
+  // The check-in takes this message as an answer only while she is
+  // answering it: on its own channel, not paused, not left for hours.
+  // Otherwise it waits, paused, for her to tap Resume.
+  if (
+    journalSession && !journalSession.paused &&
+    (journalSession.channel !== channel || isJournalSessionStale(journalSession.updatedAt, now))
+  ) {
+    await journalManager.pauseJournal(from);
+    journalSession.paused = true;
   }
+  const answering = !!journalSession && !journalSession.paused;
 
-  if (journalSession && (earlyDanger.urgencyLevel === 'critical' || earlyDanger.urgencyLevel === 'high')) {
+  if (answering && (earlyDanger.urgencyLevel === 'critical' || earlyDanger.urgencyLevel === 'high')) {
+    // Care first: the check-in waits, paused.
     await journalManager.interruptForDanger(from, message, earlyDanger);
     journalNote = t(lang, 'journal_pause');
   } else if (journalSession && command === 'cancel') {
@@ -594,12 +616,26 @@ export async function processMessage(
     response = t(lang, 'journal_cancelled');
     conversationContext = 'journaling';
     handled = true;
-  } else if (journalSession && command && command !== 'journal') {
-    // Asked for a summary/report/help mid-check-in: close the check-in
-    // and answer the command.
-    await journalManager.cancelJournal(from);
-  } else if (journalSession || command === 'journal') {
-    const session = journalSession ?? await journalManager.startJournalSession(from, user, channel);
+  } else if (journalSession && (command === 'resume' || (answering && command === 'journal'))) {
+    response = await journalManager.resumeJournal(from, channel);
+    conversationContext = 'journaling';
+    handled = true;
+  } else if (journalSession && command === 'journal') {
+    // "Start journal" with one paused: carry on, or start over?
+    response = journalManager.pausedCard(journalSession, lang, 'journal_pending_card');
+    conversationContext = 'journaling';
+    handled = true;
+  } else if (answering && command && command !== 'restart') {
+    // Asked for a summary/report/help mid-check-in: answer it; the
+    // check-in waits, paused.
+    await journalManager.pauseJournal(from);
+  } else if (answering || command === 'journal' || command === 'resume' || command === 'restart') {
+    let session = answering ? journalSession! : null;
+    if (command === 'restart' && journalSession) {
+      await journalManager.restartJournal(from, channel);
+      session = await journalManager.getJournalSession(from);
+    }
+    session = session ?? await journalManager.startJournalSession(from, user, channel);
     // processJournalResponse only returns the {error} shape when there
     // is no active session in the DB — we just created/fetched one.
     const journalAi = canUseAi(await loadConsentState(from));
@@ -616,7 +652,7 @@ export async function processMessage(
       conversationContext = 'journaling';
       handled = true;
     } else if (result.passThrough) {
-      journalNote = t(lang, 'journal_paused_note');
+      // Paused by the journal manager; routed below, with the paused card.
       forceTriage = !!result.unwell;
     } else {
       response = result.response;
@@ -634,11 +670,15 @@ export async function processMessage(
           dangerSignAnalysis = raised;
           response = `${dangerCopy(raised.urgencyLevel, lang)}\n\n${t(lang, 'journal_pause')}`;
           conversationContext = 'danger_sign_detected';
+          replyOptions = null;
           await auditDangerEscalation(from, raised.urgencyLevel, { source: 'llm_raise' });
         }
       }
     }
   }
+  // A check-in waiting for her to tap Resume (shown on the reply below).
+  const openCheckin = await journalManager.getJournalSession(from);
+  const pausedCheckin = openCheckin?.paused ? openCheckin : null;
 
   if (handled) {
     // Journal turn (or cancel) — nothing more to route.
@@ -726,6 +766,7 @@ export async function processMessage(
           medicalHistory: mh,
           appUrl: publicBaseUrl(),
           channel,
+          pausedCheckinNext: pausedCheckin ? checkinStageLabel(pausedCheckin.currentStage, 'en') : null,
         });
         aiUsed = true;
         captureMedicalHistory(from, message);
@@ -751,6 +792,11 @@ export async function processMessage(
         await db.saveSymptoms(from, symptoms, mood, dangerSignAnalysis.urgencyLevel);
       }
 
+      // She asked about the check-in ("How do I start a journal?"): give
+      // her the button, whatever the model wrote.
+      if (JOURNAL_WORDS.test(message) && !offersJournal(response) && !pausedCheckin) {
+        response += `\n\n${t(lang, 'journal_start_hint')}`;
+      }
       if (profileNote) response = `${profileNote}\n\n${response}`;
       // Due date passed with no birth recorded: ask once.
       const askedDelivery = conversationHistory.some((turn) =>
@@ -766,7 +812,7 @@ export async function processMessage(
         // journaled today AND no recent bot turn already nudged them
         // (in either language).
         const todaysJournal = await db.getTodaysJournal(from);
-        if (!todaysJournal) {
+        if (!todaysJournal && !offersJournal(response) && !pausedCheckin) {
           const remindedRecently = (conversationHistory || []).some((turn) => {
             const resp = turn.response;
             return !!resp && JOURNAL_REMINDER_MARKERS.some((m) => resp.includes(m));
@@ -784,6 +830,14 @@ export async function processMessage(
   // assignment — see the consent-gate block's comment. A no-op
   // (`consentGrantedPrefix` stays '') for every turn that didn't just
   // grant consent, which is the overwhelming majority of turns.
+  // A paused check-in is always in view: what's saved, what's next, and
+  // Resume / Restart / Stop. Not on a danger reply (care comes first) or on
+  // a turn that was itself about the check-in.
+  const finalUrgency = (dangerSignAnalysis ?? earlyDanger).urgencyLevel;
+  if (pausedCheckin && conversationContext !== 'journaling' && finalUrgency !== 'critical' && finalUrgency !== 'high') {
+    response += `\n\n${journalManager.pausedCard(pausedCheckin, lang)}`;
+  }
+
   response = consentGrantedPrefix + response;
 
   // Every context — journal turns included — records the message's real

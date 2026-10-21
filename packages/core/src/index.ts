@@ -11,6 +11,7 @@ export * from './onboarding';
 export * from './journal';
 export * from './journalClarify';
 export * from './actionButtons';
+export * from './checkinResume';
 export * from './commands';
 export * from './text';
 export * from './repositories';

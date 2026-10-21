@@ -202,7 +202,9 @@ describe('"It was a 7" to the sleep question', () => {
     expect(triageInput).toMatch(/Pain 7\/10/);
     expect(r.urgencyLevel).toBe('high');
     expect(r.response).toMatch(/healthcare provider TODAY/);
-    expect(await db.getJournalSession(phone)).toBeFalsy();
+    // Paused, not lost; the danger reply itself carries no check-in buttons.
+    expect((await db.getJournalSession(phone))?.journalData.__paused).toBe(true);
+    expect(r.response).not.toMatch(/Resume check-in/);
   });
 
   it('an answer that matches no option is not asked about twice', async () => {
@@ -222,7 +224,7 @@ describe('"It was a 7" to the sleep question', () => {
     const r2 = await say(phone, '3');
     expect(r2.response).toMatch(/nearest health facility today/);
     expect(calls).toEqual({ triage: 0, interp: 0, other: 0 });
-    expect(await db.getJournalSession(phone)).toBeFalsy();
+    expect((await db.getJournalSession(phone))?.journalData.__paused).toBe(true);
   });
 });
 
