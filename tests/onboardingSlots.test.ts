@@ -119,6 +119,26 @@ describe('LLM-first onboarding', () => {
     expect(r.response).toMatch(/Which town or area/);
   });
 
+  it.each(['Confirm', 'OK', 'Yes please', 'Sawa', 'ndiyo asante'])('"%s" at the location step is not saved as the location', async (msg) => {
+    const p = phone();
+    await consented(p);
+    await db.updateUser(p, { name: 'Faith', age: 23, pregnancy_week: 8 });
+    await db.saveConversation(p, '8', 'Great! You\'re at week 8. 🤰\n\nWhere are you located?', { context: 'onboarding' });
+    slots = `{"location":"${msg}"}`;
+    const r = await say(p, msg);
+    expect((await db.getUser(p)).location).toBeNull();
+    expect(r.response).toMatch(/Which town or area|located/);
+  });
+
+  it('a real place is still saved, even with a filler word in front', async () => {
+    const p = phone();
+    await consented(p);
+    await db.updateUser(p, { name: 'Faith', age: 23, pregnancy_week: 8 });
+    await db.saveConversation(p, '8', 'Great! You\'re at week 8. 🤰\n\nWhere are you located?', { context: 'onboarding' });
+    await say(p, 'Homa Bay');
+    expect((await db.getUser(p)).location).toBe('Homa Bay');
+  });
+
   it('an answer that also asks a question gets both: the field saved and the question answered', async () => {
     const p = phone();
     await consented(p);
