@@ -961,6 +961,15 @@ function validName(raw: string | undefined): string | null {
   return name;
 }
 
+// A reply made only of these words is not a place. A prod mother answered
+// "Confirm" to the location question and it was saved as her location.
+const NON_PLACE_WORDS = new Set([
+  'confirm', 'confirmed', 'ok', 'okay', 'k', 'yes', 'yeah', 'yep', 'no', 'nope', 'sure', 'done', 'fine',
+  'agree', 'i', 'thanks', 'thank', 'you', 'hello', 'hi', 'hey', 'next', 'continue', 'skip', 'stop', 'help',
+  'none', 'nothing', 'later', 'please', 'sawa', 'ndiyo', 'ndio', 'hapana', 'nakubali', 'asante', 'habari',
+  'sijui', 'poa', 'tafadhali', 'endelea',
+]);
+
 function validLocation(raw: string | undefined): string | null {
   if (!raw) return null;
   const loc = raw
@@ -970,6 +979,7 @@ function validLocation(raw: string | undefined): string | null {
     .trim();
   if (!loc || loc.length > 60 || loc.includes('?') || loc.split(/\s+/).length > 6 || !/[a-zA-Z]/.test(loc)) return null;
   if (detectDangerSigns(loc).urgencyLevel !== 'low') return null;
+  if (loc.toLowerCase().split(/[^a-z']+/).filter(Boolean).every((w) => NON_PLACE_WORDS.has(w))) return null;
   return loc;
 }
 

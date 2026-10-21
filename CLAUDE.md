@@ -12,7 +12,7 @@ Amaaii is a maternal-health companion for pregnant/postpartum mothers in Kenya, 
 - `packages/adapters` — I/O implementations: `sqlite/` (one repository class per table + `connection.ts` schema/migrations, incl. `consentsRepository.ts`, `auditRepository.ts`, `jobRepository.ts`, `erasure.ts`), `whatsapp.ts` (provider-neutral `sendWhatsAppMessage`/`sendWhatsAppOtp` + `__setSendImpl` test seam, picks the transport from `WHATSAPP_PROVIDER`), `twilio.ts` (lazy Twilio client), `whatsappCloud.ts` (Meta Cloud API client, plain `fetch`), `llm.ts` (the single OpenAI chokepoint — see below).
 - `apps/server` — Express in TS. Entry `apps/server/src/index.ts` (import order load-bearing: `register-paths` → `dotenv/config` → app). `app.ts` is the `createApp()` factory with all routes; `database.ts` is a stable facade over the SQLite adapter; plus `messageHandler`, `journalManager`, `userManager`, `amaaii` (prompts + AI reply), `llmExtract`, `trend`, `auth`, `otp` (crypto half), `audit` (`recordAuditSafe`, `auditDangerEscalation`, `wasAccountDeleted` — see Phase 3 section below), `logger` (PII-redacting), `jobWorker` (Phase 4 — poller + handler registry over the durable job queue, see below), `metrics` (Phase 4 — Prometheus text exposition), `alerts` (Phase 4 — `notifyCritical` webhook/log seam), `errorHandler` (Phase 4 — global Express error-handling backstop), `middleware/twilioSignature`, `whatsappCloudWebhook` (Meta Cloud API inbound — see "WhatsApp transports"), `middleware/requestObservability` (Phase 4 — correlation id + structured request logging + HTTP metrics).
 - `apps/web` — Next.js 15 static-export PWA (the only pnpm workspace package; `packages/*` have no package.json and resolve via root tsconfig paths / vitest aliases / `register-paths.ts` for compiled dist).
-- `tests/` — root vitest suite (809 tests) with golden fixtures (`danger-signs-golden.json`, `redaction-golden.json`). `scripts/smoke/` — shell E2E scripts, DB-isolated via scratch `DB_PATH`.
+- `tests/` — root vitest suite (815 tests) with golden fixtures (`danger-signs-golden.json`, `redaction-golden.json`). `scripts/smoke/` — shell E2E scripts, DB-isolated via scratch `DB_PATH`.
 
 The older vanilla-JS PWA that used to live at `public/` is **retired** (express-serves-pwa): Express now serves the Next.js static export (`apps/web/out`) at `/` instead — single-process, single-origin deployment (see Architecture below). `public/` is gone from the working tree but recoverable from git history if ever needed.
 
@@ -22,7 +22,7 @@ pnpm only (`packageManager: pnpm@10.33.0`; `sqlite3` is in `pnpm.onlyBuiltDepend
 
 - `pnpm install`
 - `pnpm dev` / `pnpm start` — Express server via `tsx` (watch / no-watch), port from `PORT` (default 3000). Serves the API always; serves the PWA at `/` too if `apps/web/out` exists (see "Serving the PWA" below).
-- `pnpm test` / `pnpm test:watch` — vitest (809 tests in `tests/`)
+- `pnpm test` / `pnpm test:watch` — vitest (815 tests in `tests/`)
 - `pnpm typecheck` — `tsc --noEmit` over packages + apps/server (apps/web has its own `pnpm --filter web typecheck`)
 - `pnpm build` — `tsc -p tsconfig.build.json` → `dist/`; boot the artifact with `node dist/apps/server/src/index.js` (works because of `register-paths.ts` + `paths.ts` — see their headers before touching import resolution)
 - `pnpm dev:web` — `next dev` for the PWA; point it at a running API with `AMAAII_API_ORIGIN`, e.g. `AMAAII_API_ORIGIN=http://localhost:3100 pnpm dev:web` (rewrites proxy API calls in dev)
