@@ -31,6 +31,12 @@ import {
   buildClarifyOptions,
   bareSleepNumber,
   matchClarifyOption,
+  modelClarifyOptions,
+  checkinSoFar,
+  checkinStageQuestion,
+  checkinPausedCard,
+  checkinStillResumable,
+  parseSqliteUtc,
   JOURNAL_SCORE_STAGES,
   pregnancyStatus,
   generateJournalSummary as coreGenerateJournalSummary,
@@ -55,11 +61,11 @@ interface JournalResponseSuccess {
   nextStage?: JournalStage;
   completed: boolean;
   /** The answer wasn't an answer — it was a question or a new topic. The
-   *  session has been closed and the caller should route the message
+   *  session has been paused and the caller should route the message
    *  normally (the 2026-10 simulation's "journal trap"). */
   passThrough?: boolean;
   /** She picked the "I feel unwell"/"Pain N/10" option: the session is
-   *  closed and the caller should triage her message (passThrough too). */
+   *  paused and the caller should triage her message (passThrough too). */
   unwell?: boolean;
   /** Reply options for a "what did you mean?" question (buttons on Meta
    *  WhatsApp, chips in the app, a numbered list elsewhere). */
@@ -75,10 +81,33 @@ type JournalChannel = 'whatsapp' | 'web';
 const ATTEMPTS_KEY = '__attempts';
 // An open "what did you mean?" question (core PendingClarify).
 const CLARIFY_KEY = '__clarify';
+// Set while the check-in waits for her to tap Resume (core checkinResume.ts).
+const PAUSED_KEY = '__paused';
+
+// Every answer column of a journals row, cleared by Restart. Red flags stay:
+// starting over never erases a danger sign she reported.
+const CLEARED_ANSWERS: JournalPatch = {
+  emotional_state: null,
+  mood_description: null,
+  physical_symptoms: null,
+  sleep_quality: null,
+  sleep_hours: null,
+  appetite: null,
+  baby_movement_count: null,
+  baby_movement_time: null,
+  water_intake: null,
+  questions_for_doctor: null,
+  special_notes: null,
+};
 
 interface AnswerRead {
   fields: JournalFields | null;
   clarify?: ClarifyOption[];
+  /** The model's own wording for the clarify question. */
+  clarifyMessage?: string;
+  /** The clarify model's call on whether she was answering at all; unset =
+   *  the word-count rule (looksLikeOffTopic) decides. */
+  offTopic?: boolean;
   unwell?: boolean;
   symptom?: boolean;
 }
@@ -123,6 +152,29 @@ interface JournalSessionView {
   channel: string;
   startedAt: string | null;
   updatedAt: string | null;
+  /** Waiting for her to tap Resume. */
+  paused: boolean;
+}
+
+function sessionView(userPhone: string, row: {
+  currentStage: string;
+  journalData?: Record<string, unknown> | null;
+  journalId: number | null;
+  channel?: string | null;
+  startedAt?: string | null;
+  updatedAt?: string | null;
+}): JournalSessionView {
+  const journalData = row.journalData || {};
+  return {
+    userPhone,
+    currentStage: row.currentStage,
+    journalData,
+    journalId: row.journalId,
+    channel: row.channel ?? 'whatsapp',
+    startedAt: row.startedAt ?? null,
+    updatedAt: row.updatedAt ?? null,
+    paused: journalData[PAUSED_KEY] === true,
+  };
 }
 
 // Free-text journal stages (questions, notes) re-run symptom + danger
@@ -165,17 +217,7 @@ class JournalManager {
     // day: each `journal` command after a previous one completes opens
     // a brand-new row.
     const existingDbSession = await db.getJournalSession(userPhone);
-    if (existingDbSession) {
-      return {
-        userPhone,
-        currentStage: existingDbSession.currentStage,
-        journalData: existingDbSession.journalData || {},
-        journalId: existingDbSession.journalId,
-        channel: existingDbSession.channel ?? 'whatsapp',
-        startedAt: existingDbSession.startedAt ?? null,
-        updatedAt: existingDbSession.updatedAt ?? null,
-      };
-    }
+    if (existingDbSession) return sessionView(userPhone, existingDbSession);
 
     // INSERT the row up front so we capture started_at the moment the
     // user opens the check-in.
@@ -189,6 +231,7 @@ class JournalManager {
       channel,
       startedAt: null,
       updatedAt: null,
+      paused: false,
     };
     await db.upsertJournalSession(userPhone, {
       currentStage: session.currentStage,
@@ -201,16 +244,58 @@ class JournalManager {
 
   async getJournalSession(userPhone: string): Promise<JournalSessionView | null> {
     const row = await db.getJournalSession(userPhone);
-    if (!row) return null;
-    return {
-      userPhone,
-      currentStage: row.currentStage,
-      journalData: row.journalData || {},
-      journalId: row.journalId,
-      channel: row.channel ?? 'whatsapp',
-      startedAt: row.startedAt ?? null,
-      updatedAt: row.updatedAt ?? null,
-    };
+    return row ? sessionView(userPhone, row) : null;
+  }
+
+  /** Still resumable: it started today (Nairobi). An older one is closed,
+   *  its answers kept as an incomplete entry. */
+  isResumable(session: JournalSessionView, now: Date): boolean {
+    return checkinStillResumable(parseSqliteUtc(session.startedAt ?? session.updatedAt), now);
+  }
+
+  /** Leaves the check-in waiting for her to tap Resume. `patch` is saved
+   *  into the session too (what the paused card shows). */
+  async pauseJournal(userPhone: string, patch: JournalPatch = {}): Promise<void> {
+    const s = await db.getJournalSession(userPhone);
+    if (!s) return;
+    await db.upsertJournalSession(userPhone, {
+      currentStage: s.currentStage as JournalStage,
+      journalData: { ...(s.journalData || {}), ...patch, [PAUSED_KEY]: true, [CLARIFY_KEY]: undefined },
+      journalId: s.journalId,
+      channel: s.channel ?? 'whatsapp',
+    });
+  }
+
+  /** What she sees about a paused check-in: what's saved, what's next, and
+   *  the Resume / Restart / Stop buttons' words. */
+  pausedCard(
+    session: JournalSessionView,
+    lang: string,
+    key: 'journal_paused_card' | 'journal_pending_card' = 'journal_paused_card'
+  ): string {
+    return checkinPausedCard(session.journalData, session.currentStage, lang, key);
+  }
+
+  /** Picks the check-in up on this channel at the question she stopped at. */
+  async resumeJournal(userPhone: string, channel: JournalChannel): Promise<string> {
+    const s = await db.getJournalSession(userPhone);
+    if (!s) return '';
+    const user = await db.getUser(userPhone);
+    const lang = pickLang(user && user.language);
+    const journalData: Record<string, unknown> = { ...(s.journalData || {}), [PAUSED_KEY]: undefined, [CLARIFY_KEY]: undefined };
+    const stage = (s.currentStage === 'greeting' || s.currentStage === 'continue' ? 'mood' : s.currentStage) as JournalStage;
+    await db.upsertJournalSession(userPhone, { currentStage: stage, journalData, journalId: s.journalId, channel });
+    return t(lang, 'journal_resume', { sofar: checkinSoFar(journalData, lang), question: checkinStageQuestion(stage, lang) });
+  }
+
+  /** Clears today's answers on the same entry and starts again from the
+   *  greeting; the caller runs the greeting turn. */
+  async restartJournal(userPhone: string, channel: JournalChannel): Promise<void> {
+    const s = await db.getJournalSession(userPhone);
+    const journalId = s?.journalId
+      ? await db.createOrUpdateJournal(userPhone, CLEARED_ANSWERS, s.journalId)
+      : await db.createOrUpdateJournal(userPhone, {});
+    await db.upsertJournalSession(userPhone, { currentStage: 'greeting', journalData: {}, journalId, channel });
   }
 
   /** Ends an open session without completing it (the "stop"/"acha"
@@ -221,7 +306,7 @@ class JournalManager {
   }
 
   /** A CRITICAL/HIGH danger sign arrived mid-journal: record it on the
-   *  in-progress journal row and close the session, so the caller can run
+   *  in-progress journal row and pause the session, so the caller can run
    *  the normal escalation path (copy, audit, follow-up). */
   async interruptForDanger(userPhone: string, message: string, danger: DangerSignResult): Promise<void> {
     const session = await db.getJournalSession(userPhone);
@@ -235,15 +320,53 @@ class JournalManager {
     if (session.journalId) {
       await db.createOrUpdateJournal(userPhone, patch, session.journalId);
     }
-    await db.deleteJournalSession(userPhone);
+    await this.pauseJournal(userPhone, patch);
+  }
+
+  /**
+   * The stronger clarify model (llmExtract.clarifyJournalAnswer) settles an
+   * unclear answer or writes the "what did you mean?" question. Everything
+   * it returns is validated here; null means "use the canned question".
+   */
+  private async modelClarify(
+    stage: string,
+    question: string | null,
+    message: string,
+    journalData: Record<string, unknown>,
+    lang: string,
+    mustAsk: boolean
+  ): Promise<AnswerRead | null> {
+    const plan = await llm.clarifyJournalAnswer({
+      stage,
+      question,
+      answer: message,
+      soFar: checkinSoFar(journalData, 'en'),
+      lang,
+    });
+    if (!plan) return null;
+    if (plan.action === 'off_topic') return mustAsk ? null : { fields: null, offTopic: true };
+    if (plan.action === 'save') {
+      // A bare "7" to a two-part question is never settled by a guess: the
+      // pain option has to be offered (prod, 2026-10-20).
+      if (mustAsk) return null;
+      const fields = validJournalFields(stage, plan.answer);
+      return fields ? { fields } : null;
+    }
+    const text = plan.message.replace(/[ \t]+/g, ' ').trim();
+    if (!text || text.length > 400 || /\[[A-Z_]+\]/.test(text)) return null;
+    const clarify = modelClarifyOptions(plan.options, stage, lang, singleSmallNumber(message));
+    if (mustAsk && !clarify.length) return null;
+    return { fields: null, clarify, clarifyMessage: text };
   }
 
   /**
    * Reads a score-stage answer against the question she was asked: a pick
    * from an open "what did you mean?" question first, then the regex for
    * short replies, then the model (with the question) for anything longer
-   * or unreadable. A reply that fits more than one way gets options
-   * instead of a guess — once; a second unclear reply is left blank.
+   * or unreadable. A reply that is unclear goes to the stronger clarify
+   * model, which settles it or asks "what did you mean?" with options —
+   * once; the canned question is the fallback, and a second unclear reply
+   * is left blank.
    */
   private async readAnswer(
     userPhone: string,
@@ -251,7 +374,8 @@ class JournalManager {
     message: string,
     pending: PendingClarify | null,
     canAi: boolean,
-    lang: string
+    lang: string,
+    journalData: Record<string, unknown> = {}
   ): Promise<AnswerRead> {
     let clarifiedBefore = false;
     if (pending && pending.stage === stage) {
@@ -263,8 +387,12 @@ class JournalManager {
       clarifiedBefore = true;
     }
     const symptom = extractSymptoms(message).length > 0;
+    const question = async (): Promise<string | null> =>
+      (await db.getLastBotMessage(userPhone).catch(() => null))?.response ?? null;
     const bare = stage === 'sleep' && !clarifiedBefore ? bareSleepNumber(message) : null;
     if (bare !== null) {
+      const asked = canAi ? await this.modelClarify(stage, await question(), message, journalData, lang, true) : null;
+      if (asked) return { ...asked, symptom };
       const clarify = buildClarifyOptions([{ quality: bare }, { hours: bare }], lang, bare);
       if (clarify) return { fields: null, clarify, symptom };
     }
@@ -272,25 +400,35 @@ class JournalManager {
     const short = message.trim().split(/\s+/).length <= 5;
     if (!canAi || (det && short)) return { fields: det, symptom };
 
-    const question = (await db.getLastBotMessage(userPhone).catch(() => null))?.response ?? null;
-    const ai = await llm.interpretJournalAnswer(stage, question, message);
+    const asked = await question();
+    const ai = await llm.interpretJournalAnswer(stage, asked, message);
     if (!ai) return { fields: det, symptom };
     const mentions = symptom || ai.symptom !== '';
     const answer = validJournalFields(stage, ai.answer);
     if (ai.status === 'clear') return { fields: answer ?? det, symptom: mentions };
+    let readings: JournalFields[] = [];
     if (ai.status === 'ambiguous') {
-      const readings = ai.readings
+      readings = ai.readings
         .map((r) => validJournalFields(stage, r))
         .filter((r): r is JournalFields => r !== null);
       // Readings that only add values she never gave ("5 hours" read as
       // 3/10 + 5 hours) are not a real choice: keep what she said.
       if (answer && readings.every((r) => agreesWith(r, answer))) return { fields: answer, symptom: mentions };
-      if (!clarifiedBefore) {
+    }
+    // Unclear: ambiguous, or no value at all. A question ("?") pauses the
+    // check-in straight away; for anything else the clarify model decides
+    // whether she was answering (a long reply often is). A baby-movement
+    // reply in words is kept as text, so it isn't chased.
+    const unclear = ai.status === 'ambiguous' || (stage !== 'baby_movement' && !message.includes('?'));
+    if (unclear && !clarifiedBefore) {
+      const settled = await this.modelClarify(stage, asked, message, journalData, lang, false);
+      if (settled) return { ...settled, symptom: mentions };
+      if (ai.status === 'ambiguous') {
         const clarify = buildClarifyOptions(readings, lang, singleSmallNumber(message));
         if (clarify) return { fields: null, clarify, symptom: mentions };
       }
-      return { fields: readings.length === 1 ? readings[0] : null, symptom: mentions };
     }
+    if (ai.status === 'ambiguous') return { fields: readings.length === 1 ? readings[0] : null, symptom: mentions };
     return { fields: null, symptom: mentions };
   }
 
@@ -336,26 +474,31 @@ class JournalManager {
     const journalUpdate: JournalPatch = {};
     let mentionsSymptom = false;
     let fields: JournalFields | null = null;
+    // A question or a new topic, not an answer: the check-in pauses.
+    let offTopic = looksLikeOffTopic(message);
 
     if (JOURNAL_SCORE_STAGES.has(stage)) {
       const pending = (journalData[CLARIFY_KEY] as PendingClarify | undefined) ?? null;
-      const read = await this.readAnswer(userPhone, stage, message, pending, canAi, lang);
+      const read = await this.readAnswer(userPhone, stage, message, pending, canAi, lang, journalData);
       if (read.unwell) {
-        await db.deleteJournalSession(userPhone);
+        await this.pauseJournal(userPhone);
         return { response: '', completed: false, passThrough: true, unwell: true };
       }
       if (read.clarify) {
         const clarify: PendingClarify = { stage, options: read.clarify };
+        // A clarify counts as one try: an answer still unreadable after it
+        // is skipped (mood, water) rather than asked a third time.
+        attempts[stage] = tries(stage) + 1;
         await db.upsertJournalSession(userPhone, {
           currentStage: stage,
-          journalData: { ...journalData, [CLARIFY_KEY]: clarify },
+          journalData: { ...journalData, [CLARIFY_KEY]: clarify, [ATTEMPTS_KEY]: attempts },
           journalId,
           channel: dbSession.channel ?? 'whatsapp',
         });
         const answer = message.trim().replace(/\s+/g, ' ').slice(0, 60);
         return {
-          response: t(lang, 'journal_clarify', { answer }),
-          options: read.clarify.map((o) => o.label),
+          response: read.clarifyMessage ?? t(lang, 'journal_clarify', { answer }),
+          ...(read.clarify.length ? { options: read.clarify.map((o) => o.label) } : {}),
           nextStage: stage,
           completed: false,
           mentionsSymptom: !!read.symptom,
@@ -363,6 +506,7 @@ class JournalManager {
       }
       fields = read.fields;
       mentionsSymptom = !!read.symptom;
+      if (read.offTopic !== undefined) offTopic = read.offTopic;
     }
 
     switch (stage) {
@@ -397,7 +541,7 @@ class JournalManager {
       case 'mood': {
         const moodScore = fields?.mood ?? null;
         const moodValid = moodScore !== null;
-        if (!moodValid && looksLikeOffTopic(message)) {
+        if (!moodValid && offTopic) {
           passThrough = true;
           break;
         }
@@ -445,7 +589,7 @@ class JournalManager {
         if (fields?.quality != null) journalUpdate.sleep_quality = fields.quality;
         if (fields?.hours != null) journalUpdate.sleep_hours = fields.hours;
 
-        if (journalUpdate.sleep_quality == null && journalUpdate.sleep_hours == null && looksLikeOffTopic(message)) {
+        if (journalUpdate.sleep_quality == null && journalUpdate.sleep_hours == null && offTopic) {
           passThrough = true;
           break;
         }
@@ -458,7 +602,7 @@ class JournalManager {
 
       case 'baby_movement': {
         const movementCount = fields?.count ?? null;
-        if (movementCount === null && looksLikeOffTopic(message)) {
+        if (movementCount === null && offTopic) {
           passThrough = true;
           break;
         }
@@ -491,7 +635,7 @@ class JournalManager {
             t(lang, 'journal_water_low');
           response = t(lang, 'journal_water_followup', { ack });
           nextStage = nextJournalStage(stage, { pregnancyWeek });
-        } else if (looksLikeOffTopic(message)) {
+        } else if (offTopic) {
           passThrough = true;
         } else if (tries('water') >= 1) {
           response = t(lang, 'journal_water_followup', { ack: t(lang, 'journal_water_skip') });
@@ -508,7 +652,7 @@ class JournalManager {
 
       case 'appetite': {
         const appetiteLevel: string | null = fields?.appetite ?? null;
-        if (appetiteLevel === null && looksLikeOffTopic(message)) {
+        if (appetiteLevel === null && offTopic) {
           passThrough = true;
           break;
         }
@@ -558,7 +702,8 @@ class JournalManager {
     }
 
     if (passThrough) {
-      await db.deleteJournalSession(userPhone);
+      // Paused, not thrown away: she gets Resume / Restart / Stop.
+      await this.pauseJournal(userPhone);
       return { response: '', completed: false, passThrough: true };
     }
 

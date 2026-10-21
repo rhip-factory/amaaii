@@ -30,7 +30,9 @@ export type ActionId =
   | 'weekly_summary'
   | 'doctor_report'
   | 'lang_sw'
-  | 'lang_en';
+  | 'lang_en'
+  | 'resume'
+  | 'restart';
 
 /** WhatsApp allows at most 3 reply buttons on one message. */
 export const MAX_ACTION_BUTTONS = 3;
@@ -44,6 +46,8 @@ interface ActionPrompt {
 
 export const ACTION_PROMPTS: ActionPrompt[] = [
   { marker: '*i agree*', lang: 'en', actions: ['agree'] },
+  { marker: 'tap *resume check-in*', lang: 'en', actions: ['resume', 'restart', 'stop'] },
+  { marker: 'bonyeza *endelea na jarida*', lang: 'sw', actions: ['resume', 'restart', 'stop'] },
   { marker: '*nakubali*', lang: 'sw', actions: ['agree'] },
   { marker: "here's what i can do", lang: 'en', actions: ['start_journal', 'weekly_summary', 'doctor_report'] },
   { marker: 'haya ndiyo ninayoweza kufanya', lang: 'sw', actions: ['start_journal', 'weekly_summary', 'doctor_report'] },
@@ -82,9 +86,14 @@ function promptHits(text: string): { p: ActionPrompt; at: number }[] {
     .sort((a, b) => a.at - b.at);
 }
 
-/** Whether `text` (e.g. Amaaii's last message) invited her to start a check-in. */
+/** The actions `text` (e.g. Amaaii's last message) offered her. */
+export function offeredActions(text: string): ActionId[] {
+  return promptHits(text).flatMap(({ p }) => p.actions);
+}
+
+/** Whether `text` invited her to start a check-in. */
 export function offersJournal(text: string): boolean {
-  return promptHits(text).some(({ p }) => p.actions.includes('start_journal'));
+  return offeredActions(text).includes('start_journal');
 }
 
 /** The reply buttons a finished reply should carry, in the order its

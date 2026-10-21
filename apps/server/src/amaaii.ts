@@ -146,6 +146,8 @@ export interface AmaaiiContext {
   appUrl?: string | null;
   /** Which surface she is writing from. */
   channel?: 'whatsapp' | 'web';
+  /** Her check-in is paused; the topic of its next question, e.g. "sleep". */
+  pausedCheckinNext?: string | null;
 }
 
 // Turns that carry no conversational memory: consent, onboarding and
@@ -211,6 +213,7 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
       medicalHistory,
       appUrl,
       channel,
+      pausedCheckinNext,
     } = context;
 
     const systemPrompt = BASE_SYSTEM_PROMPT;
@@ -267,6 +270,9 @@ export async function getAmaaiiResponse(userMessage: string, context: AmaaiiCont
     }
     const memory = memoryLines(conversationHistory, new Date());
     ctxLines.push(...memory);
+    if (pausedCheckinNext) {
+      ctxLines.push(`Her daily check-in is paused (next question: ${pausedCheckinNext}). The app shows her Resume / Restart buttons under your reply: answer her message, don't ask check-in questions, and don't tell her to tap Start journal.`);
+    }
     // WhatsApp and the app are one Amaaii: same number, same history.
     if (channel === 'web') {
       ctxLines.push('She is writing in the Amaaii app; the same chat continues on WhatsApp.');

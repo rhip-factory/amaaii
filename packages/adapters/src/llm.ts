@@ -68,8 +68,10 @@ export interface ChatOptions {
   temperature?: number;
   response_format?: ChatResponseFormat;
   /** 'extract' = a structured-field fallback (llmExtract.ts), which may run
-   *  on a different, faster model via LLM_EXTRACT_MODEL. Default 'reply'. */
-  purpose?: 'reply' | 'extract';
+   *  on a different, faster model via LLM_EXTRACT_MODEL. 'clarify' = the
+   *  check-in's "what did you mean?" question, worth a stronger model
+   *  (LLM_CLARIFY_MODEL). Default 'reply'. */
+  purpose?: 'reply' | 'extract' | 'clarify';
   /** Stored user record — used ONLY to strip the user's FULL name out
    *  of user/assistant message content. Never used to add anything to
    *  the outbound request. Omit if the caller has no user context
@@ -79,6 +81,8 @@ export interface ChatOptions {
 }
 
 const DEFAULT_MODEL = 'gpt-3.5-turbo';
+/** "What did you mean?" runs rarely and she is waiting on it: worth Sonnet. */
+const DEFAULT_CLARIFY_MODEL = 'anthropic/claude-sonnet-5.5';
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 let cachedClient: OpenAI | null = null;
@@ -99,8 +103,16 @@ export function isLlmConfigured(): boolean {
  * while the mother waits, so it can stay on a fast model even if replies
  * move to a slower one. Otherwise the caller's plain OpenAI name is used,
  * prefixed with `openai/` on OpenRouter so it hits the same model there.
+ * The check-in's clarify question has its own LLM_CLARIFY_MODEL (Sonnet by
+ * default on OpenRouter): it runs only on unclear answers.
  */
 export function resolveModel(requested: string, purpose: ChatOptions['purpose'] = 'reply'): string {
+  if (purpose === 'clarify') {
+    if (process.env.LLM_CLARIFY_MODEL) return process.env.LLM_CLARIFY_MODEL;
+    if (usingOpenRouter()) return DEFAULT_CLARIFY_MODEL;
+    // Plain OpenAI: no Claude there; use the extraction model.
+    return resolveModel(requested, 'extract');
+  }
   if (purpose === 'extract' && process.env.LLM_EXTRACT_MODEL) return process.env.LLM_EXTRACT_MODEL;
   if (process.env.LLM_MODEL) return process.env.LLM_MODEL;
   if (usingOpenRouter() && !requested.includes('/')) return `openai/${requested}`;

@@ -92,11 +92,43 @@ export function buildClarifyOptions(
     if (options.length === MAX_CLARIFY_OPTIONS - 1) break;
   }
   if (options.length < 2) return null;
-  const unwellLabel = bareNumber != null && bareNumber >= 1 && bareNumber <= 10
+  options.push(safetyOption(lang, bareNumber));
+  return options;
+}
+
+/** The option that always leads to triage: "Pain 7/10" for a bare number
+ *  1-10, else "I feel unwell". */
+export function safetyOption(lang: string, bareNumber: number | null = null): ClarifyOption {
+  const label = bareNumber != null && bareNumber >= 1 && bareNumber <= 10
     ? t(lang, 'opt_pain', { n: bareNumber })
     : t(lang, 'opt_unwell');
-  options.push({ label: unwellLabel, unwell: true });
-  return options;
+  return { label, unwell: true };
+}
+
+/**
+ * Options the clarify model proposed, kept only when the label fits a
+ * WhatsApp button and the fields are a valid answer to this stage; the
+ * safety option is always added last by code, never by the model.
+ * Empty when none survive (the question then goes without buttons).
+ */
+export function modelClarifyOptions(
+  drafts: { label: string; answer: Record<string, unknown> }[],
+  stage: string,
+  lang: string,
+  bareNumber: number | null = null
+): ClarifyOption[] {
+  const safety = safetyOption(lang, bareNumber);
+  const options: ClarifyOption[] = [];
+  for (const d of drafts) {
+    const label = d.label.replace(/\s+/g, ' ').trim();
+    const fields = validJournalFields(stage, d.answer);
+    if (!label || label.length > CLARIFY_LABEL_MAX || /[[\]{}<>]/.test(label) || !fields) continue;
+    const key = label.toLowerCase();
+    if (key === safety.label.toLowerCase() || options.some((o) => o.label.toLowerCase() === key)) continue;
+    options.push({ label, fields });
+    if (options.length === MAX_CLARIFY_OPTIONS - 1) break;
+  }
+  return options.length ? [...options, safety] : [];
 }
 
 const words = (s: string): string[] => s.trim().split(/\s+/).filter(Boolean);

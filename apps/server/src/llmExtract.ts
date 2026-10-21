@@ -91,7 +91,11 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 // Every field-specific extractor below does its own runtime validation
 // on the result before trusting a field — exactly mirroring the
 // original JS, which never had a static shape here either.
-export async function extract(instructions: string, userText: string): Promise<any> {
+export async function extract(
+  instructions: string,
+  userText: string,
+  opts: { purpose?: 'extract' | 'clarify'; timeoutMs?: number } = {}
+): Promise<any> {
   if (!isLlmConfigured()) return null;
   try {
     const completion = await withTimeout(
@@ -110,10 +114,10 @@ export async function extract(instructions: string, userText: string): Promise<a
           max_tokens: 600,
           temperature: 0,
           response_format: { type: 'json_object' },
-          purpose: 'extract',
+          purpose: opts.purpose ?? 'extract',
         }
       ),
-      TIMEOUT_MS
+      opts.timeoutMs ?? TIMEOUT_MS
     );
     const raw = completion.choices?.[0]?.message?.content;
     if (!raw) return null;
@@ -378,6 +382,64 @@ Never invent a value she did not give. Replies may be in English, Kiswahili or S
     readings: Array.isArray(out.readings) ? out.readings.filter((r: unknown) => r && typeof r === 'object').slice(0, 2) : [],
     symptom: typeof out.symptom === 'string' ? out.symptom.slice(0, 60) : '',
   };
+}
+
+// "What did you mean?" for a check-in answer Haiku couldn't read for sure.
+// A stronger model (LLM_CLARIFY_MODEL) either settles the value or writes
+// one short question with up to two options, each carrying the exact
+// fields to save. The caller validates every value and label, adds the
+// "I feel unwell" option itself, and falls back to the canned question.
+const CLARIFY_TIMEOUT_MS = 12000;
+
+export interface ClarifyOptionDraft {
+  label: string;
+  answer: Record<string, unknown>;
+}
+
+export type ClarifyPlan =
+  | { action: 'save'; answer: Record<string, unknown> }
+  | { action: 'ask'; message: string; options: ClarifyOptionDraft[] }
+  | { action: 'off_topic' };
+
+export async function clarifyJournalAnswer(input: {
+  stage: string;
+  question: string | null;
+  answer: string;
+  soFar: string;
+  lang: string;
+}): Promise<ClarifyPlan | null> {
+  const spec = JOURNAL_FIELD_SPEC[input.stage];
+  if (!spec) return null;
+  const language = input.lang === 'sw' ? 'Kiswahili' : 'English';
+  const out = await extract(
+    `You help Amaaii, a pregnancy companion for mothers in Kenya, in the middle of a mother's daily check-in on WhatsApp. The app asks fixed questions and saves her answers. Her reply to the current question could not be read for certain; you settle it.
+What the app can save for this question: ${spec}.
+Return STRICT JSON, one of:
+{"action": "save", "answer": {fields}} - her reply does give the value, even roughly ("40 minutes" = hours 0.7; "like a 3" = 3; "maji glasi tano" = glasses 5). Only values she gave or clearly meant. A single bare number when the question asks for two values (sleep quality AND hours) is never settled: ask which she meant.
+{"action": "off_topic"} - she is not trying to answer: she asks something or talks about something else. The app pauses the check-in and answers her.
+{"action": "ask", "message": "...", "options": [{"label": "...", "answer": {fields}}]} - otherwise. "message": ONE short, warm question (at most 2 sentences) in ${language} that refers to her words and makes answering easy, e.g. offering the likely meanings. "options": up to 2 likely answers, each "label" at most 20 characters in ${language}, each with the exact fields to save.
+Rules: you are not a nurse here. Never give medical advice or reassurance. Don't mention symptoms she didn't mention. The app adds an "I feel unwell" button itself, so never offer one. Ask about this question only. No placeholders like [NAME].`,
+    `Saved so far today: ${input.soFar}\n\nThe app asked:\n"""${(input.question ?? '').slice(0, 500)}"""\n\nHer reply:\n"""${input.answer}"""`,
+    { purpose: 'clarify', timeoutMs: CLARIFY_TIMEOUT_MS }
+  );
+  if (!out || typeof out !== 'object') return null;
+  if (out.action === 'off_topic') return { action: 'off_topic' };
+  if (out.action === 'save' && out.answer && typeof out.answer === 'object') {
+    return { action: 'save', answer: out.answer };
+  }
+  if (out.action === 'ask' && typeof out.message === 'string') {
+    const options: ClarifyOptionDraft[] = Array.isArray(out.options)
+      ? (out.options as unknown[])
+        .filter((o): o is { label: string; answer: Record<string, unknown> } =>
+          !!o && typeof o === 'object' &&
+          typeof (o as { label?: unknown }).label === 'string' &&
+          !!(o as { answer?: unknown }).answer && typeof (o as { answer?: unknown }).answer === 'object')
+        .slice(0, 2)
+        .map((o) => ({ label: o.label, answer: o.answer }))
+      : [];
+    return { action: 'ask', message: out.message, options };
+  }
+  return null;
 }
 
 // Raise-only safety net over the deterministic danger rules (2026-10

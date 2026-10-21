@@ -12,7 +12,9 @@ export type ChatCommand =
   | 'weekly_summary'
   | 'doctor_report'
   | 'cancel'
-  | 'help';
+  | 'help'
+  | 'resume'
+  | 'restart';
 
 const COMMANDS: Record<ChatCommand, string[]> = {
   journal: [
@@ -36,6 +38,15 @@ const COMMANDS: Record<ChatCommand, string[]> = {
     'stop', 'cancel', 'exit', 'quit', 'end', 'later', 'not now', 'skip', 'acha', 'sitisha',
     'baadaye', 'sitaki', 'stop journal', 'cancel journal', 'end journal', 'skip journal',
     'stop check in', 'stop check-in', 'acha jarida', 'sitisha jarida', 'sitaki jarida',
+  ],
+  resume: [
+    'resume', 'resume check-in', 'resume check in', 'resume checkin', 'resume journal', 'continue',
+    'continue check-in', 'continue check in', 'continue journal', 'carry on', 'endelea',
+    'endelea na jarida', 'endelea na ukaguzi',
+  ],
+  restart: [
+    'restart', 'restart check-in', 'restart check in', 'restart checkin', 'restart journal',
+    'start over', 'start again', 'anza upya', 'anza jarida upya', 'anza tena',
   ],
   help: [
     'help', 'menu', 'msaada', 'commands', 'options', 'what can you do', 'unaweza kufanya nini',
