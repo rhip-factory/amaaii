@@ -31,6 +31,8 @@ import {
   canUseAi,
   classifyConsentReply,
   withOptionList,
+  actionButtonsFor,
+  withButtonHint,
   JOURNAL_SCORE_STAGES,
 } from '@amaaii/core';
 import type { UpdateUserInput, ConsentState, DangerSignResult } from '@amaaii/core';
@@ -45,9 +47,11 @@ import { recordAuditSafe, auditDangerEscalation } from './audit';
 // We compare against BOTH the EN and SW reminder markers when checking
 // "did we already nudge the user this session?" — language can change
 // between turns.
+// Fixed openings rather than the whole string, so a reminder sent before
+// the copy changed ("Type 'journal'" became "Tap *Start journal*") counts.
 const JOURNAL_REMINDER_MARKERS = [
-  t('en', 'journal_reminder'),
-  t('sw', 'journal_reminder'),
+  "Don't forget to do your daily journal!",
+  'Usisahau kufanya jarida lako la kila siku!',
 ];
 
 // --- Consent gate (P3-B) -----------------------------------------------
@@ -57,10 +61,16 @@ const JOURNAL_REMINDER_MARKERS = [
 // name_prompt string) — same "was the bot's last message asking X?"
 // detection pattern as NAME_PROMPT_MARKERS / WEEK_PROMPT_MARKERS
 // below, kept stateless per CLAUDE.md's onboarding design.
-const CONSENT_PROMPT_MARKERS = ['Reply *I AGREE* to continue', 'Jibu *NAKUBALI* kuendelea'];
+// "Reply *I AGREE*" became "Tap *I AGREE*" (it carries a button now); the
+// shared tail matches both, so a prompt sent before the change still counts.
+const CONSENT_PROMPT_MARKERS = ['*I AGREE* to continue', '*NAKUBALI* kuendelea'];
 // consent_explain reuses the reprompt phrase below; consent_declined reuses
 // the prompt phrase above ("Reply *I AGREE* to continue").
-const CONSENT_REPROMPT_MARKERS = ['please reply with the word *AGREE*', 'tafadhali jibu na neno *NAKUBALI*'];
+const CONSENT_REPROMPT_MARKERS = [
+  'please tap *I AGREE*', 'tafadhali bonyeza *NAKUBALI*',
+  // Before the reply buttons.
+  'please reply with the word *AGREE*', 'tafadhali jibu na neno *NAKUBALI*',
+];
 const CONSENT_EXPLAIN_MARKERS = ['Straight answers:', 'More detail 💚', 'Majibu ya moja kwa moja:', 'Maelezo zaidi 💚'];
 // consent_explain_more keeps the reprompt phrase too ("reply with the word *AGREE*").
 
@@ -305,11 +315,24 @@ export interface ProcessMessageResult {
    *  this turn — lets callers (POST /chat's audit wiring) log 'ai_call'
    *  vs a plain 'write' without re-deriving consent state themselves. */
   aiUsed?: boolean;
-  /** A question with reply options ("what did you mean?"). `response` is
-   *  the text form with a numbered list (what history stores, and what any
-   *  transport without buttons sends); `body` is the question alone, for
-   *  WhatsApp reply buttons and the app's chips. */
-  buttons?: { body: string; options: string[] };
+  /** A reply with buttons: WhatsApp reply buttons and the app's chips.
+   *  For a "what did you mean?" question, `response` is the text form with
+   *  a numbered list (what history stores, and what any transport without
+   *  buttons sends) and `body` is the question alone. For a canned prompt
+   *  that asks for a word ("tap *None*"), `body` is `response` and
+   *  `fallback` is the text form for a transport without buttons. */
+  buttons?: { body: string; options: string[]; fallback?: string };
+}
+
+// Canned prompts that ask her to send a word get that word as buttons.
+function withActionButtons(result: ProcessMessageResult): ProcessMessageResult {
+  if (result.buttons || result.consentRequired) return result;
+  const actions = actionButtonsFor(result.response);
+  if (!actions) return result;
+  return {
+    ...result,
+    buttons: { body: result.response, options: actions.options, fallback: withButtonHint(result.response, actions) },
+  };
 }
 
 export interface ProcessMessageOptions {
@@ -426,7 +449,7 @@ export async function processMessage(
           context: 'consent_gate',
           channel,
         });
-        return { response: gateResponse, urgencyLevel: earlyDanger.urgencyLevel, context: 'consent_gate' };
+        return withActionButtons({ response: gateResponse, urgencyLevel: earlyDanger.urgencyLevel, context: 'consent_gate' });
       }
       // Granted this turn: fall through into the normal routing below
       // (onboarding is still needed — consent and profile are separate
@@ -475,7 +498,7 @@ export async function processMessage(
       context: conversationContext,
       channel,
     });
-    return { response, urgencyLevel: onboardingTriage.urgencyLevel, context: conversationContext, aiUsed };
+    return withActionButtons({ response, urgencyLevel: onboardingTriage.urgencyLevel, context: conversationContext, aiUsed });
   }
 
   // --- Journal session + commands ------------------------------------
@@ -779,13 +802,13 @@ export async function processMessage(
 
   await db.saveConversation(from, message, response, analysisData);
 
-  return {
+  return withActionButtons({
     response,
     urgencyLevel: analysisData.urgencyLevel,
     context: conversationContext,
     aiUsed,
     ...(buttons ? { buttons } : {}),
-  };
+  });
 }
 
 // --- Check-in follow-up job (P4-A) --------------------------------------
@@ -906,7 +929,7 @@ export async function handleIncomingMessage(
     const { response, urgencyLevel, buttons } = await processMessage(from, message, profileName);
 
     if (buttons) {
-      await sendWhatsAppButtons(from, buttons.body, buttons.options, response);
+      await sendWhatsAppButtons(from, buttons.body, buttons.options, buttons.fallback ?? response);
     } else {
       await sendWhatsAppMessage(from, response);
     }
@@ -1045,8 +1068,17 @@ function slotsFromLlm(
 }
 
 // The question to ask for `next`, given what we already know. `retry` is
-// true when we just asked for that same field and couldn't read the answer.
-function onboardingPrompt(next: OnboardingSlot, u: Partial<UserWithFlag>, lang: string, retry: boolean, nameJustSet: boolean): string {
+// true when we just asked for that same field and couldn't read the answer;
+// `weekJustSet` when this message gave the week or the birth, which the
+// location question then thanks her for.
+function onboardingPrompt(
+  next: OnboardingSlot,
+  u: Partial<UserWithFlag>,
+  lang: string,
+  retry: boolean,
+  nameJustSet: boolean,
+  weekJustSet: boolean
+): string {
   switch (next) {
     case 'name':
       return t(lang, 'name_prompt');
@@ -1057,7 +1089,9 @@ function onboardingPrompt(next: OnboardingSlot, u: Partial<UserWithFlag>, lang: 
     case 'week':
       return retry ? t(lang, 'week_prompt_again') : t(lang, 'age_thanks');
     case 'location':
-      if (retry) return t(lang, 'location_prompt_again');
+      // Coming back to a missing location later (a "Hello" days on) gets
+      // the plain question, not "Great! You're at week 9" again.
+      if (retry || !weekJustSet) return t(lang, 'location_prompt_again');
       if (u.delivery_date) return t(lang, 'postpartum_thanks');
       if (u.lmp && u.edd) return t(lang, 'week_lmp_thanks', { weeks: u.pregnancy_week ?? '', edd: u.edd });
       return t(lang, 'week_thanks', { weeks: u.pregnancy_week ?? '' });
@@ -1174,7 +1208,8 @@ async function handleOnboarding(
     location: askedLocation,
   }[current];
   const retry = next === current && askedCurrent && Object.keys(update).length === 0;
-  return answerFirst(onboardingPrompt(next, fresh, lang, retry, update.name !== undefined));
+  const weekJustSet = update.pregnancy_week !== undefined || update.delivery_date !== undefined;
+  return answerFirst(onboardingPrompt(next, fresh, lang, retry, update.name !== undefined, weekJustSet));
 }
 
 function checkIfMentalHealth(message: string): boolean {

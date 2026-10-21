@@ -95,7 +95,7 @@ db.get('SELECT response FROM conversations WHERE user_phone = ? ORDER BY timesta
     console.error(row && row.response);
     process.exit(1);
   }
-  if (!/Reply \*I AGREE\*/i.test(row.response)) {
+  if (!/Tap \*I AGREE\*/i.test(row.response)) {
     console.error('FAIL: HIGH-urgency new user did not get the consent prompt (P3-B)');
     console.error(row && row.response);
     process.exit(1);

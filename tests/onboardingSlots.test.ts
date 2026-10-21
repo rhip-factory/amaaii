@@ -130,6 +130,15 @@ describe('LLM-first onboarding', () => {
     expect(r.response).toMatch(/Which town or area|located/);
   });
 
+  it('a mother coming back with only the location missing gets the plain question', async () => {
+    const p = phone();
+    await consented(p);
+    await db.updateUser(p, { name: 'Joy', age: 24, pregnancy_week: 9 });
+    const r = await say(p, 'Hello');
+    expect(r.response).toMatch(/Which town or area/);
+    expect(r.response).not.toMatch(/You're at week/);
+  });
+
   it('a real place is still saved, even with a filler word in front', async () => {
     const p = phone();
     await consented(p);

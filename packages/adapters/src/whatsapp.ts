@@ -7,7 +7,7 @@
 // whole rollback.
 
 import { sendViaTwilio } from './twilio';
-import { isCloudConfigured, sendCloudButtons, sendCloudOtpTemplate, sendCloudText } from './whatsappCloud';
+import { CLOUD_BUTTON_BODY_MAX, isCloudConfigured, sendCloudButtons, sendCloudOtpTemplate, sendCloudText } from './whatsappCloud';
 
 export type WhatsAppProvider = 'twilio' | 'meta';
 export type SendImpl = (to: string, message: string) => Promise<unknown>;
@@ -41,9 +41,10 @@ export async function sendWhatsAppMessage(to: string, message: string): Promise<
 }
 
 /**
- * A question with reply options. Meta gets real reply buttons; Twilio (and
- * a test seam) gets `fallbackText`, the same question as a numbered list,
- * which is also what a failed button send falls back to.
+ * A message with reply buttons. Meta gets real reply buttons; Twilio (and
+ * a test seam) gets `fallbackText`, the same message in text form (a
+ * numbered list, or the words to reply with), which is also what a failed
+ * button send falls back to.
  */
 export async function sendWhatsAppButtons(
   to: string,
@@ -52,10 +53,25 @@ export async function sendWhatsAppButtons(
   fallbackText: string
 ): Promise<unknown> {
   if (whatsappProvider() === 'meta' && _impl === defaultSend) {
+    // A button message's body is capped at 1024 characters. A long reply
+    // (an AI answer with the journal reminder on the end) goes as text,
+    // with its last paragraph (the prompt) on the buttons.
+    let buttonBody = body;
+    let buttonFallback = fallbackText;
+    if (body.length > CLOUD_BUTTON_BODY_MAX) {
+      const cut = body.lastIndexOf('\n\n');
+      const head = body.slice(0, cut);
+      if (cut <= 0 || body.length - cut - 2 > CLOUD_BUTTON_BODY_MAX || !fallbackText.startsWith(head)) {
+        return sendCloudText(to, fallbackText);
+      }
+      await sendCloudText(to, head);
+      buttonBody = body.slice(cut + 2);
+      buttonFallback = fallbackText.slice(cut + 2);
+    }
     try {
-      return await sendCloudButtons(to, body, options);
+      return await sendCloudButtons(to, buttonBody, options);
     } catch {
-      return sendCloudText(to, fallbackText);
+      return sendCloudText(to, buttonFallback);
     }
   }
   return sendWhatsAppMessage(to, fallbackText);

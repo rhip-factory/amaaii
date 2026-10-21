@@ -69,13 +69,13 @@ describe('routing — onboarding precedence', () => {
   it('new user sending a moderate-symptom message gets the consent prompt, not a moderate-only response', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'I have a headache');
-    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).toMatch(/tap \*i agree\*/i);
   });
 
   it('new user sending "Hi" gets the consent prompt, not the name prompt', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'Hi');
-    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).toMatch(/tap \*i agree\*/i);
     expect(reply).not.toMatch(/what'?s your name/i);
   });
 
@@ -84,14 +84,14 @@ describe('routing — onboarding precedence', () => {
     const reply = await deliver(phone, 'I am bleeding heavily');
     expect(reply).toMatch(/URGENT/i);
     expect(reply).not.toMatch(/what'?s your name/i);
-    expect(reply).not.toMatch(/reply \*i agree\*/i);
+    expect(reply).not.toMatch(/tap \*i agree\*/i);
   });
 
   it('HIGH urgency from a new user still gets the consent prompt (escalation copy also appears)', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'I have a severe headache');
     expect(reply).toMatch(/Important/i);
-    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).toMatch(/tap \*i agree\*/i);
   });
 
   it('once consent is granted ("I AGREE"), the very same turn moves on to the name prompt', async () => {

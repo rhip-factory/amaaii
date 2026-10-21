@@ -71,7 +71,7 @@ describe('WhatsApp consent gate — new user precedence', () => {
   it('a brand-new phone gets the consent prompt, not the name prompt', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'Hi');
-    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).toMatch(/tap \*i agree\*/i);
     expect(reply).not.toMatch(/what'?s your name/i);
 
     const state = deriveConsentState(await db.getConsents(phone));
@@ -120,7 +120,7 @@ describe('WhatsApp consent gate — new user precedence', () => {
     const phone = nextPhone();
     await deliver(phone, 'Hi');
     const reply = await deliver(phone, 'why do you need that?');
-    expect(reply).toMatch(/please reply with the word \*agree\*/i);
+    expect(reply).toMatch(/please tap \*i agree\*/i);
     expect(reply).not.toMatch(/what'?s your name/i);
 
     const state = deriveConsentState(await db.getConsents(phone));
@@ -132,7 +132,7 @@ describe('WhatsApp consent gate — new user precedence', () => {
     await deliver(phone, 'Hi');
     await deliver(phone, 'no thanks');
     const third = await deliver(phone, 'still not sure');
-    expect(third).toMatch(/please reply with the word \*agree\*/i);
+    expect(third).toMatch(/please tap \*i agree\*/i);
     expect(third).not.toMatch(/what'?s your name/i);
   });
 });
@@ -142,14 +142,14 @@ describe('WhatsApp consent gate — danger signs still escalate pre-consent', ()
     const phone = nextPhone();
     const reply = await deliver(phone, 'I am bleeding heavily');
     expect(reply).toMatch(/URGENT/i);
-    expect(reply).not.toMatch(/reply \*i agree\*/i);
+    expect(reply).not.toMatch(/tap \*i agree\*/i);
   });
 
   it('HIGH urgency during the pre-consent phase still carries the escalation copy alongside the consent prompt', async () => {
     const phone = nextPhone();
     const reply = await deliver(phone, 'I have a severe headache');
     expect(reply).toMatch(/checked by a healthcare provider TODAY/i);
-    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).toMatch(/tap \*i agree\*/i);
   });
 
   it('a danger sign mentioned while replying to the re-prompt still escalates', async () => {
@@ -187,7 +187,7 @@ describe('WhatsApp consent gate — returning/migrated users', () => {
     await db.updateUser(phone, { age: 29, pregnancy_week: 15, location: 'Kisumu' });
 
     const reply = await deliver(phone, 'How is my baby doing?');
-    expect(reply).toMatch(/reply \*i agree\*/i);
+    expect(reply).toMatch(/tap \*i agree\*/i);
   });
 
   it('once that returning user grants consent, the confirmation appears and CONSENT_VERSION is recorded (not a name-prompt regression, since they are already onboarded)', async () => {
@@ -231,7 +231,7 @@ describe('WhatsApp consent gate — questions and refusals never grant', () => {
     await deliver(phone, 'Hi');
     const reply = await deliver(phone, 'what is this and who sees my messages?');
     expect(reply).toMatch(/automated assistant/i);
-    expect(reply).toMatch(/please reply with the word \*agree\*/i);
+    expect(reply).toMatch(/please tap \*i agree\*/i);
   });
 
   it('STOP records a decline and an AGREE afterwards still grants', async () => {
