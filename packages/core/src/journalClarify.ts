@@ -39,6 +39,9 @@ export interface PendingClarify {
 export const MAX_CLARIFY_OPTIONS = 3;
 export const CLARIFY_LABEL_MAX = 20;
 
+// How a reply is compared with an option label: case and punctuation aside.
+const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}/]+/gu, ' ').trim();
+
 /** The stages whose answer is a score, count or level. */
 export const JOURNAL_SCORE_STAGES = new Set(['mood', 'sleep', 'baby_movement', 'water', 'appetite']);
 
@@ -123,8 +126,10 @@ export function modelClarifyOptions(
     const label = d.label.replace(/\s+/g, ' ').trim();
     const fields = validJournalFields(stage, d.answer);
     if (!label || label.length > CLARIFY_LABEL_MAX || /[[\]{}<>]/.test(label) || !fields) continue;
-    const key = label.toLowerCase();
-    if (key === safety.label.toLowerCase() || options.some((o) => o.label.toLowerCase() === key)) continue;
+    // Compared the way a reply is matched (matchClarifyOption), so no model
+    // label can stand in for the safety option or shadow another one.
+    const key = norm(label);
+    if (!key || key === norm(safety.label) || options.some((o) => norm(o.label) === key)) continue;
     options.push({ label, fields });
     if (options.length === MAX_CLARIFY_OPTIONS - 1) break;
   }
@@ -148,8 +153,6 @@ export function bareSleepNumber(message: string): number | null {
   return n >= 1 && n <= 10 ? n : null;
 }
 
-const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}/]+/gu, ' ').trim();
-
 /** Which option she picked: a button title, its exact label, or its number. */
 export function matchClarifyOption(message: string, options: ClarifyOption[]): number | null {
   const m = message.trim().match(/^\(?([1-9])[).]?$/);
@@ -158,6 +161,10 @@ export function matchClarifyOption(message: string, options: ClarifyOption[]): n
     return i < options.length ? i : null;
   }
   const said = norm(message);
+  // The triage option wins any tie: "I feel unwell" must never be saved
+  // as a value.
+  const unwell = options.findIndex((o) => o.unwell && norm(o.label) === said);
+  if (unwell >= 0) return unwell;
   const i = options.findIndex((o) => norm(o.label) === said);
   return i >= 0 ? i : null;
 }

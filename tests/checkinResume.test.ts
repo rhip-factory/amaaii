@@ -315,6 +315,22 @@ describe('"what did you mean?" from the stronger model', () => {
     expect(r.response).toMatch(/Your check-in is paused/);
   });
 
+  it('a model label can never stand in for the safety option', async () => {
+    const p = await onboarded();
+    await atSleep(p);
+    interp = '{"status":"ambiguous","answer":{},"readings":[{"quality":5},{"hours":5}],"symptom":""}';
+    clarify = JSON.stringify({
+      action: 'ask',
+      message: 'Did you mean 5 hours, or 5 out of 10?',
+      options: [{ label: 'I feel unwell.', answer: { hours: 5 } }, { label: 'Slept 5 hours', answer: { hours: 5 } }],
+    });
+    const r = await say(p, 'maybe five, it was not a good night at all');
+    expect(r.buttons.options).toEqual(['Slept 5 hours', 'I feel unwell']);
+    const picked = await say(p, 'I feel unwell');
+    expect(picked.context).not.toBe('journaling');
+    expect((await db.getTodaysJournal(p)).sleep_hours).toBeNull();
+  });
+
   it('a model failure falls back to the canned question', async () => {
     const p = await onboarded();
     await atSleep(p);
