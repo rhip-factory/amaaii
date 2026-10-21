@@ -14,7 +14,8 @@ export type ChatCommand =
   | 'cancel'
   | 'help'
   | 'resume'
-  | 'restart';
+  | 'restart'
+  | 'ai_on';
 
 const COMMANDS: Record<ChatCommand, string[]> = {
   journal: [
@@ -43,6 +44,12 @@ const COMMANDS: Record<ChatCommand, string[]> = {
     'resume', 'resume check-in', 'resume check in', 'resume checkin', 'resume journal', 'continue',
     'continue check-in', 'continue check in', 'continue journal', 'carry on', 'endelea',
     'endelea na jarida', 'endelea na ukaguzi',
+  ],
+  // The "Turn on AI replies" button: grants the optional ai_responses
+  // consent (an explicit tap, like I AGREE).
+  ai_on: [
+    'turn on ai replies', 'turn on ai', 'enable ai', 'enable ai replies', 'switch on ai', 'ai on',
+    'washa majibu ya ai', 'washa ai',
   ],
   restart: [
     'restart', 'restart check-in', 'restart check in', 'restart checkin', 'restart journal',

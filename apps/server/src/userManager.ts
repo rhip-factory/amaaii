@@ -106,7 +106,7 @@ class UserManager {
       const validFields = [
         'name', 'age', 'pregnancy_week', 'edd',
         'location', 'lmp', 'risk_level', 'anc_visits',
-        'language', 'delivery_date',
+        'language', 'delivery_date', 'location_declined',
       ];
 
       const filteredUpdates: Record<string, unknown> = {};
@@ -196,7 +196,7 @@ class UserManager {
       // otherwise handleOnboarding's location step is never reached
       // (the router skips onboarding once this flag flips).
       // A mother who joins after the birth has a delivery_date instead of a week.
-      needsOnboarding: !user.name || !user.age || (user.pregnancy_week == null && !user.delivery_date) || !user.location,
+      needsOnboarding: !user.name || !user.age || (user.pregnancy_week == null && !user.delivery_date) || (!user.location && !user.location_declined),
     };
 
     return context;
@@ -231,6 +231,7 @@ class UserManager {
     else if (user.pregnancy_week != null) summary.push(`Week: ${user.pregnancy_week}`);
     if (user.edd) summary.push(`Due: ${user.edd}`);
     if (user.location) summary.push(`Location: ${user.location}`);
+    else if (user.location_declined) summary.push('Location: not shared');
 
     return summary.join(' | ');
   }

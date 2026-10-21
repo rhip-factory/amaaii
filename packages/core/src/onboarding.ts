@@ -341,3 +341,48 @@ export function parseMonthsAsWeeks(raw: string): number | null {
   if (months == null || months <= 0 || months > 10) return null;
   return Math.round(months * 4.33);
 }
+
+// ---- Replies to the onboarding questions that aren't answers ------------
+// Prod, 2026-10-21: a 19-year-old asked for help with symptoms twice and
+// got the name and age questions back; asked "Why are you asking all this
+// information?" and got the location question again; and her "Nope😁
+// Mtanitafuta" ("no, you will look for me") was saved as her location.
+
+const strip = (s: string): string =>
+  s.toLowerCase().replace(/[‘’]/g, "'").replace(/[^\p{L}\p{N}'\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+// Whole replies that decline, and phrases that decline wherever they appear.
+const REFUSAL_WHOLE = new Set([
+  'no', 'nope', 'nah', 'no thanks', 'no thank you', 'skip', 'pass', 'not now', 'later', 'private',
+  'hapana', 'sitaki', 'ruka', 'baadaye', 'la', 'siri',
+]);
+const REFUSAL_PHRASE = /\b(?:rather not|prefer not|not telling|won'?t (?:say|tell)|don'?t want to (?:say|tell|share)|none of your business|keep (?:it|that) private|sitaki kusema|sitasema|siwezi kusema|sitaki kukuambia|ni siri|mtanitafuta|mtanipata|utanitafuta|utanipata|mnanitafuta)\b/;
+
+/** She declined to say where she lives ("Nope", "I'd rather not",
+ *  "Mtanitafuta" = "you'll come looking for me"). */
+export function isLocationRefusal(message: string): boolean {
+  const text = strip(message);
+  if (!text) return false;
+  if (REFUSAL_WHOLE.has(text) || REFUSAL_PHRASE.test(text)) return true;
+  // "Nope 😁 hapana": every word declines.
+  const words = text.split(' ');
+  return words.length <= 4 && words.every((w) => REFUSAL_WHOLE.has(w));
+}
+
+/** "Why are you asking all this information?" / "kwa nini unauliza?" */
+export function isWhyAskQuestion(message: string): boolean {
+  const text = strip(message);
+  // About OUR asking, never about her body: "why is my back hurting?" and
+  // "why do I need to rest?" are not this.
+  return /\bwhy (?:are|do|would|did|should) (?:you|u|amaaii)\b.*\b(?:ask|asking|need|want|collect|know)\b/.test(text) ||
+    /\bwhy\b.*\b(?:information|info|details|data)\b/.test(text) ||
+    /\bwhat (?:is|s) (?:this|that|it) for\b/.test(text) ||
+    /\bkwa ?nini\b.*\b(?:unauliza|mnauliza|unaniuliza|mnaniuliza|unataka kujua|mnataka kujua|unahitaji|mnahitaji|taarifa)\b/.test(text);
+}
+
+/** She came for help ("I'm going through some symptoms and would like some
+ *  advice", "nina maumivu"), not to answer the question. */
+export function asksForHelp(message: string): boolean {
+  const text = strip(message);
+  return /\b(?:symptoms?|advice|advise|help me|need help|i need to ask|feel(?:ing)? (?:sick|unwell|bad|weird|strange|pain)|in pain|hurts?|hurting|pain|ache|aching|worried|scared|bleeding|dalili|ushauri|nisaidie|nahitaji msaada|maumivu|naumwa|najisikia vibaya|sijisikii vizuri|nina wasiwasi|naogopa)\b/.test(text);
+}

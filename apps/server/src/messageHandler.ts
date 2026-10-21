@@ -18,6 +18,9 @@ import {
   escalationVariant,
   parseCommand,
   isGoAhead,
+  isLocationRefusal,
+  isWhyAskQuestion,
+  asksForHelp,
   offersJournal,
   offeredActions,
   checkinStageLabel,
@@ -53,6 +56,14 @@ import { recordAuditSafe, auditDangerEscalation } from './audit';
 // between turns.
 // Fixed openings rather than the whole string, so a reminder sent before
 // the copy changed ("Type 'journal'" became "Tap *Start journal*") counts.
+// The AI-off reply, current and before the "Turn on AI replies" button.
+const AI_OFF_MARKERS = [
+  "I can't write you a personal answer",
+  'Siwezi kukuandikia jibu lako binafsi',
+  'AI-powered replies are turned off',
+  'Majibu ya AI yamezimwa. Unaweza',
+];
+
 const JOURNAL_WORDS = /\b(?:journal|jarida|check-?\s?in|ukaguzi)\b/i;
 
 const JOURNAL_REMINDER_MARKERS = [
@@ -576,6 +587,36 @@ export async function processMessage(
   if (handled) conversationContext = 'profile_update';
 
   let command = handled ? null : parseCommand(message);
+  // "Turn on AI replies" (the button on the AI-off reply): an explicit tap
+  // that grants the optional ai_responses consent, recorded like I AGREE.
+  // The message she sent while AI was off is then answered.
+  let aiInput = message;
+  if (command === 'ai_on') {
+    command = null;
+    if (canUseAi(await loadConsentState(from))) {
+      response = t(lang, 'ai_already_on');
+      conversationContext = 'profile_update';
+      handled = true;
+    } else {
+      await db.recordConsent(from, 'ai_responses', true, CONSENT_VERSION);
+      await recordAuditSafe({
+        actor: from,
+        action: 'consent_grant',
+        resource: 'consent',
+        resourceOwner: from,
+        metadata: { purpose: 'ai_responses', granted: true, channel, via: 'chat_button' },
+      });
+      const lastBot = await db.getLastBotMessage(from);
+      if (lastBot?.message && AI_OFF_MARKERS.some((m) => lastBot.response.includes(m))) {
+        aiInput = lastBot.message;
+        profileNote = t(lang, 'ai_on_thanks');
+      } else {
+        response = t(lang, 'ai_on_ask');
+        conversationContext = 'profile_update';
+        handled = true;
+      }
+    }
+  }
   if (!command && !handled && earlyDanger.urgencyLevel === 'low' && isGoAhead(message)) {
     // "Prompt me" / "let's go" right after Amaaii offered the check-in.
     const lastBot = await db.getLastBotMessage(from);
@@ -607,7 +648,11 @@ export async function processMessage(
   }
   const answering = !!journalSession && !journalSession.paused;
 
-  if (answering && (earlyDanger.urgencyLevel === 'critical' || earlyDanger.urgencyLevel === 'high')) {
+  if (aiInput !== message) {
+    // The "Turn on AI replies" tap: her earlier message is answered below;
+    // a check-in waits, paused.
+    if (answering) await journalManager.pauseJournal(from);
+  } else if (answering && (earlyDanger.urgencyLevel === 'critical' || earlyDanger.urgencyLevel === 'high')) {
     // Care first: the check-in waits, paused.
     await journalManager.interruptForDanger(from, message, earlyDanger);
     journalNote = t(lang, 'journal_pause');
@@ -752,8 +797,8 @@ export async function processMessage(
       const aiConsentState = await loadConsentState(from);
       const status = pregnancyStatus(user, new Date());
       if (canUseAi(aiConsentState)) {
-        const raisePromise = llmTriageRaise(message, dangerSignAnalysis.urgencyLevel, user.pregnancy_week, from, { force: forceTriage });
-        response = await getAmaaiiResponse(message, {
+        const raisePromise = llmTriageRaise(aiInput, dangerSignAnalysis.urgencyLevel, user.pregnancy_week, from, { force: forceTriage });
+        response = await getAmaaiiResponse(aiInput, {
           userName: user.name,
           pregnancyWeek: status.phase === 'pregnant' ? status.week : null,
           postpartumDays: status.phase === 'postpartum' ? status.days : null,
@@ -769,7 +814,7 @@ export async function processMessage(
           pausedCheckinNext: pausedCheckin ? checkinStageLabel(pausedCheckin.currentStage, 'en') : null,
         });
         aiUsed = true;
-        captureMedicalHistory(from, message);
+        captureMedicalHistory(from, aiInput);
         const raised = await raisePromise;
         if (raised) {
           dangerSignAnalysis = {
@@ -1011,6 +1056,8 @@ export async function handleIncomingMessage(
 const NAME_PROMPT_MARKERS = [
   "What's your name?", // EN
   "Jina lako ni nani?", // SW
+  "What should I call you?", // name_prompt_retry
+  "Nikuite nani?",
 ];
 const LOCATION_PROMPT_MARKERS = ['Where are you located', 'Which town or area', 'Uko wapi', 'Unaishi mji'];
 const AGE_PROMPT_MARKERS = ['tell me your age', 'How old are you', 'una umri gani', 'Una miaka mingapi'];
@@ -1023,7 +1070,7 @@ function missingSlots(u: Partial<UserWithFlag>): OnboardingSlot[] {
   if (!u.name) out.push('name');
   if (!u.age) out.push('age');
   if (u.pregnancy_week == null && !u.delivery_date) out.push('week');
-  if (!u.location) out.push('location');
+  if (!u.location && !u.location_declined) out.push('location');
   return out;
 }
 
@@ -1048,8 +1095,9 @@ const NON_PLACE_WORDS = new Set([
 ]);
 
 function validLocation(raw: string | undefined): string | null {
-  if (!raw) return null;
+  if (!raw || isLocationRefusal(raw)) return null;
   const loc = raw
+    .replace(/\p{Extended_Pictographic}/gu, '')
     .trim()
     .replace(/^(?:i\s+(?:live|stay)\s+(?:in|at)|i'?m\s+(?:in|from|at)|from|in|at|niko|naishi|ninaishi|nakaa|kutoka)\s+/i, '')
     .replace(/[.!]+$/, '')
@@ -1135,7 +1183,7 @@ function onboardingPrompt(
 ): string {
   switch (next) {
     case 'name':
-      return t(lang, 'name_prompt');
+      return retry ? t(lang, 'name_prompt_retry') : t(lang, 'name_prompt');
     case 'age':
       if (retry) return t(lang, 'age_prompt_retry');
       // A name we didn't ask for came from her WhatsApp profile — let her change it.
@@ -1201,8 +1249,12 @@ async function handleOnboarding(
         }
       }
     } else if (current === 'location' && askedLocation) {
-      const loc = validLocation(message);
-      if (loc) update.location = loc;
+      if (isLocationRefusal(message)) {
+        update.location_declined = 1;
+      } else {
+        const loc = validLocation(message);
+        if (loc) update.location = loc;
+      }
     }
 
     const words = message.trim().split(/\s+/).filter(Boolean).length;
@@ -1218,6 +1270,8 @@ async function handleOnboarding(
         }
       }
     }
+    // A refusal is never overridden by a place the model read into it.
+    if (update.location_declined) delete update.location;
     // A birth wins over any pregnancy week proposed alongside it.
     if (update.delivery_date) {
       delete update.pregnancy_week;
@@ -1233,12 +1287,23 @@ async function handleOnboarding(
     fresh = (await userManager.updateUserProfile(phoneNumber, update as Record<string, unknown>)) ?? { ...user, ...update };
   }
 
-  // A question she asked along the way gets a short answer first — even
-  // when the same message also answered the field (the simulation's
+  // A question she asked, or help she asked for, gets an answer first —
+  // even when the same message also answered the field (the simulation's
   // mothers asked "is this a person or a bot?" three times while
-  // onboarding carried on regardless).
+  // onboarding carried on regardless; a prod mother asked for help with
+  // symptoms twice and got the name and age questions back). "Why do you
+  // need this?" has a fixed answer, AI or not.
+  const declined = update.location_declined === 1;
+  const join = (...parts: string[]): string => parts.filter(Boolean).join('\n\n');
   const answerFirst = async (prompt: string): Promise<{ response: string; aiUsed: boolean }> => {
-    if (!opts.canAi || !message.includes('?')) return { response: prompt, aiUsed: false };
+    const declinedNote = declined ? t(lang, 'location_declined') : '';
+    if (isConsentReply) return { response: prompt, aiUsed: false };
+    if (isWhyAskQuestion(message)) return { response: join(t(lang, 'onboarding_why'), declinedNote, prompt), aiUsed: false };
+    const wantsHelp = asksForHelp(message);
+    if (!message.includes('?') && !wantsHelp) return { response: join(declinedNote, prompt), aiUsed: false };
+    if (!opts.canAi) {
+      return { response: join(wantsHelp ? t(lang, 'onboarding_help_no_ai') : '', declinedNote, prompt), aiUsed: false };
+    }
     const answer = await getAmaaiiResponse(message, {
       userName: fresh.name,
       pregnancyWeek: fresh.pregnancy_week,
@@ -1246,13 +1311,16 @@ async function handleOnboarding(
       currentContext: 'onboarding',
       language: lang,
     });
-    return { response: `${answer}\n\n${prompt}`, aiUsed: true };
+    return { response: join(answer, declinedNote, prompt), aiUsed: true };
   };
 
   const stillMissing = missingSlots(fresh);
   if (stillMissing.length === 0) {
     const summary = userManager.formatUserSummary(fresh);
-    return answerFirst(t(lang, 'location_done', { summary }) + appLine(lang));
+    // Signed up in the app with AI replies left off: say so once, with the
+    // button to turn them on.
+    const aiHint = opts.canAi ? '' : `\n\n${t(lang, 'ai_off_hint')}`;
+    return answerFirst(t(lang, 'location_done', { summary }) + appLine(lang) + aiHint);
   }
   const next = stillMissing[0];
   const askedCurrent = {

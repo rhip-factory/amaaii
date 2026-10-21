@@ -172,7 +172,8 @@ describe('POST /chat — AI purpose gate (consented users)', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.consentRequired).toBeUndefined();
-    expect(res.body.response).toMatch(/AI-powered replies are turned off/i);
+    expect(res.body.response).toMatch(/AI replies are turned off/i);
+    expect(res.body.options[0]).toBe('Turn on AI replies');
     expect(res.body.response).not.toContain('SHOULD NEVER BE RETURNED');
     expect(mock.callCount).toBe(0);
   });

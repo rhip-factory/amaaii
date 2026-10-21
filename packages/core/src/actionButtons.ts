@@ -32,7 +32,9 @@ export type ActionId =
   | 'lang_sw'
   | 'lang_en'
   | 'resume'
-  | 'restart';
+  | 'restart'
+  | 'skip'
+  | 'ai_on';
 
 /** WhatsApp allows at most 3 reply buttons on one message. */
 export const MAX_ACTION_BUTTONS = 3;
@@ -46,6 +48,10 @@ interface ActionPrompt {
 
 export const ACTION_PROMPTS: ActionPrompt[] = [
   { marker: '*i agree*', lang: 'en', actions: ['agree'] },
+  { marker: 'tap *skip*', lang: 'en', actions: ['skip'] },
+  { marker: 'bonyeza *ruka*', lang: 'sw', actions: ['skip'] },
+  { marker: '*turn on ai replies*', lang: 'en', actions: ['ai_on'] },
+  { marker: '*washa majibu ya ai*', lang: 'sw', actions: ['ai_on'] },
   { marker: 'tap *resume check-in*', lang: 'en', actions: ['resume', 'restart', 'stop'] },
   { marker: 'bonyeza *endelea na jarida*', lang: 'sw', actions: ['resume', 'restart', 'stop'] },
   { marker: '*nakubali*', lang: 'sw', actions: ['agree'] },

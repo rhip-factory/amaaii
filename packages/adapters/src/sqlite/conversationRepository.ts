@@ -90,7 +90,7 @@ export class SqliteConversationRepository implements ConversationRepository {
       // / WEEK_REPROMPT_MARKERS checks), so returning a stale row on a
       // same-second tie silently breaks that detection.
       this.db.get<LastBotMessageRow>(
-        `SELECT response, context FROM conversations
+        `SELECT message, response, context FROM conversations
          WHERE user_phone = ?
          ORDER BY timestamp DESC, id DESC
          LIMIT 1`,

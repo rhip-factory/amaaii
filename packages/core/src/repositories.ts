@@ -35,6 +35,8 @@ export interface UserRow {
   language: string;
   /** Set when she reports the birth; null while pregnant. */
   delivery_date?: string | null;
+  /** 1 when she chose not to say where she lives. */
+  location_declined?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +58,7 @@ export interface CreateUserInput {
   anc_visits?: number;
   language?: string;
   delivery_date?: string | null;
+  location_declined?: number;
 }
 
 /**
@@ -75,6 +78,7 @@ export interface UpdateUserInput {
   anc_visits?: number;
   language?: string;
   delivery_date?: string | null;
+  location_declined?: number;
 }
 
 export interface UserRepository {
@@ -123,6 +127,8 @@ export interface ConversationAnalysis {
 export interface LastBotMessageRow {
   response: string;
   context: string | null;
+  /** Her message that this was the reply to. */
+  message?: string | null;
 }
 
 export interface ConversationRepository {
